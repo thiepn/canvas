@@ -32,8 +32,11 @@ test('disconnected client pauses edits, reconnects and receives independent chan
   await b.page.evaluate(() => { for (const ws of window.__TEST_SOCKETS__ ?? []) ws.close(4000, 'Test network interruption') })
   await expect(b.page.getByText(/editing is paused/i)).toBeVisible()
   const second = await create(a.page, 'text', 'While B was offline')
+  // tldraw deliberately backs off reconnect attempts for hidden/inactive tabs. Model the
+  // user returning to the disconnected Canvas before network recovery and allow CI headroom.
+  await b.page.bringToFront()
   await b.context.setOffline(false)
-  await expect(b.page.getByRole('status').filter({ hasText: /^Live$/ })).toBeVisible()
+  await expect(b.page.getByRole('status').filter({ hasText: /^Live$/ })).toBeVisible({ timeout: 30000 })
   await waitShape(b.page, second)
   const third = await create(b.page, 'ellipse'); await waitShape(a.page, third)
 })
