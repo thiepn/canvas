@@ -32,13 +32,13 @@
     "source:syntax": "node scripts/check-source.mjs"
   },
   "dependencies": {
-    "@tldraw/sync": "5.4.1",
-    "@tldraw/sync-core": "5.4.1",
-    "@tldraw/tlschema": "5.4.1",
+    "@tldraw/sync": "5.4.0",
+    "@tldraw/sync-core": "5.4.0",
+    "@tldraw/tlschema": "5.4.0",
     "react": "19.2.1",
     "react-dom": "19.2.1",
-    "tldraw": "5.4.1",
-    "@tldraw/assets": "5.4.1"
+    "tldraw": "5.4.0",
+    "@tldraw/assets": "5.4.0"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
