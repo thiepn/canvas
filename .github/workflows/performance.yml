@@ -1,8 +1,5 @@
 name: Canvas performance evidence
-on:
-  workflow_dispatch:
-  push:
-    branches: [release/canvas-v1-hardening]
+on: workflow_dispatch
 permissions:
   contents: read
 env:
