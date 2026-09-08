@@ -4,7 +4,10 @@ export const IDENTITY_KEY = 'canvas.identity.v1'
 export const PRESENCE_COLORS = ['#2563eb', '#c2410c', '#7c3aed', '#be185d', '#0e7490', '#047857', '#9a3412', '#4338ca'] as const
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 function stripControlCharacters(value: string): string {
-  return Array.from(value, character => character.charCodeAt(0)).filter(code => code >= 32 && code !== 127).map(code => String.fromCharCode(code)).join('')
+  return Array.from(value).filter(character => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return codePoint >= 32 && codePoint !== 127
+  }).join('')
 }
 export function cleanName(name: string): string { return stripControlCharacters(name).trim().slice(0, 32) || 'Guest' }
 export function colorForId(id: string): string {
