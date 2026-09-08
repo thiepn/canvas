@@ -1,135 +1,121 @@
 # Deployment and recovery
 
-This candidate is **not yet release-certified**. Use these instructions to run the outstanding gates, then publish. Do not interpret configuration instructions as evidence that a deployed site has already been verified.
+This repository is already published at `thiepn/canvas`. The release branch is `release/canvas-v1-hardening` and PR #1 carries the hardening work. Do not deploy a different copy of the original source archive.
 
-## 1. Install and establish a real lockfile
+The intended initial frontend URL is:
 
-From the extracted `Canvas` directory, with a current Node 22 LTS installation:
+`https://thiepn.github.io/canvas/`
+
+The backend is a Cloudflare Worker named `canvas-realtime` with one SQLite-backed `CanvasRoom` Durable Object.
+
+## 1. Local release verification
+
+Requires Node.js `>=22.16.0` and npm.
 
 ```sh
-npm install
-npm audit
-cp .env.example .env
+git clone https://github.com/thiepn/canvas.git
+cd canvas
+git switch release/canvas-v1-hardening
+npm ci
 npx playwright install --with-deps chromium firefox webkit
 npm run check
 npm run test:performance
 ```
 
-The authoring runner could not obtain npm packages, so this archive has **no fabricated lockfile**. `npm install` must generate `package-lock.json`; review it and commit it. Once present, use `npm ci`. The initial GitHub check workflow can also generate a bootstrap lockfile and retain it as an artifact, but deployment refuses to proceed until a genuine lockfile is committed.
+The genuine npm lockfile is committed. Use `npm ci`; do not regenerate it casually during deployment.
 
-The local development command is `npm run dev`, with frontend `http://127.0.0.1:5173/Canvas/` and backend `http://127.0.0.1:8787`. On Windows, use `Copy-Item` instead of `cp`, or copy the example files in the file manager. Do not point integration or stress tests at the real world.
+Local development:
 
-## 2. Configure and deploy the Cloudflare backend
+```sh
+cp .env.example .env
+npm run dev
+```
 
-Log into the account that should own the permanent world:
+Open `http://127.0.0.1:5173/canvas/`. The Worker runs at `http://127.0.0.1:8787`. Local Durable Object state is under `.wrangler/` and is independent of production.
+
+## 2. Authenticate Cloudflare
+
+From the checked-out repository:
 
 ```sh
 npx wrangler login
 npx wrangler whoami
 ```
 
-In `wrangler.jsonc`, set `vars.ALLOWED_ORIGINS` to a comma-separated list of **origins**, without paths or trailing slashes. For example:
+`wrangler.jsonc` already contains the production Pages origin and localhost development origins:
 
-```json
-"ALLOWED_ORIGINS": "https://YOUR_USERNAME.github.io,http://127.0.0.1:5173,http://127.0.0.1:4173"
+```text
+https://thiepn.github.io
+http://127.0.0.1:5173
+http://localhost:5173
+http://127.0.0.1:4173
+http://localhost:4173
 ```
 
-Do not add `/Canvas/` to an origin. That is the frontend base path, not its origin. Add `https://your-custom-domain.example` when moving or adding a domain. Origins restrict browser embedding, not who can read or edit with a custom HTTP client. Remove local origins from production when they are no longer useful.
+These are **origins**, so `/canvas/` is intentionally absent. If a future custom domain is added, append its HTTPS origin and redeploy the Worker. Origin filtering is not authentication; anyone using the permitted frontend can edit Canvas.
 
-The configuration defines one `CanvasRoom` SQLite-backed Durable Object, binding `CANVAS_ROOM`, and its initial `new_sqlite_classes` migration. Keep the Worker name `canvas-realtime` and migration history stable. No bucket or separate database needs creating.
+The Worker configuration defines:
+
+- Worker name `canvas-realtime`;
+- Durable Object binding `CANVAS_ROOM`;
+- class `CanvasRoom`;
+- initial SQLite Durable Object migration `v1`;
+- no R2/D1/database service.
+
+Do not rename the Worker/class/binding or discard migration history after production data exists unless you explicitly migrate the world.
+
+## 3. Deploy the Worker
+
+First verify the generated Worker bundle:
 
 ```sh
 npm run check:worker
+```
+
+Then deploy:
+
+```sh
 npm run deploy:worker
 ```
 
-Record the actual HTTPS Worker origin printed by Wrangler, normally resembling:
+Wrangler prints the HTTPS Worker URL. Record its **origin**, for example:
 
 ```text
 https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
 ```
 
-Test routing/liveness:
+Verify health:
 
 ```sh
 curl https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev/health
 ```
 
-Expected fields include `ok: true`, `app: "Canvas"`, `world: "main"`, and the pinned engine version. The health endpoint is intentionally lightweight; it does not replace persistence or multiplayer testing.
+The response should identify Canvas, world `main`, and the pinned engine version.
 
-### Recovery secret
+### Set the recovery secret
 
-Generate a random 32-byte hexadecimal secret, store it securely, and set it as a Worker secret:
+Generate a strong random token and retain it in a password manager or equivalent secure store:
 
 ```sh
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 npx wrangler secret put ADMIN_TOKEN
 ```
 
-Paste that secret when prompted. It protects only administrative backup/restore operations; ordinary collaborative editing remains anonymous and open. Do not put this value in a `VITE_` variable, GitHub Pages file, repository, URL query, or browser local storage. The normal frontend never receives it.
+Paste the generated token at Wrangler's prompt.
 
-`wrangler.test.jsonc` contains a known test token and is **not** a deployment configuration. Its Worker rejects public hostnames, but do not rely on that as a reason to deploy test code.
+`ADMIN_TOKEN` is a true secret. Never place it in:
 
-## 3. Configure the frontend
+- a `VITE_` variable;
+- GitHub Pages output;
+- `.env` committed to Git;
+- a URL/query string;
+- browser local storage.
 
-Use these values in local `.env` when testing your own production configuration:
+The normal Canvas frontend never needs this token.
 
-```dotenv
-VITE_CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
-VITE_TLDRAW_LICENSE_KEY=YOUR_ACTUAL_TLDRAW_KEY
-VITE_BASE_PATH=/Canvas/
-```
+## 4. Verify the deployed backend before enabling Pages
 
-Every `VITE_` value is public build-time configuration. The API value is an origin, not `/api/connect/main`; the app builds the WebSocket URL itself. HTTPS becomes WSS. Do not paste the admin token into the license field.
-
-Production needs a valid tldraw hobby, trial, or commercial key covering the deployment according to that key's terms. See THIRD_PARTY_NOTICES.md and the official application instructions linked there. Without a key on a non-localhost hostname, Canvas deliberately displays a useful configuration error. A nonempty string is not proof a key is valid; verify the real deployed editor and license status.
-
-## 4. Create/publish GitHub repository Canvas
-
-Create a repository named **Canvas** under your GitHub account. A public repository is the straightforward GitHub Free Pages option; check your own plan for private repository Pages availability. The editor URL is not confidential just because you have not shared it widely.
-
-From the extracted source directory, after generating and reviewing the lockfile:
-
-```sh
-git init -b main
-git add .
-git commit -m "Add Canvas source candidate and verification suite"
-git remote add origin https://github.com/YOUR_USERNAME/Canvas.git
-git push -u origin main
-```
-
-Do not use `--force` or overwrite an existing repository's unrelated work. When using an existing repository, merge through an appropriate branch/PR instead. No repository was created or pushed by the authoring session; its available GitHub actions were read-only.
-
-In GitHub:
-
-1. **Settings → Pages → Source:** select **GitHub Actions**.
-2. **Settings → Secrets and variables → Actions → Variables:** set `VITE_CANVAS_API_URL` to the Worker origin. Set `VITE_BASE_PATH` to `/Canvas/`, or leave it unset for that default.
-3. **Actions secrets:** set `VITE_TLDRAW_LICENSE_KEY`. It is stored here for configuration convenience, but the resulting browser key is public.
-4. Leave `CANVAS_DEPLOY_ENABLED` unset or `false` until the complete check suite and manual gates pass. Then set that repository **variable** to `true` and run the workflow on `main`.
-
-The workflow installs packages, lints, generates Worker types, type-checks, runs unit/Worker/browser tests, dry-runs the Worker build, and builds the frontend. The Pages job depends on successful checks, refuses an uncommitted lockfile or missing production configuration, rebuilds with production values, and publishes through the official Pages artifact/deployment actions. PRs do not deploy.
-
-The separate performance workflow is manually invoked. Archive its real measurements and the main workflow results when certifying a release. Add repository branch protection/required checks through GitHub settings to enforce the same policy for collaborators.
-
-## 5. Verify the real deployment
-
-Open the actual Pages URL in two clean browser contexts. Verify `Live`, both directions of text/shape updates, cursors, local undo after a remote edit, close-all/reopen persistence, an interrupted connection, image paste rejection, and an actual export. Confirm the Worker allows that exact frontend origin and the tldraw key is accepted.
-
-Use two clients on the **deployed** Worker to check a sustained idle period followed by successful edits without a refresh. Inspect Cloudflare logs/analytics for hibernation behavior and unexpected active duration. Run the physical phone/tablet cases in TESTING.md. WebKit automation is not a real iPad or Apple Pencil certification.
-
-Do not remove the release-candidate status merely because the shell loaded. AUDIT.md lists the remaining release blockers.
-
-## 6. Custom domain or website subpath
-
-For a standalone custom domain, normally set `VITE_BASE_PATH=/`. For another subdirectory, set that absolute path with a trailing slash. Configure the domain in GitHub Pages and its DNS records, then add its HTTPS origin to `ALLOWED_ORIGINS` and redeploy the Worker. Rebuild the frontend. Keep the backend origin and DO namespace unchanged to keep the same world.
-
-The manifest, icons, service worker, Vite assets, and app have relative/base-aware URLs and no client-side route tree. The automated preview gate exercises `/Canvas/`; also test the chosen alternate base before a domain migration.
-
-## 7. Export and owner recovery
-
-The normal Canvas menu downloads a portable JSON backup. A disconnected export is clearly marked `LOCAL-UNCONFIRMED`: it may contain edits the server has not acknowledged. Never assume a local file is the authoritative current world without reviewing it.
-
-For administration, set the endpoint and private token in **your terminal**, not the browser. Bash example:
+Use the deployed Worker origin as `CANVAS_API_URL` and verify administrative access from a terminal:
 
 ```sh
 export CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
@@ -137,32 +123,176 @@ read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
 export CANVAS_ADMIN_TOKEN
 npm run admin -- list
 npm run admin -- snapshot
+```
+
+PowerShell equivalent:
+
+```powershell
+$env:CANVAS_API_URL = "https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev"
+$env:CANVAS_ADMIN_TOKEN = Read-Host "Canvas admin token" -AsSecureString
+```
+
+For PowerShell, expose the secure value only for the command process you actually use; do not save it to a script/history file.
+
+## 5. Configure GitHub Pages
+
+In `thiepn/canvas`:
+
+1. **Settings → Pages → Build and deployment → Source:** choose **GitHub Actions**.
+2. **Settings → Secrets and variables → Actions → Variables:** set:
+   - `VITE_CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev`
+   - `VITE_BASE_PATH=/canvas/`
+3. **Actions secrets:** set:
+   - `VITE_TLDRAW_LICENSE_KEY=<your valid tldraw production key>`
+4. Leave `CANVAS_DEPLOY_ENABLED` unset/false until PR #1 is fully green and the deployed Worker has been checked.
+5. When ready to publish, set repository variable `CANVAS_DEPLOY_ENABLED=true`.
+
+All `VITE_` values are embedded into browser JavaScript. The tldraw SDK key is therefore public at runtime even though GitHub stores its source value as an Actions secret. `ADMIN_TOKEN` must never be a Vite value.
+
+The frontend expects only the Worker **origin** in `VITE_CANVAS_API_URL`; it constructs `/api/connect/main` and converts HTTPS to WSS itself.
+
+## 6. tldraw production license
+
+A non-local production deployment requires a valid tldraw hobby, trial, or commercial SDK key under tldraw's applicable terms. Canvas does not fabricate or commit a key.
+
+For this personal/noncommercial project, apply for/use a hobby key if tldraw approves the use case. Preserve the required tldraw watermark. If no suitable key is available, do not deploy an intentionally invalid configuration; an engine change is a separate migration project.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## 7. Merge and deploy Pages
+
+PR #1 should have a green `Canvas checks and Pages / quality` check on its **exact final head** before merge. Do not use an older green run after later commits.
+
+After explicit approval to merge, merge PR #1 into `main`. A `main` push will rerun the quality job. The Pages deployment job runs only when:
+
+- quality passes;
+- the ref is `main`;
+- the event is not a PR;
+- `CANVAS_DEPLOY_ENABLED == true`;
+- the Worker URL is HTTPS;
+- a nonempty tldraw production key is configured.
+
+Expected Pages URL:
+
+`https://thiepn.github.io/canvas/`
+
+The workflow uses the official Pages artifact/deployment actions; it does not create or maintain a `gh-pages` branch.
+
+## 8. Real deployment acceptance test
+
+After Pages is live, test the production system, not only localhost:
+
+1. open the Pages URL in two independent browser contexts/devices;
+2. verify both report `Live`;
+3. create text in A and confirm B receives it;
+4. create/move/delete a shape in B and confirm A receives it;
+5. verify live cursors/names;
+6. verify one client's undo does not remove an unrelated remote edit;
+7. close all clients, reopen, and confirm persistence;
+8. interrupt one client's network, restore it, and confirm reconnection/convergence;
+9. paste an image and drop an image/PDF; confirm no asset is stored;
+10. export the world;
+11. inspect Worker logs/analytics for errors.
+
+### Production hibernation check
+
+Local Miniflare/Wrangler tests validate the hibernation-compatible code path but cannot prove Cloudflare actually evicted/woke the production Durable Object.
+
+For the real check:
+
+1. connect at least one browser;
+2. leave the connection idle long enough for Cloudflare to hibernate the object when the platform chooses;
+3. interact again without refreshing;
+4. confirm edits synchronize normally;
+5. inspect Cloudflare logs/analytics for unexpected active duration/errors.
+
+This is the remaining platform-specific validation after repository CI.
+
+### Physical mobile/tablet check
+
+At minimum verify on a real phone and, preferably, an iPad/Android tablet with stylus:
+
+- canvas owns the viewport without accidental body scroll;
+- one-finger object interaction;
+- two-finger pan/pinch;
+- drawing;
+- text editing/keyboard appearance;
+- selection handles;
+- toolbar safe areas;
+- no accidental binary paste/upload.
+
+Playwright's mobile/touch emulation does not certify Apple Pencil/palm rejection.
+
+## 9. Export and owner recovery
+
+The Canvas menu downloads a portable JSON backup. A disconnected export is marked as locally unconfirmed; it may include pending tab state and must not be treated as a server acknowledgement.
+
+### List/create/export server snapshots
+
+```sh
+export CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
+export CANVAS_ADMIN_TOKEN=YOUR_PRIVATE_TOKEN
+
+npm run admin -- list
+npm run admin -- snapshot
 npm run admin -- export Canvas-before-maintenance.json
 ```
 
-PowerShell users can set `$env:CANVAS_API_URL` and `$env:CANVAS_ADMIN_TOKEN` for the current shell; avoid recording the token in a script or shell history.
+Avoid leaving the token in shell history. Prefer a secure prompt/environment mechanism.
 
-After accidental deletion:
+### Recover from accidental deletion
+
+Find and download the desired recovery point:
 
 ```sh
 npm run admin -- list
 npm run admin -- get SNAPSHOT_UUID Canvas-recovered.json
 ```
 
-Review the file and close **every** Canvas tab/device. Run `admin list` again and read its current `clock`. Then:
+Then:
+
+1. review the downloaded backup;
+2. close **every** Canvas tab/device;
+3. run `npm run admin -- list` again and note the current world `clock`;
+4. restore only against that exact clock:
 
 ```sh
 npm run admin -- restore Canvas-recovered.json --expect-clock CURRENT_CLOCK --yes
 ```
 
-A 409 means active clients remain or the world clock changed. No restore was applied; close tabs, inspect the new state/clock, and review again. A pre-restore snapshot must succeed before replacement. The endpoint rejects malformed data, unsupported assets/pages, mismatched engine/schema versions, and requests from browsers. Restoration applies records transactionally at a new clock rather than replaying historical clocks.
+A `409` means a client is still connected or the world changed. No restore is applied. Re-inspect state and clock before retrying.
 
-Keep an exported copy outside the Cloudflare account before migrations. Same-DO rolling snapshots cannot recover deletion of the entire namespace or loss of account access.
+The server validates the backup/schema and takes a new `before-restore` snapshot first. It restores records transactionally at a new synchronization clock rather than replaying old clocks/tombstones.
 
-## 8. Upgrades and troubleshooting
+Keep external downloaded exports before risky migrations. Rolling snapshots inside the same Durable Object cannot recover loss of the entire Cloudflare account/namespace.
 
-**Before upgrades:** export, create an isolated local world from a copy, update the aligned tldraw package versions together, test migration/undo/reconnection/recovery, then deploy coordinated client/server builds. Do not remove Durable Object migrations or change class/binding names casually. A Wrangler code rollback is not a data rollback.
+## 10. Upgrades
 
-**Connecting indefinitely:** inspect the configured origin, network, Worker health/logs, and WebSocket upgrade. The client shows an extended connection hint after ten seconds. **403:** fix `ALLOWED_ORIGINS`. **Production license error:** supply an actual appropriate key and rebuild. **Old frontend:** close all app tabs and reload; the service worker deliberately does not force-replace editor code during a session. **Missing content after infrastructure changes:** check the backend account/name/namespace before attempting any restore. **Limits reached:** export and inspect the world; do not repeatedly retry giant pastes.
+Before changing the tldraw package family or persistent schema:
 
-Runtime logs intentionally omit document payloads and cursor traffic. No third-party monitoring service is required for V1; use Wrangler/Cloudflare logs and analytics. Failure of backup creation must be investigated even when the live document still works.
+1. export production;
+2. create a server snapshot;
+3. update all interoperating tldraw packages together;
+4. restore/migrate a copy into isolated local Worker storage;
+5. run unit + Worker + cross-browser multiplayer + reconnect + collaborative undo + media rejection + production preview tests;
+6. run the large-scene benchmark;
+7. deploy coordinated Worker/frontend versions;
+8. verify the production world before retiring the previous deployment.
+
+A source rollback is not a database rollback.
+
+## Troubleshooting
+
+**403 from Worker:** verify the exact frontend origin in `ALLOWED_ORIGINS`; do not include `/canvas/` there.
+
+**Canvas stays Connecting:** check `/health`, browser network/WebSocket errors, `VITE_CANVAS_API_URL`, Worker deployment, and origin configuration.
+
+**Production license error:** provide a valid tldraw key and rebuild Pages.
+
+**Old frontend after deploy:** close Canvas tabs and reload. The service worker is intentionally conservative around active editor sessions.
+
+**Missing world after infrastructure rename:** verify Cloudflare account, Worker binding/class/migration/namespace before restoring anything.
+
+**Backup failure:** investigate even if live editing still works; primary persistence and recovery are separate guarantees.
+
+**Large-scene slowdown:** 10,000 shapes is a stress ceiling. The measured benchmark reached ~825 MiB JS heap and ~26 ms p95 frame interval at that size. Organize/delete obsolete content or lower scene size rather than raising limits blindly.
