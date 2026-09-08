@@ -1,5 +1,8 @@
 name: Canvas performance evidence
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [release/canvas-v1-hardening]
 permissions:
   contents: read
 env:
@@ -13,6 +16,7 @@ jobs:
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: '22'
+          cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:performance
