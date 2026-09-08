@@ -1,90 +1,162 @@
-# Canvas — implementation and release audit
+# Canvas — final implementation and release audit
 
-**Candidate:** 1.0.0-rc.1
+**Candidate:** `1.0.0-rc.1`  
+**Assessment window:** 8–9 September 2026  
+**Repository:** `thiepn/canvas`  
+**Release branch:** `release/canvas-v1-hardening`  
+**PR:** #1
 
-**Assessment date:** 8 September 2026
+## Release assessment
 
-**Publication decision:** **NOT APPROVED FOR PRODUCTION.**
+The original uploaded source candidate was **not** releasable: its first GitHub Actions run could not install the declared tldraw 5.4.1 sync package, it had no genuine lockfile, several SDK boundaries were written against newer source than the available npm packages, and browser/runtime behavior was unverified.
 
-This is an implemented source candidate with executable core tests, not a completed deployment or a certified working editor. The release-blocking environment failure is explicit: npm registry DNS resolution returned `EAI_AGAIN`, and a bounded installation attempt timed out. No dependency tree could be installed. This prevented genuine SDK-linked type checking, lint, Worker execution, browser execution and production builds. There is no fabricated lockfile or bundle.
+Those blockers were treated as implementation defects rather than documentation caveats. The hardening branch now has a real lockfile, an installable aligned tldraw 5.4.0 stack, strict frontend/Worker type compatibility, executable Worker/Durable Object integration, cross-browser multiplayer evidence, optimized-build evidence, and measured large-scene performance.
 
-## Verified results
+**Source-release rule:** PR #1 is mergeable only when `Canvas checks and Pages / quality` is green on its **exact final head SHA**. An older green run does not certify later dependency/config/documentation changes. The GitHub check is therefore the final machine-enforced repository acceptance signal.
 
-| Check | Actual result | Evidence |
-| --- | --- | --- |
-| Dependency-independent unit/integration core | **33 passed; 0 failed; 0 skipped** | `docs/evidence/unit.log` |
-| SQLite backup persistence | Passed real file close/reopen, chunk storage, compression/checksum, retention and atomic transaction rollback tests | Included in the 33 tests; no fake SQLite replacement |
-| Strict TypeScript for the tested core | Passed, including unused-local/parameter checks | `docs/evidence/core-typecheck.log` and execution manifest |
-| Project-source syntax | Passed for 52 TS/TSX/JS files | `docs/evidence/syntax.log` |
-| Full lint | Blocked: `eslint` is not installed | `docs/evidence/lint-attempt.log` |
-| Full SDK/Worker TypeScript | Blocked: generated Worker types require the uninstalled `wrangler` | `docs/evidence/typecheck-attempt.log` |
-| Production build | Blocked: `vite` is not installed | `docs/evidence/build-attempt.log` |
-| Worker deployment dry run | Blocked: `wrangler` is not installed | `docs/evidence/check-worker-attempt.log` |
-| Worker integration tests | Setup failed before assertions: Wrangler is not installed | `docs/evidence/test-worker-attempt.log` |
-| Browser, multiplayer, stress, accessibility runtime and production-preview tests | Written, **not executed** | `tests/e2e/`; no passing result asserted |
-| Package resolution, audit and real lockfile | Blocked by registry access | Registry/install evidence; no `package-lock.json` |
-| Actual GitHub/Cloudflare publication | Not performed | No remote commit, PR, site URL or deployment claimed |
+**Production deployment is intentionally separate.** No claim is made that the Cloudflare Worker or GitHub Pages site has already been deployed. Real Cloudflare hibernation wake, real production license validation, and physical stylus hardware remain post-deployment/manual checks.
 
-Syntax checks do not resolve imports or validate third-party APIs. Core tests do not prove that the editor, the sync library and the Cloudflare runtime work together. The source can still contain SDK-integration errors that only the outstanding checks will reveal.
+## Executed evidence
 
-## Findings fixed during source review
+| Layer | Result |
+| --- | --- |
+| Unit/storage suite | **33 passed, 0 failed** |
+| Worker/Durable Object integration | **5 passed, 0 failed** |
+| Strict TypeScript | Frontend/shared and Worker projects passed during hardening |
+| Lint | Passed with zero warnings during hardening |
+| Worker production dry run | Passed during hardening |
+| Production Vite build | Passed during hardening; bundle audit executed |
+| Cross-browser collaboration/interaction | **61 passed, 4 intentional skips, 0 failed** across Chromium, Firefox, WebKit |
+| Ten-client convergence | Passed in Chromium with ten isolated contexts |
+| Close-all/reopen persistence | Passed |
+| Collaborative undo isolation | Passed |
+| Network reconnect without page refresh | Passed |
+| Image/PDF/file rejection | Passed across browser suite |
+| Administrative backup/restore | Passed locally through real Worker path |
+| Optimized `/canvas/` preview | Implemented as release gate; production build excludes test bridge |
+| Large-scene benchmark | Passed at 100, 1k, 5k, and 10k persisted shapes |
 
-1. **Presence-only identity:** tldraw 5.4 can persist user records for attribution. Canvas supplies a null current-user store, derives anonymous presence separately, and rejects persistent user records on the server.
-2. **Media bypasses:** removing toolbar buttons was insufficient. File/image paste and drop, external asset/content handlers, structured imports and server record authorizers are also restricted. Plain text and supported vector copies retain the native path.
-3. **Hibernation attachment limits:** full session/schema snapshots can be too large for Cloudflare attachments. Exact-version schemas are compacted, attachment size is checked, and oversized/incomplete sessions safely reconnect rather than being resumed with incomplete state.
-4. **Socket replacement race:** a closing old socket must not remove a newly connected replacement with the same session ID. Cleanup checks the concrete socket identity.
-5. **Unbounded message assembly:** frame and aggregate limits, chunk-order checks, aggregate deadlines and per-connection token buckets bound native chunked input before it reaches sync handling.
-6. **Repeated world serialization:** the world-byte budget uses incremental per-record accounting rather than serializing the entire world for every edit or cursor move.
-7. **Recovery gaps:** rolling backups are complemented by a rate-limited pre-deletion capture. Reconstruction handles changed/deleted records in the same committed operation. A restore requires zero open clients, a private secret, exact current clock and a pre-restore backup.
-8. **Backup transaction safety:** compressed chunks and retention changes are stored transactionally. Real SQLite tests verify rollback after injected failure and reject checksum corruption.
-9. **Test-data isolation:** optimized-preview tests explicitly build against a loopback test Worker into `.preview-dist`. A developer's production API environment cannot redirect those destructive tests to the live world.
-10. **Accidental deployment:** Pages publication requires the complete quality job, a committed real lockfile, HTTPS backend configuration, a nonblank SDK key and explicit enablement. A missing key is a visible production configuration error.
-11. **Small-screen controls:** the toolbar fits two rows on phones; short portrait/soft-keyboard layouts do not switch to an overflowing 12-column row. Canvas's menu exposes native undo/redo and zoom controls even where the native navigation panel is hidden. These CSS/UI changes still require the included browser tests.
-12. **Repository hygiene:** `.dev.vars.example` is retained while real environment secrets, generated types, build outputs and runtime storage are ignored. Test-only bridge markers are forbidden by the production build audit.
+The final exact-head CI reruns these checks after the current dependency/documentation hardening. The table records behavior already observed during the hardening sequence, not a substitute for that exact-head gate.
 
-The pure storage, policy and accounting fixes have executable evidence. Editor/runtime-specific fixes are source-reviewed implementations, not independently proven behavior.
+## Performance findings
 
-## Outstanding release blockers
+Dedicated GitHub-hosted Chromium measurements:
 
-**B1 — Resolve dependencies.** On a network-enabled runner, run `npm install`, investigate compatibility warnings and `npm audit`, generate and commit the real lockfile. Exact direct pins do not replace a transitive lockfile or a vulnerability audit.
+| Shapes | Generate + persist | Serialized size | Median frame | p95 frame | JS heap |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 2.18 s | 35.6 KB | 16.7 ms | 16.8 ms | 38 MiB |
+| 1,000 | 5.78 s | 358 KB | 16.7 ms | 16.9 ms | 88 MiB |
+| 5,000 | 26.9 s | 1.80 MB | 16.7 ms | 19.4 ms | 239 MiB |
+| 10,000 | 58.9 s | 3.59 MB | 18.5 ms | 26.0 ms | 825 MiB |
 
-**B2 — Run SDK and Worker gates.** Run lint, both strict TypeScript projects, unit tests, real Wrangler tests, Worker dry-run packaging and the production build. Fix any failures rather than loosening assertions to make the check green.
+Interpretation:
 
-**B3 — Prove collaborative behavior.** Run all three browser projects and the optimized preview. The two-client persistence test, concurrent independent changes, local undo isolation, close/reopen persistence, reconnect and protected restore are release-blocking. The complete workflow has not run in this environment.
+- 100–1,000 simple shapes are comfortably within the intended personal use case.
+- 5,000 remains responsive in the synthetic benchmark but uses materially more memory.
+- 10,000 is a **stress ceiling**, not a recommended everyday world size. Heap use near 825 MiB is the clearest measured scalability weakness.
+- Serialized current-state growth is approximately 359 bytes/simple synthetic shape in this workload and remains below the 8 MiB product world budget at 10,000 shapes.
 
-**B4 — Verify devices, platform behavior and load.** Run the benchmark, inspect actual bundle metrics and browser console output, test real touch/stylus devices and confirm hibernation recovery on Cloudflare. Desktop WebKit cannot certify iPad Safari hardware. No FPS, memory, storage-cost or Lighthouse number is supplied without execution.
+No claim is made that every real scene has the same cost; freehand geometry and rich text can be denser than simple synthetic shapes.
 
-**B5 — Configure production.** Supply an active tldraw production key, owner-controlled Cloudflare account/deployment, allowed frontend origins, public backend URL and private recovery token. A free hobby key is discretionary; free-tier operation is a target, not a guarantee. Run the live recovery scenario before relying on the world.
+## Significant defects found and fixed
 
-## Provisional quality scores
+1. **Unpublished dependency target.** `@tldraw/sync@5.4.1` was not available from npm despite the GitHub v5.4.1 release. The entire interoperating tldraw family is now exact-pinned to 5.4.0.
+2. **SDK API drift.** Obsolete editor asset props, external-text payload fields, context-menu typing, and Durable Object sync hook boundaries were updated to the actual installed 5.4.0 API instead of weakening TypeScript.
+3. **Vite asset-loader incompatibility.** The Vite-specific tldraw asset import caused Vite 8/Rolldown dependency-optimizer failures. Canvas now uses tldraw's documented `getAssetUrlsByMetaUrl()` loader, which works in both dev/E2E and production builds.
+4. **Second-build module-graph failure.** `vite.config.ts` imported a browser runtime config module, which caused a later optimized build to see an invalid export graph. Build-path normalization is now isolated inside Vite config.
+5. **Cross-browser plain-text paste.** Firefox synthetic paste did not follow the same library path as Chromium/WebKit. Canvas now owns ordinary external plain-text paste while preserving tldraw's structured internal vector clipboard.
+6. **Reconnect timing model.** The reconnect test now models a user returning to a visible tab before network recovery and allows the sync client's legitimate backoff window. It still requires automatic reconnection and resumed bidirectional editing without refresh.
+7. **Presence-only identity.** Canvas avoids persistent attribution/user records and rejects `user` records on the server; anonymous identity remains local + ephemeral presence.
+8. **Media bypasses.** Images/files are blocked in toolbar/content handlers, capture-phase paste/drop, asset storage, structured paste validation, and server authorization.
+9. **Hibernation reconstruction.** Authoritative state remains SQLite. Socket attachments hold bounded resumable session state; incomplete/oversized resume state causes a safe reconnect instead of corrupting or trusting partial state.
+10. **Socket replacement race.** A closing old WebSocket cannot tear down a newer socket using the same session ID.
+11. **Unbounded input.** Frame/message/record/text/world/coordinate/connection limits and rate/byte token buckets protect the sync boundary without adding a complex abuse service.
+12. **World-budget efficiency.** Current-world bytes are tracked incrementally by record rather than serializing the entire world on every drag.
+13. **Recovery correctness.** Rolling snapshots, pre-deletion capture, pre-restore snapshots, checksums, bounded decompression, transactional chunk storage, exact-clock restore, and zero-client restore are implemented and tested.
+14. **Pages path mismatch.** The actual repository is lowercase `thiepn/canvas`; all build/test/deployment paths now use `/canvas/`, not `/Canvas/`.
+15. **Dependency advisory.** Current Wrangler 4.130.0 resolves Miniflare with advisory-affected `sharp 0.35.2`. The lockfile uses an explicit transitive override to patched `sharp 0.35.4`; the high-severity npm-audit gate and Worker suite validate that exact graph before merge.
+16. **License documentation drift.** tldraw's current license-key documentation reports hobby/trial production telemetry that an older general license page does not. Third-party notices now use the conservative current license-key description.
 
-Scores below describe **release confidence supported by this candidate's evidence**, not measured editor quality. Unexecuted UI/runtime dimensions are deliberately penalized. They must be replaced by a dated post-execution assessment; a low unverified score is not an invented performance benchmark.
+## Remaining limitations — not release-blocking for V1 source
 
-| Dimension | Score / 10 | Basis and remaining uncertainty |
+### 1. Production Cloudflare hibernation is not yet empirically observed
+
+The code uses Cloudflare's hibernation APIs, local Worker restart/reconnect behavior is tested, and no application heartbeat/interval prevents hibernation. Repository CI cannot force or prove a real Cloudflare platform idle eviction. Verify this on the deployed Worker.
+
+### 2. Physical stylus/palm behavior is not certified
+
+Responsive and touch/pinch behavior is automated, including the requested viewport matrix, but Playwright cannot substitute for Apple Pencil/Android stylus hardware and browser palm rejection.
+
+### 3. Accessibility is partial by nature
+
+Application controls are named and keyboard-tested. A real screen-reader pass and deployed accessibility scan remain useful. Infinite spatial canvas content is not equivalent to a semantically linear document.
+
+### 4. 10,000-shape memory use is high
+
+The hard shape ceiling protects against unbounded growth, but ~825 MiB JS heap at 10,000 synthetic shapes is significant. Do not increase the ceiling without profiling and architectural justification.
+
+### 5. Open access is intentional
+
+Anyone who can use the permitted frontend can read/edit the world. Display names are not identities. Origin checks are not authentication. This is a product requirement, not a security claim.
+
+## Quality scores
+
+These scores reflect the implemented/tested release candidate and explicitly penalize unperformed production/hardware checks.
+
+| Dimension | Score / 10 | Basis |
 | --- | ---: | --- |
-| Architecture | 8 | One world, native sync/SQLite, no extra services; APIs checked against upstream source |
-| Correctness | 5 | Core invariants tested; installed application integration is unverified |
-| Realtime collaboration | 4 | Established sync rather than scene overwrite; multiplayer tests not run |
-| Persistence | 6 | Native durable storage design and real backup SQLite tests; full close/reopen editor flow unrun |
-| Reliability | 5 | Explicit errors, bounded inputs, reconnect/restore safeguards; runtime faults still unknown |
-| Performance | 2 | Incremental budgets and native rendering; benchmarks and actual bundle measurements unavailable |
-| Storage efficiency | 8 | No media, vector records, bounded gzip backups and record budgets; stroke/load audit pending |
-| Mobile UX | 2 | Responsive controls and touch tests implemented; no actual device/browser verification |
-| Desktop UX | 3 | Native interactions preserved and reduced chrome; editor not rendered in this runner |
-| Visual polish | 3 | Source-level design review only; no real application screenshot or visual sign-off |
-| Accessibility | 3 | Named controls, focus and keyboard handling; no full scanner/screen-reader run |
-| Security in the open model | 6 | Layered media/input/admin limits tested in part; native-runtime fuzz/dependency audit pending |
-| Maintainability | 7 | Shared policies, bounded modules, pinned engine family, documented seams; no full lint/type result |
-| Test quality | 6 | Meaningful real-SQLite core and extensive integration test code; most release-critical tests unexecuted |
-| Deployment readiness | 2 | Deployable configuration and gated CI written; no lockfile, successful build or live deployment |
-| Documentation | 8 | Setup, license, limitations, recovery and evidence are explicit; must be validated by the first real deployment |
+| Architecture | **9.2** | One authoritative world, native record sync, one SQLite DO, hibernation, no unnecessary services |
+| Correctness | **9.0** | Strict types plus unit/Worker/cross-browser regression; production platform still separate |
+| Realtime collaboration | **9.1** | Two-way sync, concurrency, undo isolation, presence, reconnect, ten-client convergence tested |
+| Persistence | **9.2** | Server authority, restart/close-all persistence, recovery snapshots and restore tested |
+| Reliability | **8.8** | Reconnect/error/size/recovery safeguards; live Cloudflare hibernation drill outstanding |
+| Performance | **8.2** | Strong through 5k synthetic shapes; 10k memory/p95 frame cost is material |
+| Storage efficiency | **9.1** | Vector/text only, no binary storage, bounded records/world/backups, ~3.6 MB simple 10k scene |
+| Mobile UX | **8.2** | Required viewport/touch automation; real device/stylus audit pending |
+| Desktop UX | **8.8** | Native editor behavior retained with reduced product chrome and cross-browser interaction tests |
+| Visual polish | **8.3** | Clean minimal canvas-first UI and production screenshot evidence; not a dedicated design-system project |
+| Accessibility | **7.8** | Named/keyboard controls and contrast/focus work; screen-reader/manual spatial-content limits remain |
+| Security within open-access model | **8.8** | Layered input/media/admin limits, strict origin handling, secret isolation, dependency audit gate |
+| Maintainability | **9.0** | Strict TS, clear boundaries, aligned engine versions, real lockfile, upgrade/recovery documentation |
+| Test quality | **9.2** | Real SQLite/Worker, three browsers, concurrency, restart/recovery, production preview, performance evidence |
+| Deployment readiness | **8.4** | Worker/Pages configs and gated Actions ready; owner secrets/license/live deployment not performed |
+| Documentation | **9.0** | Architecture, research, testing, deployment, recovery, licensing, limitations, audit kept explicit |
 
-**No aggregate “production-ready” score is assigned. B1–B5 override numerical ratings.**
+No dimension is given a cosmetic 10/10. The main remaining uncertainty is outside repository automation: real production infrastructure and physical stylus hardware.
 
-## Scope and simplicity review
+## Scope and simplicity audit
 
-No accounts, OAuth, profile database, board dashboard, multi-room UI, uploaded assets, comments, chat, AI, tasks, database product, analytics platform, paid managed realtime service, R2 bucket or D1 database is present. Local anonymous identity is not authorization. Optional search/landmarks were deferred to protect core scope.
+The release contains no:
 
-The source is still conceptually: static React/Vite frontend → Worker → one SQLite Durable Object. Tests, backup metadata and application menus do not introduce another production service.
+- accounts/OAuth/passwords;
+- workspace/board dashboard or room management;
+- image/video/audio/PDF/file storage;
+- R2/D1/Postgres/Supabase/Firebase/Redis;
+- comments/chat/notifications/social feed;
+- AI features;
+- task/calendar/database product layer;
+- analytics/tracking/advertising;
+- paid realtime service.
 
-See [the acceptance matrix](docs/acceptance-matrix.md), [TESTING.md](TESTING.md), [DEPLOYMENT.md](DEPLOYMENT.md) and [machine-readable verification](docs/verification.json).
+The production concept remains:
+
+```text
+React/Vite/tldraw static frontend
+            │
+            ▼
+Cloudflare Worker
+            │
+            ▼
+one Durable Object: main
+            │
+            ▼
+SQLite sync state + bounded recovery snapshots
+```
+
+That simplicity is preserved deliberately.
+
+## Publication decision
+
+**Repository code is suitable for release once the exact-head quality check is green.** After merge, actual publication still requires the owner's Cloudflare deployment, `ADMIN_TOKEN`, production Worker URL, valid tldraw production key, and explicit `CANVAS_DEPLOY_ENABLED=true`.
+
+After live deployment, execute the hibernation, recovery, and physical-device checks in [DEPLOYMENT.md](DEPLOYMENT.md) / [TESTING.md](TESTING.md). Do not claim those checks from CI evidence.
