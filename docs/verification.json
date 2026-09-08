@@ -1,0 +1,136 @@
+{
+  "candidate": "1.0.0-rc.1",
+  "date": "2026-09-08",
+  "releaseStatus": "not-certified",
+  "productionApproved": false,
+  "environment": {
+    "node": "22.16.0",
+    "npm": "10.9.2",
+    "typescriptCoreCheck": "5.8.3",
+    "registryDnsError": "EAI_AGAIN"
+  },
+  "checks": [
+    {
+      "name": "core-tests",
+      "command": "npm test",
+      "status": "passed",
+      "exitCode": 0,
+      "passed": 33,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "docs/evidence/unit.log"
+    },
+    {
+      "name": "strict-core-types",
+      "command": "node /usr/local/slides_js/node_modules/typescript/bin/tsc --noEmit --strict --noUnusedLocals --noUnusedParameters --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --allowImportingTsExtensions --types node --typeRoots /usr/local/slides_js/node_modules/@types --lib ES2022,DOM,DOM.Iterable tests/unit/*.ts",
+      "status": "passed",
+      "exitCode": 0,
+      "scope": "tests/unit and transitive dependency-independent modules only; not the installed SDK or full application",
+      "evidence": "docs/evidence/core-typecheck.log"
+    },
+    {
+      "name": "source-syntax",
+      "command": "NODE_PATH=/usr/local/slides_js/node_modules npm run source:syntax",
+      "status": "passed",
+      "exitCode": 0,
+      "files": 52,
+      "evidence": "docs/evidence/syntax.log"
+    },
+    {
+      "name": "lint",
+      "command": "npm run lint",
+      "status": "blocked-missing-dependencies",
+      "exitCode": 127,
+      "evidence": "docs/evidence/lint-attempt.log"
+    },
+    {
+      "name": "full-typecheck",
+      "command": "npm run typecheck",
+      "status": "blocked-missing-dependencies",
+      "exitCode": 127,
+      "evidence": "docs/evidence/typecheck-attempt.log"
+    },
+    {
+      "name": "production-build",
+      "command": "npm run build",
+      "status": "blocked-missing-dependencies",
+      "exitCode": 127,
+      "evidence": "docs/evidence/build-attempt.log"
+    },
+    {
+      "name": "worker-package",
+      "command": "npm run check:worker",
+      "status": "blocked-missing-dependencies",
+      "exitCode": 127,
+      "evidence": "docs/evidence/check-worker-attempt.log"
+    },
+    {
+      "name": "worker-tests",
+      "command": "npm run test:worker",
+      "status": "blocked-missing-dependencies",
+      "exitCode": 1,
+      "evidence": "docs/evidence/test-worker-attempt.log"
+    },
+    {
+      "name": "dependency-install",
+      "command": "npm install --package-lock-only --ignore-scripts --fetch-timeout=6000 --fetch-retries=0 (externally bounded execution)",
+      "status": "timed-out",
+      "exitCode": 124,
+      "evidence": "docs/evidence/install-exit.txt"
+    },
+    {
+      "name": "browser-e2e",
+      "status": "not-run"
+    },
+    {
+      "name": "production-preview",
+      "status": "not-run"
+    },
+    {
+      "name": "performance",
+      "status": "not-run"
+    },
+    {
+      "name": "physical-devices",
+      "status": "not-run"
+    },
+    {
+      "name": "deployed-hibernation",
+      "status": "not-run"
+    },
+    {
+      "name": "lighthouse",
+      "status": "not-run"
+    },
+    {
+      "name": "dependency-vulnerability-audit",
+      "status": "not-run"
+    }
+  ],
+  "publication": {
+    "githubRepositoryCreated": false,
+    "remoteCommit": null,
+    "pullRequest": null,
+    "cloudflareDeployed": false,
+    "pagesDeployed": false
+  },
+  "generatedArtifacts": {
+    "realDependencyLockfile": false,
+    "productionBundle": false,
+    "editorScreenshot": false,
+    "benchmarkMeasurements": false
+  },
+  "evidenceSha256": {
+    "unit.log": "fd68c4f3d4ec193eaaf510f1f3c1c3e0df68bf46e9124edab1a3fb5c2354e194",
+    "core-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "syntax.log": "3ead24f5466e6d479a9e58173e3ada58da396a93e802c53102a8740f560c10e7",
+    "lint-attempt.log": "7982e84d46a3e0b4709163a1b9894cf9d6afb0582e2fb51a731b9cb1377b3b5e",
+    "typecheck-attempt.log": "28ccc764c03d8c8416105fec2224c6588f6877ccf43c2d1de4d664f3fc21c6cd",
+    "build-attempt.log": "b26b7b78be3172a740327dc0357834e71d8663a8a0f2e56ca07c64c0f95a43c8",
+    "check-worker-attempt.log": "fab37b979a9eae270f98afc71fbc322942af0cd634db8bbd8d2edb26c917a5db",
+    "test-worker-attempt.log": "418aeb7df3c2f5bf4c3de83243859916abb6016fad4d860f865c3e3137aa5abc",
+    "registry-dns.log": "c244fd0728f1b0117e40a280e963cb89a56cad3f9be7e5c7af2a8c406bd63616",
+    "install.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "install-exit.txt": "ca2ebdf97d7469496b1f4b78958f9dc8447efdcb623953fee7b6996b762f6fff"
+  }
+}

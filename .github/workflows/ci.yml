@@ -1,0 +1,86 @@
+name: Canvas checks and Pages
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: canvas-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  WRANGLER_SEND_METRICS: 'false'
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - name: Install reproducibly when the real lockfile is present
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else
+            echo '::warning::Bootstrap checkout: npm install will generate the lockfile. Commit it before enabling deployment.'
+            npm install
+          fi
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:worker
+      - run: npm run check:worker
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:e2e
+      - run: npm run test:production
+      - name: Retain real diagnostic reports and generated bootstrap lockfile
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: canvas-check-results
+          path: |
+            artifacts/
+            playwright-report/
+            test-results/
+            package-lock.json
+  deploy-pages:
+    needs: quality
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.CANVAS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Require a committed lockfile
+        run: git ls-files --error-unmatch package-lock.json
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Require actual production configuration
+        env:
+          VITE_CANVAS_API_URL: ${{ vars.VITE_CANVAS_API_URL }}
+          VITE_TLDRAW_LICENSE_KEY: ${{ secrets.VITE_TLDRAW_LICENSE_KEY }}
+        run: |
+          node -e 'if (!process.env.VITE_CANVAS_API_URL?.startsWith("https://") || !process.env.VITE_TLDRAW_LICENSE_KEY?.trim()) process.exit(1)'
+      - run: npm run build
+        env:
+          VITE_CANVAS_API_URL: ${{ vars.VITE_CANVAS_API_URL }}
+          VITE_TLDRAW_LICENSE_KEY: ${{ secrets.VITE_TLDRAW_LICENSE_KEY }}
+          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/Canvas/' }}
+      - uses: actions/configure-pages@v6.0.0
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: dist
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5.0.1

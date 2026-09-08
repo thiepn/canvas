@@ -1,0 +1,9 @@
+
+> canvas@1.0.0-rc.1 typecheck
+> npm run typegen && tsc -p tsconfig.json && tsc -p tsconfig.worker.json
+
+
+> canvas@1.0.0-rc.1 typegen
+> wrangler types
+
+sh: 1: wrangler: not found

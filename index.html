@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="A lightweight persistent realtime infinite canvas for drawing, writing, and thinking together." />
+    <meta name="theme-color" content="#fafaf8" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%icon.svg" />
+    <link rel="apple-touch-icon" href="%BASE_URL%icon-192.png" />
+    <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
+    <title>Canvas</title>
+    <style>html,body{margin:0;height:100%;background:#fafaf8;color:#202120;font-family:Arial,sans-serif}#root{height:100%}.initial-loading{height:100%;display:grid;place-content:center;text-align:center}.initial-loading strong{font-size:36px;letter-spacing:-1px}.initial-loading p{font-size:13px;color:#62665f}@media(prefers-color-scheme:dark){html,body{background:#191a1c;color:#f2f1ed}.initial-loading p{color:#b5b5ad}}</style>
+  </head>
+  <body>
+    <div id="root"><div class="initial-loading" role="status"><strong>Canvas.</strong><p>Opening the shared canvas…</p></div></div>
+    <noscript>Canvas needs JavaScript to synchronize drawing and text.</noscript>
+    <script type="module" src="/app/main.tsx"></script>
+  </body>
+</html>

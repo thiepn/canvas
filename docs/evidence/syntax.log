@@ -1,0 +1,5 @@
+
+> canvas@1.0.0-rc.1 source:syntax
+> node scripts/check-source.mjs
+
+Syntax checks passed for 52 TypeScript/TSX/JavaScript files. This is NOT an SDK typecheck, build, or runtime test.
