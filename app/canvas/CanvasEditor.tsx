@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
+import { getAssetUrlsByMetaUrl } from '@tldraw/assets/urls'
 import { useSync } from '@tldraw/sync'
 import { atom, createUserId, getDefaultUserPresence, Tldraw, type Editor, type TLUser } from 'tldraw'
 import 'tldraw/tldraw.css'
@@ -13,7 +13,7 @@ import { LIMITS } from '../../shared/limits.ts'
 import { UI_COMPONENTS, UI_OVERRIDES } from './editor-ui.tsx'
 import type { PublicConfig } from '../config/public-config.ts'
 
-const ASSET_URLS = getAssetUrlsByImport()
+const ASSET_URLS = getAssetUrlsByMetaUrl()
 const EDITOR_OPTIONS = { maxPages: 1, maxShapesPerPage: LIMITS.shapes }
 const NO_MIMES: readonly string[] = []
 export default function CanvasEditor({ config }: { config: PublicConfig }) {
