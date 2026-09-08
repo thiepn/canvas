@@ -20,13 +20,16 @@ jobs:
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: '22'
-      - name: Install reproducibly when the real lockfile is present
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Record full dependency audit
         shell: bash
         run: |
-          if [ -f package-lock.json ]; then npm ci; else
-            echo '::warning::Bootstrap checkout: npm install will generate the lockfile. Commit it before enabling deployment.'
-            npm install
-          fi
+          mkdir -p artifacts
+          npm audit --json > artifacts/npm-audit.json || true
+      - name: Reject high-severity production dependency vulnerabilities
+        run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
@@ -36,7 +39,7 @@ jobs:
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:e2e
       - run: npm run test:production
-      - name: Retain real diagnostic reports and generated bootstrap lockfile
+      - name: Retain diagnostics
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -59,8 +62,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Require a committed lockfile
-        run: git ls-files --error-unmatch package-lock.json
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: '22'
@@ -76,7 +77,7 @@ jobs:
         env:
           VITE_CANVAS_API_URL: ${{ vars.VITE_CANVAS_API_URL }}
           VITE_TLDRAW_LICENSE_KEY: ${{ secrets.VITE_TLDRAW_LICENSE_KEY }}
-          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/Canvas/' }}
+          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/canvas/' }}
       - uses: actions/configure-pages@v6.0.0
       - uses: actions/upload-pages-artifact@v5.0.0
         with:
