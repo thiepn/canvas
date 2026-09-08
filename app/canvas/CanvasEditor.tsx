@@ -58,9 +58,9 @@ export default function CanvasEditor({ config }: { config: PublicConfig }) {
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
   }, [])
   useEffect(() => {
-    if (!rootRef.current) return
-    return installClipboardGuards(rootRef.current, notify)
-  }, [notify])
+    if (!rootRef.current || !editor) return
+    return installClipboardGuards(rootRef.current, editor, notify)
+  }, [editor, notify])
   useEffect(() => {
     presenceIdentity.set(identity)
     editor?.user.updateUserPreferences({ id: identity.deviceId, name: identity.displayName, color: identity.color })
