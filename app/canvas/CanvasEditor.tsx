@@ -29,7 +29,7 @@ export default function CanvasEditor({ config }: { config: PublicConfig }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const initialIdentity = useRef(identity)
   const presenceIdentity = useMemo(() => atom('canvas.presence-identity', initialIdentity.current), [])
-  // A non-null currentUser enables persistent attribution in tldraw 5.4. Canvas has NO accounts.
+  // A null currentUser keeps anonymous identity ephemeral; presence is supplied separately below.
   const users = useMemo(() => ({ currentUser: atom<TLUser | null>('canvas.anonymous-user', null) }), [])
   const getUserPresence = useCallback<NonNullable<Parameters<typeof useSync>[0]['getUserPresence']>>((store, user) => {
     const base = getDefaultUserPresence(store, user)
@@ -101,7 +101,7 @@ export default function CanvasEditor({ config }: { config: PublicConfig }) {
   return <div className="canvas-app" ref={rootRef}>
     <Header editor={editor} identity={identity} status={status} theme={theme} rename={rename} changeTheme={changeTheme} exportState={() => exportCanvas(config.apiUrl, editor, online, notify)} />
     <main className="canvas-workspace" aria-label="Shared infinite canvas">
-      {sync.status === 'error' ? <div className="app-message" role="alert"><h2>Canvas could not connect</h2><p>{sync.error.message}</p><p>Check the backend URL, allowed origin, and deployment. No local document has replaced the shared world.</p><button type="button" onClick={() => location.reload()}>Try again</button></div> : <Tldraw store={sync} assets={NO_ASSETS} assetUrls={ASSET_URLS} licenseKey={config.licenseKey} components={UI_COMPONENTS} overrides={UI_OVERRIDES} acceptedImageMimeTypes={NO_MIMES} acceptedVideoMimeTypes={NO_MIMES} maxAssetSize={0} locale="en" options={EDITOR_OPTIONS} onMount={onMount} />}
+      {sync.status === 'error' ? <div className="app-message" role="alert"><h2>Canvas could not connect</h2><p>{sync.error.message}</p><p>Check the backend URL, allowed origin, and deployment. No local document has replaced the shared world.</p><button type="button" onClick={() => location.reload()}>Try again</button></div> : <Tldraw store={sync} assetUrls={ASSET_URLS} licenseKey={config.licenseKey} components={UI_COMPONENTS} overrides={UI_OVERRIDES} acceptedImageMimeTypes={NO_MIMES} acceptedVideoMimeTypes={NO_MIMES} maxAssetSize={0} locale="en" options={EDITOR_OPTIONS} onMount={onMount} />}
       {connectionSlow && sync.status === 'loading' && <div className="network-banner" role="status">Still connecting. Check your internet connection and that the Canvas backend is deployed and permits this site’s origin. Connection attempts continue automatically.</div>}
       {!online && sync.status === 'synced-remote' && <div className="network-banner" role="status">{browserOnline ? 'Reconnecting' : 'Offline'} — editing is paused. Keep this tab open; pending changes will reconnect automatically. You can export a local recovery copy.</div>}
       {online && !hintDismissed && <div className="empty-hint"><span>Draw, type, or make shapes anywhere.</span><button type="button" aria-label="Dismiss hint" onClick={() => { setHintDismissed(true); writePreference(storage, 'canvas.hint.dismissed', 'yes') }}>×</button></div>}
