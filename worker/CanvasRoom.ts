@@ -74,7 +74,8 @@ export class CanvasRoom extends DurableObject<CanvasEnv> {
           return permitted
         },
       },
-      onAfterReceiveMessage: ({ message, stringified }) => {
+      onAfterReceiveMessage: ({ stringified }) => {
+        const message: unknown = JSON.parse(stringified)
         if (byteLength(stringified) > LIMITS.messageBytes || !isSafeJson(message)) throw new Error('Invalid sync payload.')
         this.pendingCreates.clear()
         this.pendingBefore.clear()
@@ -174,7 +175,7 @@ export class CanvasRoom extends DurableObject<CanvasEnv> {
         await this.ctx.blockConcurrencyWhile(async () => {
           await this.backups.create(this.exportSnapshot(), 'before-restore')
           // Drop imported clocks/tombstones. loadSnapshot applies records transactionally at a new server clock.
-          room.loadSnapshot({ schema: schema.serialize(), documents: candidate.snapshot.documents.map(item => ({ state: item.state, lastChangedClock: 0 })) } as RoomSnapshot)
+          room.loadSnapshot({ schema: schema.serialize(), documents: candidate.snapshot.documents.map(item => ({ state: item.state, lastChangedClock: 0 })) } as unknown as RoomSnapshot)
           this.budget.initialize(candidate.snapshot.documents.map(item => item.state as unknown as { id: string }))
           this.shapeIds.clear()
           for (const item of candidate.snapshot.documents) if (item.state.typeName === 'shape') this.shapeIds.add(String(item.state.id))
@@ -197,7 +198,7 @@ export class CanvasRoom extends DurableObject<CanvasEnv> {
 
   private exportSnapshot(): BackupEnvelope {
     const snapshot = this.getRoom().getCurrentSnapshot()
-    return wrapBackup(snapshot as BackupEnvelope['snapshot'])
+    return wrapBackup(snapshot as unknown as BackupEnvelope['snapshot'])
   }
 
   override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
