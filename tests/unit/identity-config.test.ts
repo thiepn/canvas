@@ -30,17 +30,17 @@ test('theme preference defaults to system and rejects malformed values', () => {
   storage.setItem('canvas.theme.v1', 'anything'); assert.equal(loadTheme(storage), 'system')
 })
 test('local config works with no license and creates the single world WS URL', () => {
-  assert.equal(createPublicConfig(undefined, undefined, 'http://localhost:5173/Canvas/').websocketUrl, 'ws://127.0.0.1:8787/api/connect/main')
+  assert.equal(createPublicConfig(undefined, undefined, 'http://localhost:5173/canvas/').websocketUrl, 'ws://127.0.0.1:8787/api/connect/main')
 })
 test('production configuration requires a key and secure backend', () => {
-  assert.throws(() => createPublicConfig('https://canvas.example', '', 'https://example.github.io/Canvas/'), /license/)
-  assert.throws(() => createPublicConfig('http://canvas.example', 'public-test-placeholder', 'https://example.github.io/Canvas/'), /HTTPS/)
-  assert.equal(createPublicConfig('https://canvas.example/', 'public-test-placeholder', 'https://example.github.io/Canvas/').websocketUrl, 'wss://canvas.example/api/connect/main')
+  assert.throws(() => createPublicConfig('https://canvas.example', '', 'https://example.github.io/canvas/'), /license/)
+  assert.throws(() => createPublicConfig('http://canvas.example', 'public-test-placeholder', 'https://example.github.io/canvas/'), /HTTPS/)
+  assert.equal(createPublicConfig('https://canvas.example/', 'public-test-placeholder', 'https://example.github.io/canvas/').websocketUrl, 'wss://canvas.example/api/connect/main')
 })
 test('configuration rejects URL credentials, paths and malformed origins', () => {
   for (const url of ['ftp://example.com', 'not a URL', 'https://a:b@example.com', 'https://example.com/api', 'https://example.com?key=x']) assert.throws(() => createPublicConfig(url, 'test', 'https://host.example/'))
 })
 test('Pages base path supports repository and custom-domain roots', () => {
-  assert.equal(normalizeBasePath('/Canvas'), '/Canvas/'); assert.equal(normalizeBasePath('/'), '/')
-  for (const path of ['Canvas', '/a/../b', '/a?b', '/a#b', '/a\\b']) assert.throws(() => normalizeBasePath(path))
+  assert.equal(normalizeBasePath('/canvas'), '/canvas/'); assert.equal(normalizeBasePath('/'), '/')
+  for (const path of ['canvas', '/a/../b', '/a?b', '/a#b', '/a\\b']) assert.throws(() => normalizeBasePath(path))
 })
