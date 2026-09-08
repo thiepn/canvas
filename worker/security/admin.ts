@@ -31,5 +31,5 @@ export async function readLimitedBody(request: Request, maxBytes: number): Promi
   const result = new Uint8Array(total)
   let offset = 0
   for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength }
-  return new TextDecoder('utf-8', { fatal: true }).decode(result)
+  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(result)
 }
