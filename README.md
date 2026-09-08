@@ -4,50 +4,59 @@ A lightweight persistent realtime infinite canvas for drawing, writing, and thin
 
 **One world. No accounts. No uploads. Open the link and work on the same sheet.**
 
-## Release status — 1.0.0-rc.1
+## Release status
 
-This repository contains the application source, Worker, recovery tooling, test suites, and deployment workflows. **It is a source release candidate, not a certified production release.** The authoring runner could not reach the npm registry. Consequently, no real dependency lockfile, installed SDK integration check, production bundle, or browser certification was produced there.
+Canvas `1.0.0-rc.1` is implemented on the `release/canvas-v1-hardening` branch and tracked in PR #1. The application, Worker, recovery tooling, tests, lockfile, CI, Pages workflow, PWA assets, and deployment documentation are present.
 
-The dependency-independent suite **passes 33 tests**, including real SQLite backup persistence and transactional recovery tests. A strict type check of that tested core and syntax checks of all application/test/script sources passed. The remaining gates are explicit in [AUDIT.md](AUDIT.md); they must pass before publication. Browser tests and benchmark code are included, but their existence is not a claim that they ran successfully.
+Release certification is evidence-driven. The hardening suite has already demonstrated 33/33 unit tests, 5/5 Worker integration tests, and a complete Chromium/Firefox/WebKit collaboration run with 61 passed and four intentional skips. A dedicated Chromium large-scene benchmark also passed at 100, 1,000, 5,000, and 10,000 persisted shapes. The exact final branch head must still have a green `Canvas checks and Pages` workflow before merge; see [AUDIT.md](AUDIT.md) and [TESTING.md](TESTING.md).
 
-## Application
+## What Canvas does
 
-The source integrates text and lightweight formatting, vector pen/highlighter strokes, rectangles, ellipses, diamonds, lines, arrows/connectors, frames, and native selection, movement, resize, rotation, grouping, copy/paste, eraser, undo, and redo. The surrounding Canvas interface adds Home, fit-content, mobile-accessible undo/redo and zoom controls, a reduced toolbar, local display-name editing, connected presence, connection feedback, system/light/dark appearance, and JSON export.
+Canvas is one permanent shared sheet. It provides:
 
-The editor's existing interaction and collaboration machinery is retained rather than replaced with custom full-scene saves. Media is blocked both in the frontend and on the server. URLs paste as plain text; there is no preview scraper or asset bucket. Frames organize regions within the same page.
+- text and lightweight text styling;
+- vector pen and highlighter strokes;
+- rectangle, ellipse, diamond, line, arrow, and frame tools;
+- native selection, move, resize, rotate, group/ungroup, duplicate, copy/paste, delete, eraser, undo, and redo;
+- live cursors, names, selection presence, collaborator list, and connection state;
+- Home, fit-content, zoom, touch/mobile controls, system/light/dark appearance, and JSON export;
+- server-authoritative persistence and rolling administrative recovery snapshots.
 
-A manifest, icons, and a scoped service worker support installation and static-shell caching. **A backend connection is required for collaboration.** After a detected disconnect, editing pauses; the official sync client retains pending work in the current tab and attempts to reconnect. Do not close an offline tab without exporting a recovery copy. `Live` means connected, not a durability acknowledgement for every individual keystroke.
+Images, video, audio, PDFs, file attachments, embeds, asset libraries, and binary paste/drop are deliberately disabled in both frontend and backend. URLs paste as text. Frames are the organizational primitive; there are no boards, workspaces, accounts, permissions, comments, chat, tasks, or AI features.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  A[GitHub Pages: React / Vite / tldraw] <-->|HTTPS + WebSocket| B[Cloudflare Worker]
-  B --> C[One Durable Object: main]
-  C --> D[SQLite: native sync records]
-  C --> E[SQLite: compressed rolling backups]
+  A[GitHub Pages\nReact + Vite + tldraw] <-->|HTTPS + WebSocket| B[Cloudflare Worker]
+  B --> C[Durable Object\nmain]
+  C --> D[SQLite\ntldraw sync records]
+  C --> E[SQLite\ncompressed recovery snapshots]
 ```
 
-The editor and official synchronization packages are pinned together to **tldraw 5.4.1**. There is no separate database, R2 bucket, managed multiplayer subscription, account service, or always-running server. See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision, boundaries, and failure model, and [RESEARCH.md](RESEARCH.md) for the official sources checked on 8 September 2026.
+The editor and synchronization packages are pinned together to **tldraw 5.4.0**. The GitHub v5.4.1 release exists, but the complete 5.4.1 npm package family was not published together during hardening, so using it produced an npm `ETARGET`. Pinning one tested version across `tldraw`, `@tldraw/sync`, `@tldraw/sync-core`, `@tldraw/tlschema`, and `@tldraw/assets` avoids a mixed protocol/schema stack.
 
-## Run locally
+The Durable Object uses tldraw's SQLite sync storage and Cloudflare's WebSocket Hibernation API. Presence is ephemeral. Persistent document records use record-level synchronization rather than repeated whole-scene replacement. No PostgreSQL, Supabase, Firebase, Redis, R2, paid realtime provider, or always-on VPS is required.
 
-Use a current Node.js 22 LTS patch release or a compatible newer LTS release. The executable core was checked under Node 22.16.0. An internet connection is required for the first npm installation.
+See [ARCHITECTURE.md](ARCHITECTURE.md) and [RESEARCH.md](RESEARCH.md).
+
+## Local development
+
+Requires Node.js `>=22.16.0` and npm.
 
 ```sh
-cd Canvas
-npm install
+git clone https://github.com/thiepn/canvas.git
+cd canvas
+npm ci
 cp .env.example .env
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173/Canvas/`. The combined command starts the frontend and local Wrangler backend at port 8787. Alternatively, use `npm run dev:worker` and `npm run dev:web` in separate terminals. Local SQLite is under `.wrangler/`; deleting it deletes the **local** world, not the deployed world.
+Open `http://127.0.0.1:5173/canvas/`. `npm run dev` starts Vite and the local Wrangler Worker. Local Durable Object data lives under `.wrangler/` and is separate from production.
 
-On Windows, copy the example file using File Explorer or `Copy-Item .env.example .env` in PowerShell. A localhost tldraw license key is not required. Generate an optional local administration token in `.dev.vars` using [.dev.vars.example](.dev.vars.example); ordinary drawing does not need it.
+A tldraw production license key is not required on localhost. Optional administrative backup/restore commands use the local token described in `.dev.vars.example`.
 
-**Bootstrap requirement:** installation must generate a genuine `package-lock.json`. Review `npm audit`, run the complete checks, and commit the lockfile. Do not replace it with a root-only placeholder. Subsequent installations and releases should use `npm ci`.
-
-## Check the implementation
+## Verification
 
 ```sh
 npm run lint
@@ -62,48 +71,71 @@ npm run test:production
 npm run test:performance
 ```
 
-`npm run check` combines the main checks, excluding the separately invoked large-scene benchmark. `test:production` builds an optimized **local-backend** preview into `.preview-dist` and uses isolated test storage; it never tests against the real world or overwrites `dist`. Tests contain a known local-only admin token; the test Worker configuration refuses public hostnames.
+The CI quality gate additionally runs `npm audit --audit-level=high`. A patched `sharp 0.35.4` transitive override is retained because the current Wrangler/Miniflare dependency graph otherwise resolves an advisory-affected `sharp 0.35.2`; the Worker suite verifies that override against the actual development runtime.
 
-The normal production bundle excludes the test bridge. `scripts/audit-build.mjs` checks for its accidental inclusion and writes actual bundle measurements after a successful build. The preview smoke test also records an actual editor screenshot in `artifacts/Canvas-desktop.png`. No fabricated screenshot or benchmark is included in this candidate.
+### Performance evidence
 
-## Deploy
+The dedicated GitHub-hosted Chromium benchmark persisted real shared-state shapes through the Worker and measured the synchronized client afterward:
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete sequence. The only owner-supplied configuration is your Cloudflare account/deployment, allowed frontend origins, public backend URL, tldraw production key, and private recovery token.
+| Shapes | Persist + generate | Serialized scene | Median frame | p95 frame | JS heap |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 2.18 s | 35.6 KB | 16.7 ms | 16.8 ms | 38 MiB |
+| 1,000 | 5.78 s | 358 KB | 16.7 ms | 16.9 ms | 88 MiB |
+| 5,000 | 26.9 s | 1.80 MB | 16.7 ms | 19.4 ms | 239 MiB |
+| 10,000 | 58.9 s | 3.59 MB | 18.5 ms | 26.0 ms | 825 MiB |
 
-The repository is named **Canvas**, and `/Canvas/` is the default Vite base. Production runs from static files; GitHub Pages never runs the Worker. The Pages workflow requires successful checks, a committed lockfile, production configuration, and explicit deployment enablement. A custom-domain deployment normally changes the base to `/`; it need not change the backend or world.
+The 10,000-shape result is deliberately treated as an upper-end stress case, not a normal target. Memory growth at that level is the clearest measured performance weakness. Canvas is optimized for a small shared world used by roughly ten people, not arbitrarily large diagrams.
 
-## Persistence and recovery
+## Persistence, reconnect, and recovery
 
-Shared document state is stored by the native sync SQLite adapter, not by one browser. Presence is ephemeral. In particular, the SDK's current-user store is deliberately null to avoid its newer persistent attribution/user-record behavior; the anonymous identity feeds only presence and local preferences.
+The authoritative world is stored in Durable Object SQLite. Closing every browser does not delete it. tldraw sync handles record-level convergence and local collaborative undo semantics. Temporary disconnection is visible in the UI; editing pauses when the application knows it is offline, and the sync client reconnects automatically when connectivity returns.
 
-Automatic backup alarms are scheduled by document changes, not by an idle polling loop. Backups are gzip-compressed, checked with SHA-256, chunked into SQL rows, and rotated transactionally. Retention allows up to 16 recent, seven daily, four manual, four pre-restore, and four pre-deletion backups, within a total compressed-data budget of 64 MiB. The byte cap can reduce those counts. Unchanged worlds are not duplicated every day. Pre-deletion capture is limited to once per minute.
+Recovery snapshots are gzip-compressed, SHA-256 checked, chunked into SQLite rows, and rotated. Automatic, daily, pre-deletion, pre-restore, and manual snapshot kinds are supported within a bounded retention budget. Restore is intentionally not exposed in the anonymous public UI: the owner uses the administration CLI/endpoint with `ADMIN_TOKEN`, zero active clients, and an `If-Match` world clock. A pre-restore snapshot is taken before destructive replacement.
 
-Export a JSON backup from the Canvas menu. Restoring the entire world is deliberately **not** a public editor feature. The owner uses the CLI and a separate secret, closes all tabs, reviews the current clock, and explicitly confirms the restore. A pre-restore backup is taken first. See the recovery runbook in [DEPLOYMENT.md](DEPLOYMENT.md).
+## Deployment
 
-## Limits and omissions
+The intended frontend URL is:
 
-The target is approximately ten active friends; the hard connection ceiling is 20 to leave room for multiple tabs. The world has both a 10,000-shape ceiling and an 8 MiB serialized-record budget. A record is limited to 128 KiB and a text object to 20,000 characters. Large selections may need to be pasted in smaller groups. Native vector stroke geometry is preserved; no second simplification pass is added.
+`https://thiepn.github.io/canvas/`
 
-There is no public world import, search, landmarks menu, separate rooms, permissions, comments, chat, tasks, AI, or binary upload. Native zoom and Home/fit navigation remain. Long-duration offline-first editing is intentionally not promised. Real Safari/iPad stylus behavior, large-scene performance, and deployed hibernation still require the release checks described in [TESTING.md](TESTING.md).
+The Worker configuration already allows the `https://thiepn.github.io` origin plus localhost development origins. The repository-project Vite base is `/canvas/`; use `/` for a future custom domain.
 
-## Access, costs, and licensing
+Deployment requires only owner-controlled configuration:
 
-**Anyone who can reach the Canvas can read and edit it.** Display names are not authentication, and an origin allowlist is not privacy protection. Do not put confidential information into this world. No analytics or tracking service is added. See [SECURITY.md](SECURITY.md).
+1. authenticate Wrangler and deploy the Worker;
+2. create a strong Cloudflare `ADMIN_TOKEN` secret;
+3. set GitHub variable `VITE_CANVAS_API_URL` to the deployed HTTPS Worker origin;
+4. set GitHub secret `VITE_TLDRAW_LICENSE_KEY` to a valid tldraw production key;
+5. set `VITE_BASE_PATH=/canvas/`;
+6. select GitHub Actions as the Pages source;
+7. set `CANVAS_DEPLOY_ENABLED=true` only when the backend configuration is ready;
+8. merge the certified release branch.
 
-The architecture targets free-tier personal usage, not guaranteed zero cost under arbitrary public traffic. A tldraw production key is required. Free hobby keys are discretionary and retain a watermark; trial or commercial terms differ. A missing production key produces a configuration error instead of pretending that deployment is usable. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the licensing and telemetry details.
+Exact commands and the recovery runbook are in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+## Security and privacy model
+
+**Anyone who can reach Canvas can read and edit the shared world.** Names and colors are presence hints, not identity proof. The origin allowlist prevents accidental embedding/origin use; it is not authentication or cryptographic privacy.
+
+Canvas adds no analytics, ad tracking, account database, or upload storage. Backend input is bounded and validated, unsupported persistent record types are rejected, and administrative restore requires a secret that never enters the frontend bundle. Do not store confidential information in an anonymous shared world.
+
+See [SECURITY.md](SECURITY.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Licensing
+
+Application-specific source is MIT licensed. tldraw and its assets retain their own license terms. Production use requires a valid tldraw license key; qualifying hobby use may use tldraw's hobby license and required watermark. Trial/hobby key validation behavior is documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Repository map
 
 | Location | Responsibility |
 | --- | --- |
-| `app/` | Editor integration, Canvas interface, local preferences and clipboard guards |
-| `shared/` | Product limits, record policy, backup format, bounded JSON validation |
-| `worker/` | Single-world routing, native sync Durable Object, limits and SQL backups |
-| `scripts/` | Development, administration, build audit and release verification |
-| `tests/unit/` | Runnable core and real SQLite backup tests |
-| `tests/worker/` | Local Wrangler HTTP and process-restart tests |
-| `tests/e2e/` | Multiplayer, interaction, responsive, preview and stress regressions |
-| `.github/workflows/` | Checks, gated Pages deployment, manual performance workflow |
-| `docs/evidence/` | Actual authoring-runner evidence, not simulated browser results |
+| `app/` | Editor integration, product chrome, identity, clipboard/media guards |
+| `shared/` | Record policy, limits, recovery format, bounded JSON utilities |
+| `worker/` | One-world routing, Durable Object sync, validation, backups |
+| `scripts/` | Local orchestration, administration, build/release checks |
+| `tests/unit/` | Identity/config/policy/recovery/storage unit coverage |
+| `tests/worker/` | Local Wrangler HTTP, persistence, restart, and backend guards |
+| `tests/e2e/` | Collaboration, reconnect, undo, media rejection, responsive and stress cases |
+| `.github/workflows/` | Read-only quality CI, gated Pages deployment, manual performance evidence |
 
-Application-specific source is MIT-licensed. That does not relicense the tldraw SDK or its assets. Future changes should first improve verified reliability and recovery, not add more product categories.
+Future work should improve measured reliability, recovery, and large-scene efficiency before expanding the product surface.
