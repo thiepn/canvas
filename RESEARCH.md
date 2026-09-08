@@ -1,31 +1,91 @@
 # Research record
 
-Checked on **8 September 2026** using official documentation and current upstream source. The selected tldraw release was verified as **v5.4.1**, published 2026-09-08 at 10:52:18 UTC. The current Cloudflare starter's package manifest and source were inspected, not copied from an old blog post.
+Technical choices were rechecked against current upstream documentation and source during the September 2026 release hardening.
+
+## Engine decision
+
+### tldraw
+
+tldraw remains the best fit for Canvas because its SDK supplies the difficult editor behavior—selection, transforms, arrows, frames, touch, text, drawing, undo—and its official sync stack supplies record-level multiplayer, presence, schema migration, reconnect, conflict reconciliation, and a Cloudflare Durable Object/SQLite reference architecture.
+
+The GitHub project released **v5.4.1 on 8 September 2026**, but the complete v5.4.1 npm family was not published together: `@tldraw/sync@5.4.1` returned npm `ETARGET` in the first real GitHub Actions install. The release therefore pins the complete interoperating SDK family to **5.4.0**, which is available and has been integration-tested together:
+
+- `tldraw@5.4.0`
+- `@tldraw/assets@5.4.0`
+- `@tldraw/sync@5.4.0`
+- `@tldraw/sync-core@5.4.0`
+- `@tldraw/tlschema@5.4.0`
+
+Using one exact version across schema/client/server packages is safer than mixing a GitHub tag with unavailable npm artifacts.
+
+The implementation also switched from the Vite-specific `@tldraw/assets/imports.vite` helper to the documented standards-based `getAssetUrlsByMetaUrl()` loader. With Vite 8/Rolldown, the former caused the dependency optimizer to reject translation `?url` imports in development even though a production build succeeded. The standards-based loader works in both development/E2E and production.
+
+### Excalidraw
+
+Excalidraw remains an attractive MIT-licensed fallback and provides the relevant canvas primitives. Its packaged editor does not turn its hosted-app collaboration service into a drop-in multiplayer backend, so choosing it would require owning more synchronization behavior. For this product, that would increase correctness risk precisely where correctness is the highest priority.
+
+### Custom Konva/Yjs stack
+
+A custom rendering/editor layer plus Yjs could be built, but would duplicate substantial interaction and canvas-engine behavior for no product benefit. It was rejected for V1.
+
+## Cloudflare decision
+
+One SQLite-backed Durable Object is sufficient for the one-world product. Current Cloudflare APIs support:
+
+- WebSocket Hibernation via `acceptWebSocket` and Durable Object WebSocket event handlers;
+- serialized per-socket attachments for hibernation reconstruction;
+- WebSocket auto-response so tldraw ping/pong traffic need not continually wake the object;
+- SQLite-backed durable storage within the Durable Object;
+- alarms for bounded backup scheduling without a permanent interval loop.
+
+Canvas therefore uses one world ID, `main`, and no D1, PostgreSQL, Redis, R2, external queue, managed realtime provider, or always-on server.
 
 ## Sources
 
 | ID | Official source | Decision supported |
 | --- | --- | --- |
-| R1 | [tldraw sync documentation](https://tldraw.dev/docs/sync) | Official client/server synchronization instead of a separate whole-scene protocol |
-| R2 | [Cloudflare multiplayer starter](https://github.com/tldraw/tldraw-sync-cloudflare) | SQLite adapter, hibernation handlers, session snapshot/resume and ping auto-response |
-| R3 | [tldraw v5.4.1 source](https://github.com/tldraw/tldraw/tree/v5.4.1) and [release](https://github.com/tldraw/tldraw/releases/tag/v5.4.1) | Actual installed-version APIs to target; `useSync`, authorizers, native chunking, persistent user-attribution behavior |
-| R4 | [Excalidraw package FAQ](https://docs.excalidraw.com/docs/@excalidraw/excalidraw/faq) | Collaboration is not a drop-in feature shipped in the npm component |
-| R5 | [Excalidraw license](https://github.com/excalidraw/excalidraw/blob/master/LICENSE) | MIT licensing verified; attractive alternative, but additional sync integration is required |
-| R6 | [Durable Objects WebSocket best practices](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) | Current platform hibernation API, attachments, and auto-response boundary |
-| R7 | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) and [overview](https://developers.cloudflare.com/durable-objects/) | SQLite-backed DO availability and conditional free-tier cost model |
-| R8 | [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages) | Static frontend deployment via official Actions/artifacts, not a server on Pages |
-| R9 | [tldraw license](https://tldraw.dev/community/license) and [pricing](https://tldraw.dev/pricing) | Production-key requirement, hobby/trial/commercial distinctions and stated telemetry behavior |
-| R10 | [External content](https://tldraw.dev/sdk-features/external-content) | Supported asset/content handler overrides rather than relying solely on hiding buttons |
-| R11 | [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) | Worker/DO bindings, SQLite migration and configuration format |
-| R12 | [Workers testing](https://developers.cloudflare.com/workers/testing/) | Real local Wrangler runtime plus separate core and browser tests; no invented mock hibernation certification |
-| R13 | [Playwright test configuration](https://playwright.dev/docs/test-configuration) | Separate browsers, isolated contexts, real web-server test setup and traces |
+| R1 | [tldraw sync documentation](https://tldraw.dev/docs/sync) | Official record-level synchronization rather than whole-scene overwrite |
+| R2 | [tldraw Cloudflare multiplayer starter](https://github.com/tldraw/tldraw-sync-cloudflare) | SQLite sync storage, Durable Object routing, hibernation/session-resume pattern |
+| R3 | [tldraw v5.4.0 source](https://github.com/tldraw/tldraw/tree/v5.4.0) | Exact APIs used by the installed package family |
+| R4 | [tldraw v5.4.1 release](https://github.com/tldraw/tldraw/releases/tag/v5.4.1) | Confirmed newer GitHub release; npm install evidence showed the complete package family was not available together |
+| R5 | [tldraw installation](https://tldraw.dev/installation) | Supported asset URL strategies including `getAssetUrlsByMetaUrl()` |
+| R6 | [tldraw external content](https://tldraw.dev/sdk-features/external-content) | Override content handlers and asset handling, not only toolbar visibility |
+| R7 | [tldraw licensing](https://tldraw.dev/community/license) | Production-key requirement and hobby/trial/commercial behavior |
+| R8 | [Excalidraw package FAQ](https://docs.excalidraw.com/docs/@excalidraw/excalidraw/faq) | Packaged editor collaboration boundary |
+| R9 | [Excalidraw MIT license](https://github.com/excalidraw/excalidraw/blob/master/LICENSE) | Sustainable licensing alternative verified |
+| R10 | [Cloudflare Durable Objects WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) | Hibernation, attachments, auto-response, reconnect considerations |
+| R11 | [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/) | SQLite-backed state and one-object coordination model |
+| R12 | [Cloudflare Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) | Personal/free-tier cost objective and hibernation incentive |
+| R13 | [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) | Current Worker/DO bindings and SQLite migration config |
+| R14 | [Workers testing](https://developers.cloudflare.com/workers/testing/) | Real local Worker runtime instead of backend mocks alone |
+| R15 | [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages) | Official artifact-based Pages deployment |
+| R16 | [Playwright configuration](https://playwright.dev/docs/test-configuration) | Isolated browser contexts, multiple engines, local web servers, traces |
+| R17 | [sharp package](https://www.npmjs.com/package/sharp) | `0.35.4` is the current patched sharp release used for the Wrangler/Miniflare transitive override |
 
-The implementation consulted the exact v5.4.1 source for `TLSocketRoom`, `TLSyncRoom`, `TLSyncStorage`, `chunk`, `useSync`, `TLUser`, `createTLSchema`, `Tldraw`, UI component overrides, tools, and external content handlers. Notably, the current-user API now supports persistent attribution records: Canvas keeps that store null and overrides only presence. Omitting this distinction would violate the anonymous presence-only requirement.
+## Current toolchain
 
-Official GitHub Actions releases/marketplace entries were rechecked during workflow creation: checkout 7.0.1, setup-node 7.0.0, upload-artifact 7.0.1, configure-pages 6.0.0, upload-pages-artifact 5.0.0, deploy-pages 5.0.1. The workflow uses exact release tags rather than stale examples from an older README. See the respective repositories under [github.com/actions](https://github.com/actions).
+The release lockfile pins the dependency graph. Key development tools are:
 
-## Dependency verification boundary
+- React 19.2.1;
+- TypeScript 5.8.3;
+- Vite 8.2.2;
+- `@vitejs/plugin-react` 6.1.1;
+- Playwright 1.63.0;
+- Wrangler 4.130.0.
 
-The selected SDK version and core public APIs were checked against upstream. React 19.2.1, Vite 8.0.16, its React plugin 6.0.1 and Wrangler 4.75.0 follow the inspected current starter's manifest; surrounding lint/test/type tooling is exact-pinned to known stable versions. This is **not** a claim that every development dependency is the newest available release.
+Wrangler 4.130.0 currently resolves a Miniflare build that requests `sharp 0.35.2`. npm audit flags that version because of bundled libheif vulnerabilities fixed in `sharp 0.35.4`. Canvas therefore uses an npm `overrides` entry for `sharp: 0.35.4`; the complete Worker dry-run, local persistence tests, browser tests, and dependency audit are release gates for that override.
 
-Package installation and registry resolution did not complete in the authoring runner. Compatibility of the entire resolved dependency graph, npm audit results, and the generated lockfile therefore remain unverified. Source inspection is not an adequate replacement for the required install/typecheck/build/browser gates. AUDIT.md records this as a release blocker.
+## Important implementation findings
+
+- `TLSocketRoom` owns the multiplayer protocol and conflict handling. Canvas does not layer another ad-hoc full-document protocol over it.
+- tldraw presence is distinct from persisted document records. Canvas supplies local anonymous identity through presence while rejecting persistent user records on the server.
+- hibernation destroys normal Durable Object in-memory state, so session-resume data is serialized onto sockets and authoritative document data remains in SQLite.
+- media must be blocked in several places: toolbar/content handlers, paste/drop guards, asset storage, and server record authorization. Hiding an image button alone is insufficient.
+- GitHub project Pages for this actual repository is case-sensitive `/canvas/`, not `/Canvas/`.
+- origin allowlisting is operational containment, not authentication. Anyone who can access the permitted frontend can edit the world.
+
+## Evidence boundary
+
+Local Wrangler/Playwright tests establish application behavior against the development Worker runtime. They do **not** prove that a production Cloudflare deployment has actually entered and resumed from platform hibernation; that remains a deployment verification item because no Cloudflare account deployment is performed by repository CI.
+
+Similarly, responsive/touch automation is not a substitute for physical iPad/stylus testing. These limitations are carried explicitly into [AUDIT.md](AUDIT.md) rather than being treated as passed by inference.
