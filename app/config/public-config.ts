@@ -17,7 +17,7 @@ export function createPublicConfig(apiValue: string | undefined, licenseValue: s
   ws.protocol = api.protocol === 'https:' ? 'wss:' : 'ws:'
   return { apiUrl: api.origin, websocketUrl: ws.href, licenseKey: key }
 }
-export function normalizeBasePath(value = '/Canvas/'): string {
-  if (!value.startsWith('/') || /[?#\\]/.test(value) || value.split('/').includes('..')) throw new Error('VITE_BASE_PATH must be an absolute URL path, for example /Canvas/ or /.')
+export function normalizeBasePath(value = '/canvas/'): string {
+  if (!value.startsWith('/') || /[?#\\]/.test(value) || value.split('/').includes('..')) throw new Error('VITE_BASE_PATH must be an absolute URL path, for example /canvas/ or /.')
   return value.endsWith('/') ? value : `${value}/`
 }
