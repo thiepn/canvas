@@ -23,7 +23,7 @@ export const test = base.extend<{ peer: PeerFactory }>({
         }
       })
       const page = await context.newPage()
-      await page.goto(`${ORIGIN}/Canvas/`)
+      await page.goto(`${ORIGIN}/canvas/`)
       await expect(page.getByRole('status').filter({ hasText: /^Live$/ })).toBeVisible()
       await page.waitForFunction(() => !!window.__CANVAS_TEST__)
       return { page, context }
