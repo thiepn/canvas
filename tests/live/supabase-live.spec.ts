@@ -22,9 +22,13 @@ async function cleanTestWorld() {
 }
 
 async function latestActiveId(): Promise<string> {
-  const { data, error } = await supabase.from(TABLE).select('id,is_deleted,updated_at').eq('is_deleted', false).order('updated_at', { ascending: false }).limit(1)
+  const { data, error } = await supabase.from(TABLE).select('id,element,is_deleted,updated_at').eq('is_deleted', false).order('updated_at', { ascending: false }).limit(1)
   if (error) throw error
-  return data?.[0]?.id ?? ''
+  const row = data?.[0]
+  // A real drag emits intermediate versions before mouse-up. An ID alone is
+  // not a save barrier: wait for the final gesture geometry (130 by 80).
+  if (row?.element?.type !== 'rectangle' || row.element.width !== 130 || row.element.height !== 80) return ''
+  return row.id
 }
 
 async function activeRow(id: string): Promise<StoredRow | null> {
@@ -121,6 +125,18 @@ test('same-element equal-version conflict converges in both real clients', async
     const elementId = await createRectangle(pageA)
     await expect.poll(async () => Boolean(await exportElement(pageB, elementId))).toBe(true)
 
+    // Inject the tie only after both clients and the database agree on the
+    // finished drag. Otherwise an in-flight higher version legitimately wins.
+    await expect.poll(async () => {
+      const [row, a, b] = await Promise.all([
+        activeRow(elementId), exportElement(pageA, elementId), exportElement(pageB, elementId),
+      ])
+      return Boolean(row && a && b && [a, b].every(element =>
+        element.version === row.version && element.versionNonce === row.version_nonce &&
+        element.width === 130 && element.height === 80,
+      ))
+    }, { message: 'Both client scenes and the database must agree on the finished rectangle.' }).toBe(true)
+
     const stored = await activeRow(elementId)
     if (!stored) throw new Error('Persisted rectangle disappeared before conflict test.')
     const currentX = Number(stored.element.x)
@@ -135,6 +151,9 @@ test('same-element equal-version conflict converges in both real clients', async
       updated_by: 'same-element-conflict-test',
     }).eq('id', elementId)
     expect(error).toBeNull()
+    await expect.poll(() => activeRow(elementId)).toMatchObject({
+      version: stored.version, version_nonce: winningNonce, element: { x: winningX },
+    })
 
     await expect.poll(async () => Number((await exportElement(pageA, elementId))?.x)).toBe(winningX)
     await expect.poll(async () => Number((await exportElement(pageB, elementId))?.x)).toBe(winningX)
