@@ -17,8 +17,8 @@ The authoritative current evidence is:
 - [`../verification.json`](../verification.json) — machine-readable release record;
 - [`../../TESTING.md`](../../TESTING.md) — test strategy, exact counts, performance evidence, and remaining platform-only checks;
 - [`../../AUDIT.md`](../../AUDIT.md) — final quality audit and known limitations;
-- GitHub Actions for PR #1 / the final `main` merge SHA.
+- GitHub Actions run `34298529147` for application release commit `f429294102146b61107de0427b360fab4c1f9f89` on `main`.
 
-The certified implementation run (`34296811474`, implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f`) passed dependency installation and audit, lint, strict type checking, 33 unit/storage tests, 5 real Worker/Durable Object integration tests, production Worker dry-run, optimized build, **62 Chromium/Firefox/WebKit E2E tests with 4 intentional platform-specific skips and zero failures/flakes**, and optimized production-preview smoke. The recorded npm audit reported **zero vulnerabilities at all severities**.
+That exact post-merge `main` run passed dependency installation and audit, lint, strict type checking, 33 unit/storage tests, 5 real Worker/Durable Object integration tests, production Worker dry-run, optimized build, **62 expected Chromium/Firefox/WebKit E2E passes with 4 intentional project-specific skips, zero unexpected failures, and zero flaky tests**, plus optimized production-preview smoke. Its retained npm-audit artifact reports **zero vulnerabilities at all severities**.
 
 The historical logs remain here solely to make the transition from the constrained authoring environment to repository-based certification auditable rather than rewriting or deleting the earlier evidence.
