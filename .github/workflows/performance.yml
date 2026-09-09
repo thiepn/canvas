@@ -1,6 +1,8 @@
 name: Canvas performance evidence
 on:
   workflow_dispatch:
+  push:
+    branches: [phase1/diagnostics-baseline]
 permissions:
   contents: read
 defaults:
