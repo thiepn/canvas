@@ -229,7 +229,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (!changed) return
     const reconciled = reconcileElements(
       localElements as Parameters<typeof reconcileElements>[0],
-      remoteElements as Parameters<typeof reconcileElements>[1],
+      remoteElements as unknown as Parameters<typeof reconcileElements>[1],
       editor.getAppState(),
     )
     applyingRemote.current = true
