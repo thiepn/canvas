@@ -37,41 +37,47 @@ test('two live clients persist and synchronize a real rectangle through Supabase
   pageB.on('pageerror', error => pageErrors.push(`B: ${error.message}`))
 
   try {
-    await Promise.all([pageA.goto('./'), pageB.goto('./')])
-    await expect(pageA.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
-    await expect(pageB.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
-    await expect(pageA.getByText('Live', { exact: true })).toBeVisible()
-    await expect(pageB.getByText('Live', { exact: true })).toBeVisible()
-
-    const surfaceA = pageA.locator('.live-excalidraw')
-    const boxA = await surfaceA.boundingBox()
-    if (!boxA) throw new Error('Live Excalidraw surface has no bounding box.')
-    await pageA.getByRole('button', { name: /rectangle/i }).first().click()
-    await pageA.mouse.move(boxA.x + 300, boxA.y + 250)
-    await pageA.mouse.down()
-    await pageA.mouse.move(boxA.x + 430, boxA.y + 330, { steps: 8 })
-    await pageA.mouse.up()
+    await test.step('connect both clients to the live Supabase canvas', async () => {
+      await Promise.all([pageA.goto('./'), pageB.goto('./')])
+      await expect(pageA.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
+      await expect(pageB.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
+      await expect(pageA.getByText('Live', { exact: true })).toBeVisible()
+      await expect(pageB.getByText('Live', { exact: true })).toBeVisible()
+      await expect(pageB.getByLabel('2 people connected')).toBeVisible()
+    })
 
     let elementId = ''
-    await expect.poll(async () => {
-      elementId = await latestActiveId()
-      return elementId
-    }).not.toBe('')
+    await test.step('client A creates and persists a rectangle', async () => {
+      const surfaceA = pageA.locator('.live-excalidraw')
+      const boxA = await surfaceA.boundingBox()
+      if (!boxA) throw new Error('Live Excalidraw surface has no bounding box.')
+      await pageA.getByRole('radio', { name: /^Rectangle\b/i }).click()
+      await pageA.mouse.move(boxA.x + 300, boxA.y + 250)
+      await pageA.mouse.down()
+      await pageA.mouse.move(boxA.x + 430, boxA.y + 330, { steps: 8 })
+      await pageA.mouse.up()
 
-    await expect(pageB.getByLabel('2 people connected')).toBeVisible()
-    const surfaceB = pageB.locator('.live-excalidraw')
-    const boxB = await surfaceB.boundingBox()
-    if (!boxB) throw new Error('Peer Excalidraw surface has no bounding box.')
-    await pageB.getByRole('button', { name: /eraser/i }).first().click()
-    await pageB.mouse.move(boxB.x + 280, boxB.y + 290)
-    await pageB.mouse.down()
-    await pageB.mouse.move(boxB.x + 450, boxB.y + 290, { steps: 12 })
-    await pageB.mouse.up()
+      await expect.poll(async () => {
+        elementId = await latestActiveId()
+        return elementId
+      }).not.toBe('')
+    })
 
-    await expect.poll(() => isDeleted(elementId)).toBe(true)
+    await test.step('client B receives and deletes the rectangle', async () => {
+      const surfaceB = pageB.locator('.live-excalidraw')
+      const boxB = await surfaceB.boundingBox()
+      if (!boxB) throw new Error('Peer Excalidraw surface has no bounding box.')
+      await pageB.getByRole('radio', { name: /^Eraser\b/i }).click()
+      await pageB.mouse.move(boxB.x + 280, boxB.y + 290)
+      await pageB.mouse.down()
+      await pageB.mouse.move(boxB.x + 450, boxB.y + 290, { steps: 12 })
+      await pageB.mouse.up()
+
+      await expect.poll(() => isDeleted(elementId)).toBe(true)
+    })
+
     expect(pageErrors).toEqual([])
   } finally {
-    await contextA.close()
-    await contextB.close()
+    await Promise.allSettled([contextA.close(), contextB.close()])
   }
 })
