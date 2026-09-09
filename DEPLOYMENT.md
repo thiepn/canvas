@@ -1,6 +1,6 @@
 # Deployment and recovery
 
-This repository is already published at `thiepn/canvas`. The release branch is `release/canvas-v1-hardening` and PR #1 carries the hardening work. Do not deploy a different copy of the original source archive.
+The hardened Canvas source is merged to `main` in `thiepn/canvas`. PR #1 is historical; application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality workflow in GitHub Actions run `34298529147`. Do not deploy a different copy of the original source archive.
 
 The intended initial frontend URL is:
 
@@ -15,7 +15,7 @@ Requires Node.js `>=22.16.0` and npm.
 ```sh
 git clone https://github.com/thiepn/canvas.git
 cd canvas
-git switch release/canvas-v1-hardening
+git switch main
 npm ci
 npx playwright install --with-deps chromium firefox webkit
 npm run check
@@ -144,7 +144,7 @@ In `thiepn/canvas`:
    - `VITE_BASE_PATH=/canvas/`
 3. **Actions secrets:** set:
    - `VITE_TLDRAW_LICENSE_KEY=<your valid tldraw production key>`
-4. Leave `CANVAS_DEPLOY_ENABLED` unset/false until PR #1 is fully green and the deployed Worker has been checked.
+4. Leave `CANVAS_DEPLOY_ENABLED` unset/false until the deployed Worker has been checked.
 5. When ready to publish, set repository variable `CANVAS_DEPLOY_ENABLED=true`.
 
 All `VITE_` values are embedded into browser JavaScript. The tldraw SDK key is therefore public at runtime even though GitHub stores its source value as an Actions secret. `ADMIN_TOKEN` must never be a Vite value.
@@ -159,11 +159,19 @@ For this personal/noncommercial project, apply for/use a hobby key if tldraw app
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## 7. Merge and deploy Pages
+## 7. Enable and deploy Pages
 
-PR #1 should have a green `Canvas checks and Pages / quality` check on its **exact final head** before merge. Do not use an older green run after later commits.
+The release is already merged to `main`, and exact merge commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete quality workflow in run `34298529147`. Its `deploy-pages` job was skipped because `CANVAS_DEPLOY_ENABLED` was not true; this was a deployment gate, not a test failure.
 
-After explicit approval to merge, merge PR #1 into `main`. A `main` push will rerun the quality job. The Pages deployment job runs only when:
+After the Worker, GitHub variables, and tldraw key are configured:
+
+1. set `CANVAS_DEPLOY_ENABLED=true`;
+2. open **Actions → Canvas checks and Pages → Run workflow**;
+3. dispatch the workflow on `main`.
+
+A later push to `main` also triggers the workflow, but changing a repository variable alone does **not** create a new push event. Use manual workflow dispatch if there is no subsequent code/documentation change.
+
+The Pages deployment job runs only when:
 
 - quality passes;
 - the ref is `main`;
