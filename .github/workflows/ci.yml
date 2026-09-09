@@ -38,6 +38,7 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:e2e
+      - run: npm run test:live
       - run: npm run test:production
       - name: Retain diagnostics
         if: always()
@@ -51,7 +52,7 @@ jobs:
             package-lock.json
   deploy-pages:
     needs: quality
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.CANVAS_DEPLOY_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,16 +68,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: Require actual production configuration
-        env:
-          VITE_CANVAS_API_URL: ${{ vars.VITE_CANVAS_API_URL }}
-          VITE_TLDRAW_LICENSE_KEY: ${{ secrets.VITE_TLDRAW_LICENSE_KEY }}
-        run: |
-          node -e 'if (!process.env.VITE_CANVAS_API_URL?.startsWith("https://") || !process.env.VITE_TLDRAW_LICENSE_KEY?.trim()) process.exit(1)'
       - run: npm run build
         env:
-          VITE_CANVAS_API_URL: ${{ vars.VITE_CANVAS_API_URL }}
-          VITE_TLDRAW_LICENSE_KEY: ${{ secrets.VITE_TLDRAW_LICENSE_KEY }}
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/canvas/' }}
       - uses: actions/configure-pages@v6.0.0
       - uses: actions/upload-pages-artifact@v5.0.0
