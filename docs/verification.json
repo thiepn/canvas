@@ -7,8 +7,8 @@
     "fullName": "thiepn/canvas",
     "branch": "release/canvas-v1-hardening",
     "pullRequest": 1,
-    "lastFullyCertifiedImplementationHeadSha": "68f83d614a39388515cae2efe671832f07a65d00",
-    "lastFullyCertifiedWorkflowRun": 34294256800,
+    "lastFullyCertifiedImplementationHeadSha": "44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f",
+    "lastFullyCertifiedWorkflowRun": 34296811474,
     "pagesBasePath": "/canvas/",
     "expectedPagesUrl": "https://thiepn.github.io/canvas/"
   },
@@ -28,7 +28,7 @@
       "command": "npm audit --audit-level=high",
       "status": "passed",
       "vulnerabilities": { "info": 0, "low": 0, "moderate": 0, "high": 0, "critical": 0, "total": 0 },
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "unit-tests",
@@ -36,7 +36,7 @@
       "status": "passed",
       "passed": 33,
       "failed": 0,
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "worker-integration",
@@ -44,39 +44,39 @@
       "status": "passed",
       "passed": 5,
       "failed": 0,
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "strict-types",
       "command": "npm run typecheck",
       "status": "passed",
       "scope": "frontend/shared and Worker projects",
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "lint",
       "command": "npm run lint",
       "status": "passed",
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "worker-dry-run",
       "command": "npm run check:worker",
       "status": "passed",
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "production-build",
       "command": "npm run build",
       "status": "passed",
       "javascriptGzipBytes": 601531,
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "cross-browser-e2e",
       "command": "npm run test:e2e",
       "status": "passed",
-      "passed": 59,
+      "passed": 62,
       "failed": 0,
       "skipped": 4,
       "flaky": 0,
@@ -85,7 +85,15 @@
         "ten-client stress is intentionally executed once in Chromium; functional multiplayer still runs in all three engines",
         "CDP multi-touch injection is Chromium-only; responsive/touch-independent cases still run cross-browser"
       ],
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
+    },
+    {
+      "name": "required-tool-matrix",
+      "status": "passed",
+      "browsers": ["chromium", "firefox", "webkit"],
+      "coverage": ["rectangle", "ellipse", "diamond", "line", "arrow", "frame", "highlighter", "eraser", "server persistence"],
+      "note": "eraser uses tldraw's native hollow-shape outline hit semantics and is exercised by sweeping through the target outline",
+      "evidenceRun": 34296811474
     },
     {
       "name": "production-preview",
@@ -93,40 +101,40 @@
       "status": "passed",
       "passed": 1,
       "failed": 0,
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "ten-client-convergence",
       "status": "passed",
       "contexts": 10,
       "browser": "chromium",
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "collaborative-undo",
       "status": "passed",
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "network-reconnect",
       "status": "passed",
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "media-rejection",
       "status": "passed",
       "coverage": ["image paste", "image drop", "PDF/file drop", "server asset rejection"],
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "zero-client-persistence",
       "status": "passed",
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "administrative-recovery",
       "status": "passed-local-worker",
-      "evidenceRun": 34294256800
+      "evidenceRun": 34296811474
     },
     {
       "name": "large-scene-performance",
@@ -147,14 +155,14 @@
       "required": true,
       "status": "passed-for-recorded-implementation-head",
       "workflow": "Canvas checks and Pages",
-      "evidenceRun": 34294256800,
-      "rule": "every later commit and the final main merge commit must pass the same workflow; documentation never claims that an older run certifies a newer SHA"
+      "evidenceRun": 34296811474,
+      "rule": "the documentation-only final branch head and the final main merge commit must also pass this workflow; an older run never certifies a newer SHA"
     },
     "dependencyAudit": {
       "required": true,
       "status": "passed",
       "command": "npm audit --audit-level=high",
-      "note": "last fully certified run reported zero vulnerabilities across all severities"
+      "note": "recorded implementation run reported zero vulnerabilities across all severities"
     },
     "productionPreview": {
       "required": true,
