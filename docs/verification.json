@@ -1,12 +1,14 @@
 {
   "candidate": "1.0.0-rc.1",
   "assessmentDate": "2026-09-09",
-  "releaseStatus": "release-candidate",
+  "releaseStatus": "branch-certified",
   "productionDeployed": false,
   "repository": {
     "fullName": "thiepn/canvas",
     "branch": "release/canvas-v1-hardening",
     "pullRequest": 1,
+    "certifiedHeadSha": "68f83d614a39388515cae2efe671832f07a65d00",
+    "certifiedWorkflowRun": 34294256800,
     "pagesBasePath": "/canvas/",
     "expectedPagesUrl": "https://thiepn.github.io/canvas/"
   },
@@ -22,76 +24,109 @@
   },
   "observedChecks": [
     {
+      "name": "dependency-audit",
+      "command": "npm audit --audit-level=high",
+      "status": "passed",
+      "vulnerabilities": { "info": 0, "low": 0, "moderate": 0, "high": 0, "critical": 0, "total": 0 },
+      "evidenceRun": 34294256800
+    },
+    {
       "name": "unit-tests",
       "command": "npm test",
       "status": "passed",
       "passed": 33,
-      "failed": 0
+      "failed": 0,
+      "evidenceRun": 34294256800
     },
     {
       "name": "worker-integration",
       "command": "npm run test:worker",
       "status": "passed",
       "passed": 5,
-      "failed": 0
+      "failed": 0,
+      "evidenceRun": 34294256800
     },
     {
       "name": "strict-types",
       "command": "npm run typecheck",
-      "status": "passed-during-hardening",
-      "scope": "frontend/shared and Worker projects"
+      "status": "passed",
+      "scope": "frontend/shared and Worker projects",
+      "evidenceRun": 34294256800
     },
     {
       "name": "lint",
       "command": "npm run lint",
-      "status": "passed-during-hardening"
+      "status": "passed",
+      "evidenceRun": 34294256800
     },
     {
       "name": "worker-dry-run",
       "command": "npm run check:worker",
-      "status": "passed-during-hardening"
+      "status": "passed",
+      "evidenceRun": 34294256800
     },
     {
       "name": "production-build",
       "command": "npm run build",
-      "status": "passed-during-hardening"
+      "status": "passed",
+      "javascriptGzipBytes": 601531,
+      "evidenceRun": 34294256800
     },
     {
       "name": "cross-browser-e2e",
       "command": "npm run test:e2e",
       "status": "passed",
-      "passed": 61,
+      "passed": 59,
       "failed": 0,
       "skipped": 4,
+      "flaky": 0,
       "browsers": ["chromium", "firefox", "webkit"],
-      "evidenceRun": 34289590383
+      "skipRationale": [
+        "ten-client stress is intentionally executed once in Chromium; functional multiplayer still runs in all three engines",
+        "CDP multi-touch injection is Chromium-only; responsive/touch-independent cases still run cross-browser"
+      ],
+      "evidenceRun": 34294256800
+    },
+    {
+      "name": "production-preview",
+      "command": "npm run test:production",
+      "status": "passed",
+      "passed": 1,
+      "failed": 0,
+      "evidenceRun": 34294256800
     },
     {
       "name": "ten-client-convergence",
       "status": "passed",
       "contexts": 10,
-      "browser": "chromium"
+      "browser": "chromium",
+      "evidenceRun": 34294256800
     },
     {
       "name": "collaborative-undo",
-      "status": "passed"
+      "status": "passed",
+      "evidenceRun": 34294256800
     },
     {
       "name": "network-reconnect",
-      "status": "passed"
+      "status": "passed",
+      "evidenceRun": 34294256800
     },
     {
       "name": "media-rejection",
       "status": "passed",
-      "coverage": ["image paste", "image drop", "PDF/file drop", "server asset rejection"]
+      "coverage": ["image paste", "image drop", "PDF/file drop", "server asset rejection"],
+      "evidenceRun": 34294256800
     },
     {
       "name": "zero-client-persistence",
-      "status": "passed"
+      "status": "passed",
+      "evidenceRun": 34294256800
     },
     {
       "name": "administrative-recovery",
-      "status": "passed-local-worker"
+      "status": "passed-local-worker",
+      "evidenceRun": 34294256800
     },
     {
       "name": "large-scene-performance",
@@ -110,16 +145,20 @@
   "releaseGates": {
     "exactHeadQualityWorkflow": {
       "required": true,
+      "status": "passed-for-recorded-head",
       "workflow": "Canvas checks and Pages",
-      "rule": "must be green on the exact merge SHA; GitHub check status is authoritative rather than frozen into this file"
+      "evidenceRun": 34294256800,
+      "rule": "the final merge commit on main must also pass the same workflow; an older head run never certifies later changes"
     },
     "dependencyAudit": {
       "required": true,
+      "status": "passed",
       "command": "npm audit --audit-level=high",
-      "note": "lockfile overrides Wrangler/Miniflare transitive sharp to patched 0.35.4"
+      "note": "final recorded audit reported zero vulnerabilities across all severities"
     },
     "productionPreview": {
       "required": true,
+      "status": "passed",
       "command": "npm run test:production"
     }
   },
@@ -152,7 +191,7 @@
     "requiresOwnerAdminToken": true
   },
   "knownLimitations": [
-    "10,000-shape stress scene reached approximately 825 MiB JavaScript heap",
+    "10,000-shape stress scene reached approximately 825 MiB JavaScript heap; this is a stress ceiling rather than a normal target",
     "no authentication by design; anyone using the permitted frontend can edit",
     "long-duration offline-first editing is not promised",
     "real platform hibernation and physical stylus behavior are outside repository CI"
