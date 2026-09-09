@@ -22,7 +22,6 @@ type CursorPayload = {
 }
 
 const ALLOWED_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame'])
-const CHANNEL_NAME = 'canvas:main:v1'
 const UI_OPTIONS = {
   canvasActions: {
     changeViewBackgroundColor: false,
@@ -171,22 +170,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     noticeTimer.current = setTimeout(() => setNotice(''), 6000)
   }, [])
 
-  useEffect(() => {
-    identityRef.current = identity
-  }, [identity])
-  useEffect(() => {
-    statusRef.current = status
-  }, [status])
-  useEffect(() => {
-    apiRef.current = api
-  }, [api])
+  useEffect(() => { identityRef.current = identity }, [identity])
+  useEffect(() => { statusRef.current = status }, [status])
+  useEffect(() => { apiRef.current = api }, [api])
   useEffect(() => () => {
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
     if (flushTimer.current) clearTimeout(flushTimer.current)
   }, [])
-  useEffect(() => {
-    document.documentElement.dataset.theme = resolvedTheme
-  }, [resolvedTheme])
+  useEffect(() => { document.documentElement.dataset.theme = resolvedTheme }, [resolvedTheme])
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)')
     const update = () => setSystemDark(media.matches)
@@ -213,6 +204,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (!element) continue
       const nextStamp = { version: row.version, versionNonce: row.version_nonce, isDeleted: row.is_deleted }
       if (!replace && !isNewer(nextStamp, shadowRef.current.get(row.id))) continue
+      const pending = pendingRef.current.get(row.id)
+      if (!replace && pending && isNewer(stampOf(pending), nextStamp)) {
+        shadowRef.current.set(row.id, nextStamp)
+        continue
+      }
       shadowRef.current.set(row.id, nextStamp)
       currentElements.set(row.id, element)
       changed = true
@@ -224,10 +220,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [])
 
   const loadAuthoritative = useCallback(async () => {
-    const { data, error } = await supabase.from('canvas_elements').select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true })
+    const { data, error } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true })
     if (error) throw error
-    applyRows(data ?? [], true)
-  }, [applyRows, supabase])
+    applyRows(data ?? [], pendingRef.current.size === 0)
+  }, [applyRows, config.tableName, supabase])
 
   const flushPending = useCallback(async () => {
     if (statusRef.current !== 'Live' || !navigator.onLine || pendingRef.current.size === 0) return
@@ -242,23 +238,26 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       updated_by: identityRef.current.deviceId,
     }))
     const ids = rows.map(row => row.id)
-    const { error } = await supabase.from('canvas_elements').upsert(rows, { onConflict: 'id' })
+    const { error } = await supabase.from(config.tableName).upsert(rows, { onConflict: 'id' })
     if (error) {
       for (const element of elements) {
-        if (isNewer(stampOf(element), stampOf(pendingRef.current.get(element.id) ?? element))) pendingRef.current.set(element.id, element)
-        else pendingRef.current.set(element.id, element)
+        const queued = pendingRef.current.get(element.id)
+        if (!queued || isNewer(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
       }
-      setStatus(navigator.onLine ? 'Reconnecting' : 'Offline')
+      if (!navigator.onLine) setStatus('Offline')
       notify(`Canvas could not save: ${error.message}`)
+      if (navigator.onLine && !flushTimer.current) {
+        flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushPending() }, 1200)
+      }
       return
     }
-    const { data, error: readError } = await supabase.from('canvas_elements').select('id,version,version_nonce,is_deleted,element').in('id', ids)
+    const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').in('id', ids)
     if (readError) {
       notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
       return
     }
     applyRows(data ?? [])
-  }, [applyRows, notify, supabase])
+  }, [applyRows, config.tableName, notify, supabase])
 
   const scheduleFlush = useCallback(() => {
     if (flushTimer.current) return
@@ -267,6 +266,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       void flushPending()
     }, 120)
   }, [flushPending])
+
+  useEffect(() => {
+    if (status === 'Live' && pendingRef.current.size) scheduleFlush()
+  }, [scheduleFlush, status])
 
   const syncPresence = useCallback((channel: RealtimeChannel) => {
     const state = channel.presenceState() as Record<string, Array<Record<string, unknown>>>
@@ -296,10 +299,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => {
     if (!api) return
     let disposed = false
-    const channel = supabase.channel(CHANNEL_NAME, { config: { presence: { key: identity.deviceId }, broadcast: { self: false } } })
+    const channel = supabase.channel(`canvas:${config.tableName}:v1`, { config: { presence: { key: identity.deviceId }, broadcast: { self: false } } })
     channelRef.current = channel
     channel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'canvas_elements' }, payload => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {
         if (payload.new && Object.keys(payload.new).length) applyRows([payload.new])
       })
       .on('presence', { event: 'sync' }, () => syncPresence(channel))
@@ -324,11 +327,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           setStatus('Synchronizing')
           void channel.track({ deviceId: identityRef.current.deviceId, displayName: identityRef.current.displayName, color: identityRef.current.color, onlineAt: new Date().toISOString() })
             .then(() => loadAuthoritative())
-            .then(() => { if (!disposed) setStatus(navigator.onLine ? 'Live' : 'Offline') })
+            .then(() => {
+              if (disposed) return
+              setStatus(navigator.onLine ? 'Live' : 'Offline')
+              if (navigator.onLine && pendingRef.current.size) scheduleFlush()
+            })
             .catch(error => { if (!disposed) { setStatus('Error'); notify(`Canvas could not synchronize: ${error instanceof Error ? error.message : String(error)}`) } })
-        } else if (subscriptionStatus === 'CHANNEL_ERROR' || subscriptionStatus === 'TIMED_OUT') {
-          setStatus(navigator.onLine ? 'Reconnecting' : 'Offline')
-        } else if (subscriptionStatus === 'CLOSED') {
+        } else if (subscriptionStatus === 'CHANNEL_ERROR' || subscriptionStatus === 'TIMED_OUT' || subscriptionStatus === 'CLOSED') {
           setStatus(navigator.onLine ? 'Reconnecting' : 'Offline')
         }
       })
@@ -337,7 +342,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       channelRef.current = null
       void supabase.removeChannel(channel)
     }
-  }, [api, applyRows, identity.deviceId, loadAuthoritative, notify, supabase, syncPresence])
+  }, [api, applyRows, config.tableName, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence])
 
   useEffect(() => {
     const channel = channelRef.current
@@ -357,7 +362,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     for (const element of allowed) {
       const nextStamp = stampOf(element)
       if (!isNewer(nextStamp, shadowRef.current.get(element.id))) continue
-      pendingRef.current.set(element.id, element)
+      const queued = pendingRef.current.get(element.id)
+      if (!queued || isNewer(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
     }
     if (pendingRef.current.size) scheduleFlush()
   }, [notify, scheduleFlush])
@@ -389,7 +395,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     event.preventDefault(); event.stopPropagation(); notify('File uploads are disabled on Canvas.')
   }
 
-  return <div className="canvas-app live-canvas-app">
+  return <div className="canvas-app live-canvas-app" data-canvas-engine="excalidraw-supabase">
     <LiveHeader api={api} identity={identity} people={people} status={status} theme={theme} rename={rename} changeTheme={changeTheme} />
     <main className="canvas-workspace live-canvas-workspace" aria-label="Shared infinite canvas">
       <div className="live-excalidraw" onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
