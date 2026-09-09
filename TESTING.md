@@ -4,9 +4,9 @@ Canvas uses layered verification because a collaborative editor can compile succ
 
 ## Automated evidence obtained
 
-### Certified implementation quality run
+### Certified `main` quality run
 
-The fully integrated release gate passed on commit `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` in GitHub Actions run `34296811474`.
+The application release was squash-merged to `main` as commit `f429294102146b61107de0427b360fab4c1f9f89`. That exact commit passed the complete `Canvas checks and Pages / quality` workflow in GitHub Actions run `34298529147`.
 
 That run completed all of the following successfully:
 
@@ -22,7 +22,11 @@ That run completed all of the following successfully:
 - Chromium/Firefox/WebKit E2E;
 - optimized production-preview smoke.
 
-The recorded npm audit for that run contains **zero vulnerabilities at every severity level**.
+The retained exact-`main` artifact reports:
+
+- npm audit: **0 vulnerabilities** at info/low/moderate/high/critical;
+- E2E: **62 expected, 4 intentional project-specific skips, 0 unexpected, 0 flaky**;
+- production preview: **1 expected, 0 skipped, 0 unexpected, 0 flaky**.
 
 ### Unit and storage layer
 
@@ -99,7 +103,7 @@ Required viewports automated:
 - no page errors or failed frontend assets are observed;
 - an actual editor screenshot is captured as CI evidence.
 
-The certified production-preview test passed. `scripts/audit-build.mjs` also rejects accidental test-bridge inclusion and records bundle measurements. The production JavaScript payload measured **601,531 bytes gzip** across application chunks, dominated by the canvas engine.
+The exact-`main` production-preview test passed. `scripts/audit-build.mjs` also rejects accidental test-bridge inclusion and records bundle measurements. The production JavaScript payload measured **601,531 bytes gzip** across application chunks, dominated by the canvas engine.
 
 ### Performance evidence
 
@@ -129,7 +133,7 @@ The benchmark intentionally reports measured behavior rather than inventing a pa
 | `npm run test:performance` | Real persisted large-scene measurement |
 | `npm run check` | Main quality sequence excluding the separately invoked large-scene benchmark |
 
-CI additionally records `npm audit --json` and rejects high/critical dependency findings. The certified audit reported zero findings across all severities.
+CI additionally records `npm audit --json` and rejects high/critical dependency findings. The certified `main` audit reported zero findings across all severities.
 
 ## Test isolation
 
@@ -185,4 +189,4 @@ The production build already checks console/static-asset/PWA basics. A Lighthous
 
 ## Release rule
 
-The recorded implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete quality workflow in run `34296811474`. This documentation update creates a later head, so that exact head must pass the same gate before merge, and the final merge commit on `main` must also be green. Deployment-specific checks remain explicitly separate from repository CI rather than being inferred from source design.
+Application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality workflow in run `34298529147`. Repository CI remains authoritative for every later commit: any code or configuration change must pass its own exact-SHA quality run. Documentation-only maintenance may cite the application release commit without pretending that a historical run certifies future application changes. Deployment-specific checks remain explicitly separate from repository CI rather than being inferred from source design.
