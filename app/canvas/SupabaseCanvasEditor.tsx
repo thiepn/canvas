@@ -149,6 +149,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const [status, setStatus] = useState<ConnectionState>('Connecting')
   const statusRef = useRef<ConnectionState>('Connecting')
+  const [connectionAttempt, setConnectionAttempt] = useState(0)
+  const channelCleanupRef = useRef<Promise<unknown>>(Promise.resolve())
+  const retryDelayRef = useRef(1200)
   const [people, setPeople] = useState<PresencePerson[]>([])
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -172,8 +175,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     noticeTimer.current = setTimeout(() => setNotice(''), 6000)
   }, [])
 
+  // Network callbacks must lock writes immediately, before React commits a render.
+  const transition = useCallback((next: ConnectionState) => {
+    statusRef.current = next
+    setStatus(next)
+  }, [])
+
   useEffect(() => { identityRef.current = identity }, [identity])
-  useEffect(() => { statusRef.current = status }, [status])
   useEffect(() => { apiRef.current = api }, [api])
   useEffect(() => () => {
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
@@ -187,12 +195,19 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     return () => media.removeEventListener('change', update)
   }, [])
   useEffect(() => {
-    const offline = () => setStatus('Offline')
-    const online = () => setStatus(current => current === 'Live' ? current : 'Reconnecting')
+    const offline = () => {
+      transition('Offline')
+      setConnectionAttempt(value => value + 1)
+    }
+    const online = () => {
+      transition('Reconnecting')
+      retryDelayRef.current = 1200
+      setConnectionAttempt(value => value + 1)
+    }
     window.addEventListener('offline', offline)
     window.addEventListener('online', online)
     return () => { window.removeEventListener('offline', offline); window.removeEventListener('online', online) }
-  }, [])
+  }, [transition])
 
   const applyRows = useCallback((values: unknown[], replace = false) => {
     const editor = apiRef.current
@@ -237,10 +252,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     queueMicrotask(() => { applyingRemote.current = false })
   }, [])
 
-  const loadAuthoritative = useCallback(async () => {
-    const { data, error } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true })
+  const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true) => {
+    const { data, error } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true }).abortSignal(AbortSignal.timeout(15_000))
     if (error) throw error
-    applyRows(data ?? [], pendingRef.current.size === 0)
+    if (isCurrent()) applyRows(data ?? [], pendingRef.current.size === 0)
   }, [applyRows, config.tableName, supabase])
 
   const flushPending = useCallback(async () => {
@@ -262,7 +277,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         const queued = pendingRef.current.get(element.id)
         if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
       }
-      if (!navigator.onLine) setStatus('Offline')
+      if (!navigator.onLine) transition('Offline')
       notify(`Canvas could not save: ${error.message}`)
       if (navigator.onLine) {
         try {
@@ -282,7 +297,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       return
     }
     applyRows(data ?? [])
-  }, [applyRows, config.tableName, loadAuthoritative, notify, supabase])
+  }, [applyRows, config.tableName, loadAuthoritative, notify, supabase, transition])
 
   const scheduleFlush = useCallback(() => {
     if (flushTimer.current) return
@@ -324,55 +339,105 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => {
     if (!api) return
     let disposed = false
-    const channel = supabase.channel(`canvas:${config.tableName}:v1`, { config: { presence: { key: identity.deviceId }, broadcast: { self: false } } })
-    channelRef.current = channel
-    channel
-      .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {
-        if (payload.new && Object.keys(payload.new).length) applyRows([payload.new])
-      })
-      .on('presence', { event: 'sync' }, () => syncPresence(channel))
-      .on('broadcast', { event: 'cursor' }, message => {
-        const payload = message.payload as Partial<CursorPayload>
-        if (!payload.deviceId || payload.deviceId === identityRef.current.deviceId || !payload.pointer) return
-        if (typeof payload.pointer.x !== 'number' || typeof payload.pointer.y !== 'number') return
-        const socketId = payload.deviceId as SocketId
-        const existing = collaboratorsRef.current.get(socketId)
-        collaboratorsRef.current.set(socketId, {
-          ...existing,
-          username: cleanName(payload.displayName ?? 'Guest'),
-          pointer: { x: payload.pointer.x, y: payload.pointer.y, tool: payload.pointer.tool === 'laser' ? 'laser' : 'pointer' },
-          button: payload.button === 'down' ? 'down' : 'up',
-          selectedElementIds: payload.selectedElementIds && typeof payload.selectedElementIds === 'object' ? payload.selectedElementIds : {},
-        } as Collaborator)
-        apiRef.current?.updateScene({ collaborators: new Map(collaboratorsRef.current) })
-      })
-      .subscribe(subscriptionStatus => {
-        if (disposed) return
-        if (subscriptionStatus === 'SUBSCRIBED') {
-          setStatus('Synchronizing')
-          void channel.track({ deviceId: identityRef.current.deviceId, displayName: identityRef.current.displayName, color: identityRef.current.color, onlineAt: new Date().toISOString() })
-            .then(() => loadAuthoritative())
-            .then(() => {
-              if (disposed) return
-              setStatus(navigator.onLine ? 'Live' : 'Offline')
-              if (navigator.onLine && pendingRef.current.size) scheduleFlush()
-            })
-            .catch(error => { if (!disposed) { setStatus('Error'); notify(`Canvas could not synchronize: ${error instanceof Error ? error.message : String(error)}`) } })
-        } else if (subscriptionStatus === 'CHANNEL_ERROR' || subscriptionStatus === 'TIMED_OUT' || subscriptionStatus === 'CLOSED') {
-          setStatus(navigator.onLine ? 'Reconnecting' : 'Offline')
-        }
-      })
+    let channel: RealtimeChannel | null = null
+    let syncGeneration = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    const retry = () => {
+      if (disposed || retryTimer || !navigator.onLine) return
+      const delay = retryDelayRef.current
+      retryDelayRef.current = Math.min(delay * 2, 10_000)
+      retryTimer = setTimeout(() => {
+        retryTimer = null
+        if (!disposed) setConnectionAttempt(value => value + 1)
+      }, delay)
+    }
+    const start = async () => {
+      // Removing a channel is asynchronous. Do not reuse a same-topic channel
+      // while its predecessor is still leaving (including StrictMode cleanup).
+      await channelCleanupRef.current
+      if (disposed) return
+      if (!navigator.onLine) { transition('Offline'); return }
+      transition(connectionAttempt ? 'Reconnecting' : 'Connecting')
+      collaboratorsRef.current.clear()
+      setPeople([])
+      api.updateScene({ collaborators: new Map() })
+      const currentChannel = supabase.channel(`canvas:${config.tableName}:v1`, { config: { presence: { key: identity.deviceId }, broadcast: { self: false } } })
+      channel = currentChannel
+      channelRef.current = currentChannel
+      const isCurrent = () => !disposed && navigator.onLine && channelRef.current === currentChannel
+      currentChannel
+        .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {
+          if (isCurrent() && payload.new && Object.keys(payload.new).length) applyRows([payload.new])
+        })
+        .on('presence', { event: 'sync' }, () => { if (isCurrent()) syncPresence(currentChannel) })
+        .on('broadcast', { event: 'cursor' }, message => {
+          if (!isCurrent()) return
+          const payload = message.payload as Partial<CursorPayload>
+          if (!payload.deviceId || payload.deviceId === identityRef.current.deviceId || !payload.pointer) return
+          if (typeof payload.pointer.x !== 'number' || typeof payload.pointer.y !== 'number') return
+          const socketId = payload.deviceId as SocketId
+          const existing = collaboratorsRef.current.get(socketId)
+          collaboratorsRef.current.set(socketId, {
+            ...existing,
+            username: cleanName(payload.displayName ?? 'Guest'),
+            pointer: { x: payload.pointer.x, y: payload.pointer.y, tool: payload.pointer.tool === 'laser' ? 'laser' : 'pointer' },
+            button: payload.button === 'down' ? 'down' : 'up',
+            selectedElementIds: payload.selectedElementIds && typeof payload.selectedElementIds === 'object' ? payload.selectedElementIds : {},
+          } as Collaborator)
+          apiRef.current?.updateScene({ collaborators: new Map(collaboratorsRef.current) })
+        })
+        .subscribe(subscriptionStatus => {
+          if (disposed) return
+          if (subscriptionStatus === 'SUBSCRIBED') {
+            const generation = ++syncGeneration
+            if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+            if (!isCurrent()) return
+            transition('Synchronizing')
+            // Presence is ephemeral. An unavailable presence acknowledgement must
+            // not prevent a successfully joined client from loading durable data.
+            void currentChannel.track({ deviceId: identityRef.current.deviceId, displayName: identityRef.current.displayName, color: identityRef.current.color, onlineAt: new Date().toISOString() }).catch(() => {})
+            const stillCurrent = () => isCurrent() && generation === syncGeneration
+            void loadAuthoritative(stillCurrent)
+              .then(() => {
+                if (!stillCurrent()) return
+                retryDelayRef.current = 1200
+                transition('Live')
+                if (pendingRef.current.size) scheduleFlush()
+              })
+              .catch(error => {
+                if (!stillCurrent()) return
+                transition('Error')
+                notify(`Canvas could not synchronize: ${error instanceof Error ? error.message : String(error)}`)
+                retry()
+              })
+          } else if (subscriptionStatus === 'CHANNEL_ERROR' || subscriptionStatus === 'TIMED_OUT' || subscriptionStatus === 'CLOSED') {
+            ++syncGeneration
+            transition(navigator.onLine ? 'Reconnecting' : 'Offline')
+            retry()
+          }
+        })
+    }
+    void start().catch(error => {
+      if (disposed) return
+      transition(navigator.onLine ? 'Error' : 'Offline')
+      notify(`Canvas could not connect: ${error instanceof Error ? error.message : String(error)}`)
+      retry()
+    })
     return () => {
       disposed = true
-      channelRef.current = null
-      void supabase.removeChannel(channel)
+      ++syncGeneration
+      if (retryTimer) clearTimeout(retryTimer)
+      if (channel) {
+        if (channelRef.current === channel) channelRef.current = null
+        channelCleanupRef.current = supabase.removeChannel(channel).catch(() => {})
+      }
     }
-  }, [api, applyRows, config.tableName, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence])
+  }, [api, applyRows, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence, transition])
 
   useEffect(() => {
     const channel = channelRef.current
     if (!channel || (status !== 'Live' && status !== 'Synchronizing')) return
-    void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, onlineAt: new Date().toISOString() })
+    void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, onlineAt: new Date().toISOString() }).catch(() => {})
   }, [identity, status])
 
   const onChange = useCallback((elements: readonly SceneElement[]) => {
@@ -393,7 +458,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (pendingRef.current.size) scheduleFlush()
   }, [notify, scheduleFlush])
 
-  const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'down' | 'up' }) => {
+  const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return
     const now = performance.now()
     if (now - cursorAt.current < 45 && payload.button !== 'down') return
@@ -440,7 +505,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
         </Excalidraw>
       </div>
-      {status !== 'Live' && <div className="network-banner" role="status">{status === 'Error' ? 'Canvas could not synchronize. Check the connection and reload.' : `${status} — editing is paused until the shared canvas is synchronized.`}</div>}
+      {status !== 'Live' && <div className="network-banner" role="status">{status === 'Error' ? 'Canvas could not synchronize. Retrying automatically; editing remains paused.' : `${status} — editing is paused until the shared canvas is synchronized.`}</div>}
       {notice && <div className="canvas-notice" role="status">{notice}</div>}
     </main>
   </div>
