@@ -4,9 +4,9 @@ Canvas uses layered verification because a collaborative editor can compile succ
 
 ## Automated evidence obtained
 
-### Final exact-head quality run
+### Certified implementation quality run
 
-The fully integrated release gate passed on commit `68f83d614a39388515cae2efe671832f07a65d00` in GitHub Actions run `34294256800`.
+The fully integrated release gate passed on commit `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` in GitHub Actions run `34296811474`.
 
 That run completed all of the following successfully:
 
@@ -36,9 +36,9 @@ The local Wrangler suite contains **5 passing integration tests** against the ac
 
 ### Cross-browser E2E
 
-The final exact-head Chromium/Firefox/WebKit run passed with:
+The certified Chromium/Firefox/WebKit run passed with:
 
-- **59 passed**;
+- **62 passed**;
 - **4 intentional project-specific skips**;
 - **0 failures**;
 - **0 flaky tests**.
@@ -64,6 +64,7 @@ Critical automated scenarios include:
 - owner snapshot → destructive edit → administrative restore returns known state and stale restore clocks are rejected;
 - ten isolated Chromium contexts connect and converge on ten shapes/presence;
 - pointer-based drawing, text creation, shape resizing and persistence;
+- a dedicated real-editor tool matrix creates rectangle, ellipse, diamond, line, arrow, frame, and highlighter content through the actual toolbar, confirms every record reaches the authoritative server, then erases a target by sweeping across its outline; this passed in Chromium, Firefox, and WebKit;
 - plain-text paste in Chromium/Firefox/WebKit;
 - pasted images and dropped image/PDF files are rejected;
 - malformed/oversized WebSocket traffic is rejected;
@@ -71,6 +72,8 @@ Critical automated scenarios include:
 - required responsive viewports remain usable without body-scroll/tool overflow;
 - Chromium touch/pinch simulation changes the canvas camera rather than scrolling the page;
 - phone-native menu controls expose undo, redo, zoom, and fit behavior when desktop navigation is hidden.
+
+The eraser regression deliberately crosses a shape outline. tldraw's hollow geo eraser semantics use outline hit-testing rather than treating the empty interior as filled content, so pressing only inside a rectangle is correctly not an erase hit.
 
 Required viewports automated:
 
@@ -96,7 +99,7 @@ Required viewports automated:
 - no page errors or failed frontend assets are observed;
 - an actual editor screenshot is captured as CI evidence.
 
-The final exact-head production-preview test passed. `scripts/audit-build.mjs` also rejects accidental test-bridge inclusion and records bundle measurements. The final production JavaScript payload measured approximately **602 KB gzip** across application chunks, dominated by the canvas engine.
+The certified production-preview test passed. `scripts/audit-build.mjs` also rejects accidental test-bridge inclusion and records bundle measurements. The production JavaScript payload measured **601,531 bytes gzip** across application chunks, dominated by the canvas engine.
 
 ### Performance evidence
 
@@ -121,12 +124,12 @@ The benchmark intentionally reports measured behavior rather than inventing a pa
 | `npm run test:worker` | Local Wrangler/DO integration and restart tests |
 | `npm run check:worker` | Production Worker dry-run bundle |
 | `npm run build` | Optimized Vite build plus bundle audit |
-| `npm run test:e2e` | Chromium, Firefox and WebKit collaboration/interaction/responsive regression |
+| `npm run test:e2e` | Chromium, Firefox and WebKit collaboration/interaction/tool/responsive regression |
 | `npm run test:production` | Optimized `/canvas/` preview smoke against isolated Worker state |
 | `npm run test:performance` | Real persisted large-scene measurement |
 | `npm run check` | Main quality sequence excluding the separately invoked large-scene benchmark |
 
-CI additionally records `npm audit --json` and rejects high/critical dependency findings. The final recorded audit reported zero findings across all severities.
+CI additionally records `npm audit --json` and rejects high/critical dependency findings. The certified audit reported zero findings across all severities.
 
 ## Test isolation
 
@@ -182,4 +185,4 @@ The production build already checks console/static-asset/PWA basics. A Lighthous
 
 ## Release rule
 
-The recorded branch head `68f83d614a39388515cae2efe671832f07a65d00` passed the complete quality workflow in run `34294256800`. Any later commit must pass the same gate again, and the final merge commit on `main` must also be green. Deployment-specific checks remain explicitly separate from repository CI rather than being inferred from source design.
+The recorded implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete quality workflow in run `34296811474`. This documentation update creates a later head, so that exact head must pass the same gate before merge, and the final merge commit on `main` must also be green. Deployment-specific checks remain explicitly separate from repository CI rather than being inferred from source design.
