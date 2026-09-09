@@ -8,7 +8,9 @@ A lightweight persistent realtime infinite canvas for drawing, writing, and thin
 
 Canvas `1.0.0-rc.1` is implemented on the `release/canvas-v1-hardening` branch and tracked in PR #1. The application, Worker, recovery tooling, tests, lockfile, CI, Pages workflow, PWA assets, and deployment documentation are present.
 
-Release certification is evidence-driven. The hardening suite has already demonstrated 33/33 unit tests, 5/5 Worker integration tests, and a complete Chromium/Firefox/WebKit collaboration run with 61 passed and four intentional skips. A dedicated Chromium large-scene benchmark also passed at 100, 1,000, 5,000, and 10,000 persisted shapes. The exact final branch head must still have a green `Canvas checks and Pages` workflow before merge; see [AUDIT.md](AUDIT.md) and [TESTING.md](TESTING.md).
+The previously incomplete release gate is now resolved. Commit `68f83d614a39388515cae2efe671832f07a65d00` passed the complete `Canvas checks and Pages / quality` workflow in GitHub Actions run `34294256800`: install, zero-vulnerability dependency audit, lint, strict type checking, 33 unit/storage tests, 5 Worker/Durable Object integration tests, Worker production dry-run, optimized build, Chromium/Firefox/WebKit E2E, and optimized production-preview smoke all passed. The final E2E result was **59 passed, 4 intentional project-specific skips, 0 failed, 0 flaky**.
+
+Any commit after that recorded head must pass the same gate again. The merge commit on `main` must also be green before publication. See [AUDIT.md](AUDIT.md), [TESTING.md](TESTING.md), and [docs/verification.json](docs/verification.json).
 
 ## What Canvas does
 
@@ -71,7 +73,7 @@ npm run test:production
 npm run test:performance
 ```
 
-The CI quality gate additionally runs `npm audit --audit-level=high`. A patched `sharp 0.35.4` transitive override is retained because the current Wrangler/Miniflare dependency graph otherwise resolves an advisory-affected `sharp 0.35.2`; the Worker suite verifies that override against the actual development runtime.
+The CI quality gate additionally records the full `npm audit --json` result and runs `npm audit --audit-level=high`. The final certified run reported **zero vulnerabilities at every severity level**. A patched `sharp 0.35.4` transitive override is retained because an earlier Wrangler/Miniflare dependency graph resolved an advisory-affected `sharp 0.35.2`; the current lockfile and Worker suite verify the patched graph.
 
 ### Performance evidence
 
@@ -100,7 +102,7 @@ The intended frontend URL is:
 
 The Worker configuration already allows the `https://thiepn.github.io` origin plus localhost development origins. The repository-project Vite base is `/canvas/`; use `/` for a future custom domain.
 
-Deployment requires only owner-controlled configuration:
+Deployment requires owner-controlled production configuration:
 
 1. authenticate Wrangler and deploy the Worker;
 2. create a strong Cloudflare `ADMIN_TOKEN` secret;
