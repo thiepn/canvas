@@ -63,6 +63,7 @@ jobs:
     needs: quality
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     permissions:
       contents: read
       pages: write
@@ -87,3 +88,14 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v5.0.1
+      - run: npx playwright install --with-deps chromium
+      - name: Verify published bundle, shared connection, reconnect and mobile menu
+        run: node scripts/verify-deployed.mjs
+        env:
+          CANVAS_DEPLOYED_URL: ${{ steps.deployment.outputs.page_url }}
+      - name: Retain deployed-site verification
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: canvas-deployed-verification
+          path: artifacts/deployed/
