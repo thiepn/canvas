@@ -40,8 +40,7 @@ async function selectTool(page: Page, title: RegExp, roleName: RegExp) {
 }
 
 async function selectFrameTool(page: Page) {
-  await page.locator('.App-toolbar__extra-tools-trigger').click()
-  await page.getByTestId('toolbar-frame').click()
+  await page.getByRole('button', { name: 'Frame tool' }).click()
 }
 
 async function drag(page: Page, from: [number, number], to: [number, number], steps = 8) {
@@ -63,6 +62,12 @@ test('required vector tools persist through the real Excalidraw + Supabase path'
   await page.goto('./')
   await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
+
+  await expect(page.getByTestId('main-menu-trigger')).toBeHidden()
+  await expect(page.locator('.default-sidebar-trigger')).toBeHidden()
+  await expect(page.locator('.App-toolbar__extra-tools-trigger')).toBeHidden()
+  await expect(page.getByTestId('toolbar-LaserPointer')).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Frame tool' })).toBeVisible()
 
   await selectTool(page, /^Rectangle\b/i, /^Rectangle\b/i)
   await drag(page, [180, 150], [290, 220])
@@ -122,13 +127,19 @@ test('320px mobile shell stays contained and the identity/settings menu remains 
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1)
   expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.innerHeight + 1)
 
+  await expect(page.getByTestId('main-menu-trigger')).toBeHidden()
+  await expect(page.locator('.default-sidebar-trigger')).toBeHidden()
+  await expect(page.locator('.App-toolbar__extra-tools-trigger')).toBeHidden()
+
   const menuButton = page.getByRole('button', { name: 'Canvas menu and presence' })
   await expect(menuButton).toBeVisible()
   await menuButton.click()
-  await expect(page.getByLabel('Canvas settings')).toBeVisible()
-  await expect(page.getByLabel('Display name')).toBeVisible()
-  await expect(page.getByLabel('Appearance')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Export JSON backup' })).toBeVisible()
+  const settings = page.getByLabel('Canvas settings')
+  await expect(settings).toBeVisible()
+  await expect(settings.getByLabel('Display name')).toBeVisible()
+  await expect(settings.getByLabel('Appearance')).toBeVisible()
+  await expect(settings.getByRole('button', { name: 'Frame tool' })).toBeVisible()
+  await expect(settings.getByRole('button', { name: 'Export JSON backup' })).toBeVisible()
 })
 
 test('offline state pauses editing and returns to Live after reconnect', async ({ page, context }) => {
