@@ -4,9 +4,11 @@ import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { createLiveConfig, createPublicConfig } from './config/public-config.ts'
 import './styles/app.css'
 
-const LegacyCanvasEditor = lazy(() => import('./canvas/CanvasEditor.tsx'))
-const SupabaseCanvasEditor = lazy(() => import('./canvas/SupabaseCanvasEditor.tsx'))
 const useLegacyHarness = import.meta.env.MODE === 'test' || import.meta.env.VITE_CANVAS_TEST_BACKEND === 'legacy'
+// Keep the old Worker/tldraw harness available for its regression suite without shipping
+// that editor in normal production bundles. Vite can eliminate this branch when false.
+const LegacyCanvasEditor = useLegacyHarness ? lazy(() => import('./canvas/CanvasEditor.tsx')) : null
+const SupabaseCanvasEditor = lazy(() => import('./canvas/SupabaseCanvasEditor.tsx'))
 
 function Loading() {
   return <main className="boot" role="status"><span>Canvas<span aria-hidden="true">.</span></span><p>Opening the shared canvas…</p></main>
@@ -14,7 +16,7 @@ function Loading() {
 
 function App() {
   if (!globalThis.crypto?.randomUUID || !('WebSocket' in window)) throw new Error('Use a current Chrome, Edge, Firefox, or Safari browser over HTTPS.')
-  if (useLegacyHarness) {
+  if (useLegacyHarness && LegacyCanvasEditor) {
     const config = createPublicConfig(import.meta.env.VITE_CANVAS_API_URL, import.meta.env.VITE_TLDRAW_LICENSE_KEY, location.href)
     return <Suspense fallback={<Loading />}><LegacyCanvasEditor config={config} /></Suspense>
   }
