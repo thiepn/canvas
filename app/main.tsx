@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
+import { installCanvasWheelZoom } from './canvas/wheel-zoom.ts'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { createLiveConfig, createPublicConfig } from './config/public-config.ts'
 import './styles/app.css'
@@ -9,6 +10,11 @@ const useLegacyHarness = import.meta.env.MODE === 'test' || import.meta.env.VITE
 // that editor in normal production bundles. Vite can eliminate this branch when false.
 const LegacyCanvasEditor = useLegacyHarness ? lazy(() => import('./canvas/CanvasEditor.tsx')) : null
 const SupabaseCanvasEditor = lazy(() => import('./canvas/SupabaseCanvasEditor.tsx'))
+
+if (!useLegacyHarness) {
+  const removeWheelZoom = installCanvasWheelZoom()
+  import.meta.hot?.dispose(removeWheelZoom)
+}
 
 function Loading() {
   return <main className="boot" role="status"><span>Canvas<span aria-hidden="true">.</span></span><p>Opening the shared canvas…</p></main>

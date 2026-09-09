@@ -2,6 +2,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { chromium, expect, request } from '@playwright/test'
 import { deploymentUrl, requireSecureResponse } from './deployment-url.mjs'
 
+async function readZoomPercent(page) {
+  const text = await page.locator('.zoom-actions').innerText()
+  const match = text.match(/(\d+(?:\.\d+)?)%/)
+  if (!match) throw new Error(`Could not read Excalidraw zoom from: ${JSON.stringify(text)}`)
+  return Number(match[1])
+}
+
 const url = deploymentUrl(process.env.CANVAS_DEPLOYED_URL)
 url.searchParams.set('release', process.env.GITHUB_SHA || 'verified')
 const html = await readFile('dist/index.html', 'utf8')
@@ -37,6 +44,21 @@ try {
   await expect(page.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
   expect(await page.locator('script[type="module"][src]').first().getAttribute('src')).toBe(expectedAsset)
   expect(await page.evaluate(() => '__CANVAS_TEST__' in window)).toBe(false)
+
+  // Normal vertical wheel is a Canvas zoom gesture, not Excalidraw's default pan.
+  await page.locator('.reset-zoom-button').click()
+  await expect.poll(() => readZoomPercent(page)).toBe(100)
+  const interactiveCanvas = page.locator('canvas.excalidraw__canvas.interactive')
+  const canvasBox = await interactiveCanvas.boundingBox()
+  if (!canvasBox) throw new Error('Published interactive canvas has no bounding box.')
+  await page.mouse.move(canvasBox.x + canvasBox.width * 0.65, canvasBox.y + canvasBox.height * 0.55)
+  await page.mouse.wheel(0, -120)
+  await expect.poll(() => readZoomPercent(page)).toBeGreaterThan(100)
+  const zoomedIn = await readZoomPercent(page)
+  await page.mouse.wheel(0, 240)
+  await expect.poll(() => readZoomPercent(page)).toBeLessThan(zoomedIn)
+  await page.locator('.reset-zoom-button').click()
+  await expect.poll(() => readZoomPercent(page)).toBe(100)
   await page.screenshot({ path: 'artifacts/deployed/desktop.png' })
 
   // No drawing, deletion, restore, or other persistent mutation of the public canvas.
@@ -62,7 +84,7 @@ try {
   await page.screenshot({ path: 'artifacts/deployed/mobile-menu.png' })
   expect(pageErrors).toEqual([])
   expect(failedAssets).toEqual([])
-  const evidence = { commit: process.env.GITHUB_SHA, reportedUrl: process.env.CANVAS_DEPLOYED_URL, url: url.origin + url.pathname, finalUrl: page.url(), expectedAsset, checkedAt: new Date().toISOString(), checks: ['https-with-valid-certificate', 'exact-published-bundle', 'real-supabase-live', 'no-test-bridge', 'offline-reconnect', '320px-menu', 'no-page-errors', 'no-missing-assets'], layout }
+  const evidence = { commit: process.env.GITHUB_SHA, reportedUrl: process.env.CANVAS_DEPLOYED_URL, url: url.origin + url.pathname, finalUrl: page.url(), expectedAsset, checkedAt: new Date().toISOString(), checks: ['https-with-valid-certificate', 'exact-published-bundle', 'real-supabase-live', 'wheel-zooms-canvas', 'no-test-bridge', 'offline-reconnect', '320px-menu', 'no-page-errors', 'no-missing-assets'], layout }
   await writeFile('artifacts/deployed/verification.json', JSON.stringify(evidence, null, 2))
   console.log(JSON.stringify(evidence))
 } finally {
