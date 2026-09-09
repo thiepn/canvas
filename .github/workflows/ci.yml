@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
       options: --init --ipc=host
     steps:
       - uses: actions/checkout@v7.0.1
@@ -44,7 +44,8 @@ jobs:
       - name: Record source and full dependency audit
         run: |
           mkdir -p artifacts
-          git archive --format=zip --output=artifacts/source.zip HEAD
+          # Container and host checkout users differ; trust only this workspace for this command.
+          git -c safe.directory="$GITHUB_WORKSPACE" archive --format=zip --output=artifacts/source.zip HEAD
           npm audit --json > artifacts/npm-audit.json || true
       - name: Reject high-severity dependency vulnerabilities
         run: npm audit --audit-level=high
@@ -81,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
       options: --init --ipc=host
     permissions:
       contents: read
