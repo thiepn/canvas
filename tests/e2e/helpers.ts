@@ -4,7 +4,7 @@ export const ORIGIN = 'http://127.0.0.1:5173'
 export const ADMIN = 'local-test-only-not-a-production-secret-0123456789'
 export interface Peer { context: BrowserContext; page: Page }
 export type PeerFactory = (viewport?: { width: number; height: number }, touch?: boolean) => Promise<Peer>
-declare global { interface Window { __TEST_SOCKETS__?: Set<WebSocket> } }
+declare global { interface Window { __TEST_SOCKETS__?: Set<WebSocket>; __TEST_BLOCK_CANVAS_WS__?: boolean } }
 export const test = base.extend<{ peer: PeerFactory }>({
   peer: async ({ browser, browserName }, use) => {
     const contexts: BrowserContext[] = []
@@ -12,13 +12,21 @@ export const test = base.extend<{ peer: PeerFactory }>({
       const context = await browser.newContext({ viewport, hasTouch: touch, isMobile: touch && browserName !== 'firefox' })
       contexts.push(context)
       await context.addInitScript(() => {
-        // Test-only fault injection. It is not compiled into Canvas.
+        // Test-only fault injection. Track/block only Canvas sync sockets; Vite's own HMR
+        // WebSocket must remain untouched or the test starts exercising dev-server reload logic.
         const NativeSocket = window.WebSocket
         window.__TEST_SOCKETS__ = new Set()
+        window.__TEST_BLOCK_CANVAS_WS__ = false
         window.WebSocket = class extends NativeSocket {
           constructor(url: string | URL, protocols?: string | string[]) {
-            super(url, protocols); window.__TEST_SOCKETS__!.add(this)
-            this.addEventListener('close', () => window.__TEST_SOCKETS__!.delete(this))
+            const requested = String(url)
+            const isCanvasSocket = requested.includes('/api/connect/main')
+            const actualUrl = isCanvasSocket && window.__TEST_BLOCK_CANVAS_WS__ ? 'ws://127.0.0.1:1/__canvas-sync-blocked__' : url
+            super(actualUrl, protocols)
+            if (isCanvasSocket) {
+              window.__TEST_SOCKETS__!.add(this)
+              this.addEventListener('close', () => window.__TEST_SOCKETS__!.delete(this))
+            }
           }
         }
       })
