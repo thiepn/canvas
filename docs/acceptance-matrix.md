@@ -1,6 +1,6 @@
 # Release acceptance matrix
 
-**Assessment:** Canvas V1 source implementation is release-candidate complete. Implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete quality workflow in GitHub Actions run `34296811474`, including the explicit required-tool matrix. Because this evidence/documentation update creates a later commit, the final branch head and eventual `main` merge SHA must pass the same gate again. Production-only Cloudflare hibernation and physical stylus checks remain separate and are not falsely marked as CI passes.
+**Assessment:** Canvas V1 source implementation is release-candidate complete and merged to `main`. Application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality workflow in GitHub Actions run `34298529147`, including the explicit required-tool matrix. The retained exact-`main` artifact records 62 expected E2E passes, 4 intentional project-specific skips, 0 unexpected failures, 0 flaky tests, 1/1 production-preview pass, and zero npm vulnerabilities. Production-only Cloudflare hibernation and physical stylus checks remain separate and are not falsely marked as CI passes. Pages publication is still disabled by owner-controlled configuration.
 
 Legend:
 
@@ -14,7 +14,7 @@ Legend:
 | Requirement | Evidence | State |
 | --- | --- | --- |
 | App called Canvas | Manifest, UI, package metadata | **PASS** |
-| Repository `thiepn/canvas` | GitHub repository and PR #1 | **PASS** |
+| Repository `thiepn/canvas` | GitHub repository; hardening PR #1 merged to `main` | **PASS** |
 | GitHub Pages compatible | Vite `/canvas/` base; optimized subpath test; official Pages Actions | **PASS** |
 | Cloudflare backend deployable | Wrangler dry-run, Worker/DO integration, SQLite migration config | **PASS** |
 | One persistent world | Fixed `main` Worker/DO route; no rooms UI | **PASS** |
@@ -54,9 +54,9 @@ Legend:
 | Backup/recovery | Real SQLite backups/checksums/rollback + owner restore browser/Worker scenario | **PASS** locally |
 | Export | Portable JSON export path | **PASS** implementation/build; deployed download drill recommended |
 | Input/rate/size limits | Unit policy tests + malformed/oversize WebSocket browser tests | **PASS** |
-| Tests | 33 unit + 5 Worker + 62 E2E + production-preview gate; 4 deliberate project-specific skips | **PASS** on recorded implementation head |
-| CI | Read-only quality workflow and gated Pages deployment | **PASS** configuration and recorded implementation run |
-| Dependency security | Recorded npm audit | **PASS — 0 vulnerabilities** |
+| Tests | 33 unit + 5 Worker + 62 E2E + production-preview gate; 4 deliberate project-specific skips | **PASS** on exact application release commit on `main` |
+| CI | Exact `main` release commit passed full quality workflow; Pages job remains separately gated | **PASS** |
+| Dependency security | Exact-`main` npm audit artifact | **PASS — 0 vulnerabilities** |
 | Documentation | README/architecture/research/testing/deployment/security/license/audit | **PASS** |
 | No required paid infrastructure | No paid database/realtime/asset service | **PASS**, subject to Cloudflare/tldraw eligibility/usage |
 | No app analytics/tracking | None implemented | **PASS** |
@@ -109,15 +109,16 @@ The release does not add:
 
 ## Final owner/platform acceptance
 
-Before calling the **live deployment** fully certified:
+Source acceptance is complete. Before calling the **live deployment** fully certified:
 
-1. deploy Worker and set `ADMIN_TOKEN`;
+1. deploy the Cloudflare Worker and set `ADMIN_TOKEN`;
 2. configure the actual Worker URL and valid tldraw production key in GitHub;
-3. ensure the final branch/merge SHA has a green quality run;
-4. enable Pages deployment;
-5. repeat the two-client/close-reopen/reconnect/image-rejection smoke on the live URL;
-6. observe a real Cloudflare hibernation/wake cycle;
-7. test a real phone/tablet and stylus if stylus use matters;
-8. run one noncritical production backup/restore drill.
+3. set `VITE_BASE_PATH=/canvas/` and `CANVAS_DEPLOY_ENABLED=true`;
+4. manually dispatch **Canvas checks and Pages** on `main` if no later `main` push occurs;
+5. confirm the Pages deployment job succeeds;
+6. repeat the two-client/close-reopen/reconnect/image-rejection smoke on the live URL;
+7. observe a real Cloudflare hibernation/wake cycle;
+8. test a real phone/tablet and stylus if stylus use matters;
+9. run one noncritical production backup/restore drill.
 
 These are operational/platform checks, not missing V1 application features.

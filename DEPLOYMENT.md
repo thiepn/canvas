@@ -1,6 +1,6 @@
 # Deployment and recovery
 
-This repository is already published at `thiepn/canvas`. The release branch is `release/canvas-v1-hardening` and PR #1 carries the hardening work. Do not deploy a different copy of the original source archive.
+The hardened Canvas source is merged to `main` in `thiepn/canvas`. PR #1 is historical; application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality workflow in GitHub Actions run `34298529147`. Do not deploy a different copy of the original source archive.
 
 The intended initial frontend URL is:
 
@@ -15,7 +15,7 @@ Requires Node.js `>=22.16.0` and npm.
 ```sh
 git clone https://github.com/thiepn/canvas.git
 cd canvas
-git switch release/canvas-v1-hardening
+git switch main
 npm ci
 npx playwright install --with-deps chromium firefox webkit
 npm run check
@@ -123,16 +123,27 @@ read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
 export CANVAS_ADMIN_TOKEN
 npm run admin -- list
 npm run admin -- snapshot
+unset CANVAS_ADMIN_TOKEN
 ```
 
-PowerShell equivalent:
+PowerShell equivalent (keeps the prompt masked and removes the plaintext environment value immediately afterward):
 
 ```powershell
 $env:CANVAS_API_URL = "https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev"
-$env:CANVAS_ADMIN_TOKEN = Read-Host "Canvas admin token" -AsSecureString
+$secureToken = Read-Host "Canvas admin token" -AsSecureString
+$tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+try {
+    $env:CANVAS_ADMIN_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
+    npm run admin -- list
+    npm run admin -- snapshot
+}
+finally {
+    Remove-Item Env:CANVAS_ADMIN_TOKEN -ErrorAction SilentlyContinue
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr)
+}
 ```
 
-For PowerShell, expose the secure value only for the command process you actually use; do not save it to a script/history file.
+The admin CLI necessarily receives the token as a process environment string. The examples above keep that exposure scoped to the commands that require it and remove it afterward; do not save the token to scripts or shell profiles.
 
 ## 5. Configure GitHub Pages
 
@@ -144,7 +155,7 @@ In `thiepn/canvas`:
    - `VITE_BASE_PATH=/canvas/`
 3. **Actions secrets:** set:
    - `VITE_TLDRAW_LICENSE_KEY=<your valid tldraw production key>`
-4. Leave `CANVAS_DEPLOY_ENABLED` unset/false until PR #1 is fully green and the deployed Worker has been checked.
+4. Leave `CANVAS_DEPLOY_ENABLED` unset/false until the deployed Worker has been checked.
 5. When ready to publish, set repository variable `CANVAS_DEPLOY_ENABLED=true`.
 
 All `VITE_` values are embedded into browser JavaScript. The tldraw SDK key is therefore public at runtime even though GitHub stores its source value as an Actions secret. `ADMIN_TOKEN` must never be a Vite value.
@@ -159,11 +170,19 @@ For this personal/noncommercial project, apply for/use a hobby key if tldraw app
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## 7. Merge and deploy Pages
+## 7. Enable and deploy Pages
 
-PR #1 should have a green `Canvas checks and Pages / quality` check on its **exact final head** before merge. Do not use an older green run after later commits.
+The release is already merged to `main`, and exact merge commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete quality workflow in run `34298529147`. Its `deploy-pages` job was skipped because `CANVAS_DEPLOY_ENABLED` was not true; this was a deployment gate, not a test failure.
 
-After explicit approval to merge, merge PR #1 into `main`. A `main` push will rerun the quality job. The Pages deployment job runs only when:
+After the Worker, GitHub variables, and tldraw key are configured:
+
+1. set `CANVAS_DEPLOY_ENABLED=true`;
+2. open **Actions → Canvas checks and Pages → Run workflow**;
+3. dispatch the workflow on `main`.
+
+A later push to `main` also triggers the workflow, but changing a repository variable alone does **not** create a new push event. Use manual workflow dispatch if there is no subsequent code/documentation change.
+
+The Pages deployment job runs only when:
 
 - quality passes;
 - the ref is `main`;
@@ -231,20 +250,24 @@ The Canvas menu downloads a portable JSON backup. A disconnected export is marke
 
 ```sh
 export CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
-export CANVAS_ADMIN_TOKEN=YOUR_PRIVATE_TOKEN
+read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
+export CANVAS_ADMIN_TOKEN
 
 npm run admin -- list
 npm run admin -- snapshot
 npm run admin -- export Canvas-before-maintenance.json
+unset CANVAS_ADMIN_TOKEN
 ```
 
-Avoid leaving the token in shell history. Prefer a secure prompt/environment mechanism.
+Avoid leaving the token in shell history. Prefer a secure prompt/environment mechanism. On PowerShell, use the scoped SecureString-to-environment pattern from section 4 around the equivalent admin commands.
 
 ### Recover from accidental deletion
 
-Find and download the desired recovery point:
+Start a fresh scoped admin-token session before recovery; the export example intentionally removed its token:
 
 ```sh
+read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
+export CANVAS_ADMIN_TOKEN
 npm run admin -- list
 npm run admin -- get SNAPSHOT_UUID Canvas-recovered.json
 ```
@@ -258,9 +281,12 @@ Then:
 
 ```sh
 npm run admin -- restore Canvas-recovered.json --expect-clock CURRENT_CLOCK --yes
+unset CANVAS_ADMIN_TOKEN
 ```
 
-A `409` means a client is still connected or the world changed. No restore is applied. Re-inspect state and clock before retrying.
+A `409` means a client is still connected or the world changed. No restore is applied. Re-inspect state and clock before retrying. If the restore command fails for another reason, clear the token manually with `unset CANVAS_ADMIN_TOKEN` before investigating.
+
+For PowerShell recovery, reuse the scoped `SecureString` conversion block from section 4, execute `list`, `get`, and `restore` inside its `try` block, and let the `finally` block remove `CANVAS_ADMIN_TOKEN`.
 
 The server validates the backup/schema and takes a new `before-restore` snapshot first. It restores records transactionally at a new synchronization clock rather than replaying old clocks/tombstones.
 
