@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
-    "dev:worker": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "legacy:worker:dev": "wrangler dev --ip 127.0.0.1 --port 8787",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -25,9 +25,9 @@
     "build": "vite build && node scripts/audit-build.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "check": "npm run lint && npm run typecheck && npm test && npm run test:worker && npm run build && npm run test:e2e && npm run test:live && npm run test:production",
-    "deploy:worker": "wrangler deploy",
+    "legacy:worker:deploy": "wrangler deploy",
     "check:worker": "wrangler deploy --dry-run --outdir artifacts/worker",
-    "admin": "node scripts/admin.mjs",
+    "legacy:worker:admin": "node scripts/admin.mjs",
     "release:verify": "node scripts/release-verify.mjs",
     "test:production": "node scripts/test-production.mjs",
     "source:syntax": "node scripts/check-source.mjs"
