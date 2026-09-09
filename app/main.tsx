@@ -7,6 +7,7 @@ import { DiagnosticsOverlay } from './diagnostics/DiagnosticsOverlay.tsx'
 import { canvasDiagnostics, diagnosticsRequested, exposeDiagnostics } from './diagnostics/metrics.ts'
 import { installDiagnosticsRuntime } from './diagnostics/runtime.ts'
 import './styles/app.css'
+import './styles/diagnostics.css'
 
 const useLegacyHarness = import.meta.env.MODE === 'test' || import.meta.env.VITE_CANVAS_TEST_BACKEND === 'legacy'
 const usePerformanceFixture = import.meta.env.MODE === 'performance' && new URLSearchParams(location.search).get('fixture') === '1'
