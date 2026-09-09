@@ -1,66 +1,47 @@
 # Third-party licensing and telemetry
 
-Canvas-specific code is offered under the repository MIT license. Dependencies retain their own licenses; this repository does **not** relicense the tldraw SDK as MIT software.
+Canvas-specific code is offered under the repository license. Dependencies retain their own licenses and notices.
 
-## tldraw
+## Excalidraw
 
-Canvas pins the interoperating tldraw package family to **5.4.0**. Production use of the SDK requires a valid tldraw trial, commercial, or hobby license key under tldraw's terms. No key is supplied, fabricated, bypassed, or committed by Canvas.
+The production editor uses `@excalidraw/excalidraw` **0.18.1**. Excalidraw is distributed under the MIT license in its upstream repository. Canvas uses the packaged editor as a dependency and does not claim ownership of Excalidraw source, icons, fonts, translations or other upstream assets.
 
-For a qualifying noncommercial project, tldraw offers a discretionary hobby license. Hobby deployments retain the required **“made with tldraw”** watermark. A trial is time-limited; commercial licensing follows tldraw's commercial terms. The key is intentionally treated as public frontend configuration because the SDK validates it client-side.
+Canvas does not add advertising, product analytics or tracking around the editor. Supabase Realtime/PostgREST traffic is functional collaboration traffic required by the product.
 
-Current official documentation should be checked again before every production licensing change:
+Upstream project: https://github.com/excalidraw/excalidraw
 
-- [tldraw SDK license](https://tldraw.dev/community/license)
-- [license key behavior](https://tldraw.dev/sdk-features/license-key)
-- [pricing](https://tldraw.dev/pricing)
-- [hobby application](https://tldraw.dev/get-a-license/hobby)
+## Supabase
 
-### License telemetry
+Production persistence and realtime collaboration use Supabase Postgres, PostgREST and Realtime. The frontend contains only the project URL and browser-safe publishable key. A Supabase service-role credential is not bundled or required by the public app.
 
-The current **license-key** documentation states that data collection depends on license type:
+Supabase receives the element rows, presence state and cursor broadcasts necessary to operate the shared canvas. Canvas does not intentionally send image/file uploads because media is outside the product model.
 
-| License state | Vendor-documented data sent from production SDK |
-| --- | --- |
-| Commercial | None |
-| Hobby | License ID, license type, SDK version, build environment, and page/deployment URL |
-| Trial | License ID, license type, SDK version, build environment, and page/deployment URL |
-| Unlicensed production | SDK version and page URL |
-| Development/localhost | No license telemetry described for development environments |
+Upstream/project information: https://supabase.com/
 
-The same documentation states that no user data, canvas content, or personally identifiable information is collected through this license telemetry.
+## React, Vite, Playwright and supporting packages
 
-An older general tldraw license page still contains a different statement saying hobby/commercial send no information and trial sends only a key hash. Because the dedicated current license-key documentation is more specific about the runtime implementation, Canvas documents the more conservative/current behavior above rather than relying on the older statement.
+React, React DOM, Vite, the Vite React plugin, TypeScript, Playwright, ESLint, Prettier and transitive dependencies retain their upstream licenses/notices.
 
-This is a description of tldraw's published documentation, **not an independent network audit**. Canvas itself adds no analytics, tracking pixel, advertising SDK, or product telemetry.
+The repository commits `package-lock.json` so the installed dependency graph is auditable. CI records `npm audit --json` and fails on high-severity dependency findings.
 
-### Watermark and production failure behavior
+## Historical tldraw / Cloudflare test harness
 
-The current license-key documentation says hobby licenses keep the watermark. Trial/commercial keys remove it. A non-local production build without a valid key logs license errors and stops rendering the editor after a short period; therefore the Pages workflow requires a configured production key rather than silently publishing an unusable editor.
+The repository still contains the previous tldraw + Cloudflare Worker implementation and its regression tests while migration coverage is retained. Those dependencies are **not the normal production editor** and the production Pages build does not require a tldraw license key or Cloudflare Worker deployment.
 
-## tldraw Cloudflare starter
+`tldraw` SDK packages retain tldraw's upstream license terms. Their presence for the historical harness does not relicense them under the Canvas repository license. Any future decision to ship tldraw in production would require a fresh review of tldraw's then-current production licensing terms.
 
-The official [tldraw Cloudflare multiplayer starter](https://github.com/tldraw/tldraw-sync-cloudflare) informed the SQLite sync and WebSocket Hibernation integration. The starter/example code is separately licensed from the SDK packages. Canvas removes the starter's media/unfurl storage concerns and adds its own one-world routing, media exclusion, size policy, recovery storage, interface, and deployment gates.
-
-Using MIT-licensed starter code does not change the license of imported tldraw SDK packages.
-
-## React, Vite, Cloudflare, Playwright, and supporting packages
-
-React, React DOM, Vite, the Vite React plugin, TypeScript, Wrangler, Playwright, ESLint, Prettier, and transitive dependencies retain their upstream licenses/notices.
-
-The source repository commits `package-lock.json` so the installed dependency graph is auditable. CI records `npm audit --json` and rejects high/critical findings. During hardening, Wrangler/Miniflare resolved `sharp 0.35.2`, which was covered by a high-severity libheif advisory. The project therefore overrides the transitive dependency to patched `sharp 0.35.4` and verifies the actual Worker runtime after installation.
-
-Static editor fonts/icons/assets are resolved from the installed tldraw asset package and retain their upstream licenses. Canvas does not copy font binaries into a separate downloadable package.
+Wrangler/Miniflare/Cloudflare-related packages used by the historical Worker tests retain their own licenses. They are development/test tooling in the current architecture.
 
 ## Canvas-owned assets
 
-The simple Canvas favicon/PWA icons are project assets. No stock photography, uploaded media, external thumbnails, third-party analytics, or advertising assets are bundled as product content.
+The Canvas shell, project-specific CSS, favicon/PWA icon treatment and integration code are project assets/code. No stock photography, uploaded media, remote thumbnails, advertising assets or analytics SDKs are intentionally bundled as product content.
 
 ## Redistribution
 
-Before redistributing a compiled build or changing engine/dependencies:
+Before redistributing a compiled build or changing the editor/backend dependencies:
 
-1. review the current tldraw license and the specific issued key terms;
-2. preserve required watermark/attribution behavior;
-3. retain dependency notices required by upstream licenses;
-4. rerun license/security dependency checks against the new lockfile;
-5. do not assume this notice supersedes a dependency's own license text.
+1. review the upstream licenses for the exact dependency versions in `package-lock.json`;
+2. retain attribution/notices required by those licenses;
+3. rerun the dependency audit and production build;
+4. verify that the built application contains only the intended production engine;
+5. never treat this notice as a replacement for an upstream license text.

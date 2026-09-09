@@ -1,324 +1,178 @@
-# Deployment and recovery
+# Deployment and Recovery
 
-The hardened Canvas source is merged to `main` in `thiepn/canvas`. PR #1 is historical; application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality workflow in GitHub Actions run `34298529147`. Do not deploy a different copy of the original source archive.
+## Production components
 
-The intended initial frontend URL is:
+Canvas production consists of two independently provisioned pieces:
 
-`https://thiepn.github.io/canvas/`
+1. a Supabase project containing `canvas_elements`, Realtime publication, RLS/validation and the private recovery schema;
+2. a static Vite build deployed by GitHub Actions to GitHub Pages.
 
-The backend is a Cloudflare Worker named `canvas-realtime` with one SQLite-backed `CanvasRoom` Durable Object.
+No Cloudflare Worker deployment is required for normal operation.
 
-## 1. Local release verification
+## 1. Provision Supabase
 
-Requires Node.js `>=22.16.0` and npm.
+Use the Supabase project intended for Canvas and apply every SQL file under `supabase/migrations/` in filename order. The checked-in migrations create:
 
-```sh
-git clone https://github.com/thiepn/canvas.git
-cd canvas
-git switch main
+- `public.canvas_elements` — shared production world;
+- `public.canvas_ci_elements` — isolated automated-test world;
+- Realtime publication for both tables;
+- RLS and validation constraints;
+- stale-write guards;
+- private `canvas_admin` history/recovery objects.
+
+For a new Supabase project, obtain its **Project URL** and **publishable/anon key** after migrations are applied. The publishable key is browser-safe. Never expose the service-role key.
+
+### Backend verification
+
+Run privileged SQL checks before pointing a frontend at a new project:
+
+```sql
+select tablename, policyname, cmd
+from pg_policies
+where schemaname = 'public'
+  and tablename in ('canvas_elements', 'canvas_ci_elements')
+order by tablename, policyname;
+
+select pubname, schemaname, tablename
+from pg_publication_tables
+where tablename in ('canvas_elements', 'canvas_ci_elements');
+```
+
+Expected: production has anonymous/authenticated SELECT/INSERT/UPDATE policies but no public physical DELETE policy; CI has the additional cleanup DELETE policy; both tables are in `supabase_realtime`.
+
+## 2. Frontend configuration
+
+`.env.example` lists the public configuration contract:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_PUBLISHABLE_KEY
+VITE_CANVAS_TABLE
+VITE_BASE_PATH
+```
+
+For this repository Pages deployment:
+
+```text
+VITE_CANVAS_TABLE=canvas_elements
+VITE_BASE_PATH=/canvas/
+```
+
+A custom domain mounted at its root should use `VITE_BASE_PATH=/`.
+
+The repository currently has checked-in defaults for the public Supabase URL and publishable key. GitHub Actions therefore does not require a secret to build. If those values change, update the public config and/or workflow environment intentionally. Do not create a GitHub secret merely to hide a publishable key; it will still be embedded in the browser bundle.
+
+## 3. Pre-release verification
+
+From a clean checkout:
+
+```bash
 npm ci
-npx playwright install --with-deps chromium firefox webkit
-npm run check
-npm run test:performance
+npm audit --audit-level=high
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:live
+npm run test:production
 ```
 
-The genuine npm lockfile is committed. Use `npm ci`; do not regenerate it casually during deployment.
+`test:live` and `test:production` write only to `canvas_ci_elements` and clean that table before/after their scenario. They must never target `canvas_elements`.
 
-Local development:
+The retained historical Worker regression suite may also run in CI, but it is not the production deployment gate by itself.
 
-```sh
-cp .env.example .env
-npm run dev
-```
+## 4. GitHub Pages
 
-Open `http://127.0.0.1:5173/canvas/`. The Worker runs at `http://127.0.0.1:8787`. Local Durable Object state is under `.wrangler/` and is independent of production.
+`.github/workflows/ci.yml` is the release pipeline. On a pull request it executes quality tests only. On `main`, the Pages deployment job is conditional on the quality job succeeding.
 
-## 2. Authenticate Cloudflare
+The Pages job should:
 
-From the checked-out repository:
+1. check out the exact successful commit;
+2. build with the repository base path `/canvas/`;
+3. configure GitHub Pages;
+4. upload `dist` as the Pages artifact;
+5. deploy that artifact.
 
-```sh
-npx wrangler login
-npx wrangler whoami
-```
+After merging, require both the quality job and the Pages deployment job to be green. A green pull-request run does **not** prove that Pages deployed.
 
-`wrangler.jsonc` already contains the production Pages origin and localhost development origins:
+## 5. Post-deployment verification
+
+Open:
 
 ```text
-https://thiepn.github.io
-http://127.0.0.1:5173
-http://localhost:5173
-http://127.0.0.1:4173
-http://localhost:4173
+https://thiepn.github.io/canvas/
 ```
 
-These are **origins**, so `/canvas/` is intentionally absent. If a future custom domain is added, append its HTTPS origin and redeploy the Worker. Origin filtering is not authentication; anyone using the permitted frontend can edit Canvas.
+Verify at minimum:
 
-The Worker configuration defines:
+- the app identifies itself as the Excalidraw/Supabase engine;
+- connection reaches `Live`;
+- browser console has no uncaught error;
+- repository-relative assets/manifest load without 404s;
+- a test vector made on the public canvas persists after refresh;
+- a second browser/device receives subsequent changes and presence.
 
-- Worker name `canvas-realtime`;
-- Durable Object binding `CANVAS_ROOM`;
-- class `CanvasRoom`;
-- initial SQLite Durable Object migration `v1`;
-- no R2/D1/database service.
+Because the public world is intentionally shared, remove any release-test objects manually after verification rather than adding a hidden cleanup endpoint.
 
-Do not rename the Worker/class/binding or discard migration history after production data exists unless you explicitly migrate the world.
+## Recovery operations
 
-## 3. Deploy the Worker
+Recovery is intentionally not available to anonymous clients.
 
-First verify the generated Worker bundle:
+### Find recent destructive transactions
 
-```sh
-npm run check:worker
+In Supabase SQL Editor or another privileged SQL session:
+
+```sql
+select *
+from canvas_admin.recovery_transactions
+order by finished_at desc
+limit 30;
 ```
 
-Then deploy:
+For detail:
 
-```sh
-npm run deploy:worker
+```sql
+select
+  history_id,
+  source_txid,
+  recorded_at,
+  element_id,
+  version,
+  version_nonce,
+  is_deleted,
+  updated_by
+from canvas_admin.element_history
+where source_txid = <source_txid>
+order by history_id;
 ```
 
-Wrangler prints the HTTPS Worker URL. Record its **origin**, for example:
+### Restore one transaction
 
-```text
-https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
+```sql
+select canvas_admin.restore_transaction(<source_txid>);
 ```
 
-Verify health:
+The returned integer is the number of affected elements restored. Recovery versions are bumped above current versions so connected clients accept the restored rows through normal Realtime propagation.
 
-```sh
-curl https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev/health
-```
+### Recovery guarantees and limits
 
-The response should identify Canvas, world `main`, and the pinned engine version.
+- previous state is captured before production UPDATE/physical DELETE;
+- history is grouped by Postgres transaction ID;
+- only the latest 20 prior versions per element are retained;
+- public browser roles have no privileges on `canvas_admin`;
+- a restore produces new writes, and those writes are themselves history-protected;
+- newly inserted objects have no previous state until their first update. Normal collaborative deletion is a tombstone UPDATE, so the pre-delete active state is captured.
 
-### Set the recovery secret
+If restoring after a suspected incident, inspect the transaction rows before executing restore. Do not expose `restore_transaction` through an anonymous RPC or frontend button.
 
-Generate a strong random token and retain it in a password manager or equivalent secure store:
+## Rollback strategy
 
-```sh
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-npx wrangler secret put ADMIN_TOKEN
-```
+Frontend rollback: redeploy a previously known-good Git commit through the normal Pages workflow.
 
-Paste the generated token at Wrangler's prompt.
+Data rollback: use `canvas_admin.restore_transaction` for element-state recovery. Avoid dropping/recreating the production table as a rollback mechanism.
 
-`ADMIN_TOKEN` is a true secret. Never place it in:
+Schema rollback: prefer a new forward migration that corrects the schema. Do not edit migration history that has already been applied to the live Supabase project.
 
-- a `VITE_` variable;
-- GitHub Pages output;
-- `.env` committed to Git;
-- a URL/query string;
-- browser local storage.
+## Cost model
 
-The normal Canvas frontend never needs this token.
-
-## 4. Verify the deployed backend before enabling Pages
-
-Use the deployed Worker origin as `CANVAS_API_URL` and verify administrative access from a terminal:
-
-```sh
-export CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
-read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
-export CANVAS_ADMIN_TOKEN
-npm run admin -- list
-npm run admin -- snapshot
-unset CANVAS_ADMIN_TOKEN
-```
-
-PowerShell equivalent (keeps the prompt masked and removes the plaintext environment value immediately afterward):
-
-```powershell
-$env:CANVAS_API_URL = "https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev"
-$secureToken = Read-Host "Canvas admin token" -AsSecureString
-$tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
-try {
-    $env:CANVAS_ADMIN_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
-    npm run admin -- list
-    npm run admin -- snapshot
-}
-finally {
-    Remove-Item Env:CANVAS_ADMIN_TOKEN -ErrorAction SilentlyContinue
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr)
-}
-```
-
-The admin CLI necessarily receives the token as a process environment string. The examples above keep that exposure scoped to the commands that require it and remove it afterward; do not save the token to scripts or shell profiles.
-
-## 5. Configure GitHub Pages
-
-In `thiepn/canvas`:
-
-1. **Settings → Pages → Build and deployment → Source:** choose **GitHub Actions**.
-2. **Settings → Secrets and variables → Actions → Variables:** set:
-   - `VITE_CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev`
-   - `VITE_BASE_PATH=/canvas/`
-3. **Actions secrets:** set:
-   - `VITE_TLDRAW_LICENSE_KEY=<your valid tldraw production key>`
-4. Leave `CANVAS_DEPLOY_ENABLED` unset/false until the deployed Worker has been checked.
-5. When ready to publish, set repository variable `CANVAS_DEPLOY_ENABLED=true`.
-
-All `VITE_` values are embedded into browser JavaScript. The tldraw SDK key is therefore public at runtime even though GitHub stores its source value as an Actions secret. `ADMIN_TOKEN` must never be a Vite value.
-
-The frontend expects only the Worker **origin** in `VITE_CANVAS_API_URL`; it constructs `/api/connect/main` and converts HTTPS to WSS itself.
-
-## 6. tldraw production license
-
-A non-local production deployment requires a valid tldraw hobby, trial, or commercial SDK key under tldraw's applicable terms. Canvas does not fabricate or commit a key.
-
-For this personal/noncommercial project, apply for/use a hobby key if tldraw approves the use case. Preserve the required tldraw watermark. If no suitable key is available, do not deploy an intentionally invalid configuration; an engine change is a separate migration project.
-
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## 7. Enable and deploy Pages
-
-The release is already merged to `main`, and exact merge commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete quality workflow in run `34298529147`. Its `deploy-pages` job was skipped because `CANVAS_DEPLOY_ENABLED` was not true; this was a deployment gate, not a test failure.
-
-After the Worker, GitHub variables, and tldraw key are configured:
-
-1. set `CANVAS_DEPLOY_ENABLED=true`;
-2. open **Actions → Canvas checks and Pages → Run workflow**;
-3. dispatch the workflow on `main`.
-
-A later push to `main` also triggers the workflow, but changing a repository variable alone does **not** create a new push event. Use manual workflow dispatch if there is no subsequent code/documentation change.
-
-The Pages deployment job runs only when:
-
-- quality passes;
-- the ref is `main`;
-- the event is not a PR;
-- `CANVAS_DEPLOY_ENABLED == true`;
-- the Worker URL is HTTPS;
-- a nonempty tldraw production key is configured.
-
-Expected Pages URL:
-
-`https://thiepn.github.io/canvas/`
-
-The workflow uses the official Pages artifact/deployment actions; it does not create or maintain a `gh-pages` branch.
-
-## 8. Real deployment acceptance test
-
-After Pages is live, test the production system, not only localhost:
-
-1. open the Pages URL in two independent browser contexts/devices;
-2. verify both report `Live`;
-3. create text in A and confirm B receives it;
-4. create/move/delete a shape in B and confirm A receives it;
-5. verify live cursors/names;
-6. verify one client's undo does not remove an unrelated remote edit;
-7. close all clients, reopen, and confirm persistence;
-8. interrupt one client's network, restore it, and confirm reconnection/convergence;
-9. paste an image and drop an image/PDF; confirm no asset is stored;
-10. export the world;
-11. inspect Worker logs/analytics for errors.
-
-### Production hibernation check
-
-Local Miniflare/Wrangler tests validate the hibernation-compatible code path but cannot prove Cloudflare actually evicted/woke the production Durable Object.
-
-For the real check:
-
-1. connect at least one browser;
-2. leave the connection idle long enough for Cloudflare to hibernate the object when the platform chooses;
-3. interact again without refreshing;
-4. confirm edits synchronize normally;
-5. inspect Cloudflare logs/analytics for unexpected active duration/errors.
-
-This is the remaining platform-specific validation after repository CI.
-
-### Physical mobile/tablet check
-
-At minimum verify on a real phone and, preferably, an iPad/Android tablet with stylus:
-
-- canvas owns the viewport without accidental body scroll;
-- one-finger object interaction;
-- two-finger pan/pinch;
-- drawing;
-- text editing/keyboard appearance;
-- selection handles;
-- toolbar safe areas;
-- no accidental binary paste/upload.
-
-Playwright's mobile/touch emulation does not certify Apple Pencil/palm rejection.
-
-## 9. Export and owner recovery
-
-The Canvas menu downloads a portable JSON backup. A disconnected export is marked as locally unconfirmed; it may include pending tab state and must not be treated as a server acknowledgement.
-
-### List/create/export server snapshots
-
-```sh
-export CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
-read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
-export CANVAS_ADMIN_TOKEN
-
-npm run admin -- list
-npm run admin -- snapshot
-npm run admin -- export Canvas-before-maintenance.json
-unset CANVAS_ADMIN_TOKEN
-```
-
-Avoid leaving the token in shell history. Prefer a secure prompt/environment mechanism. On PowerShell, use the scoped SecureString-to-environment pattern from section 4 around the equivalent admin commands.
-
-### Recover from accidental deletion
-
-Start a fresh scoped admin-token session before recovery; the export example intentionally removed its token:
-
-```sh
-read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
-export CANVAS_ADMIN_TOKEN
-npm run admin -- list
-npm run admin -- get SNAPSHOT_UUID Canvas-recovered.json
-```
-
-Then:
-
-1. review the downloaded backup;
-2. close **every** Canvas tab/device;
-3. run `npm run admin -- list` again and note the current world `clock`;
-4. restore only against that exact clock:
-
-```sh
-npm run admin -- restore Canvas-recovered.json --expect-clock CURRENT_CLOCK --yes
-unset CANVAS_ADMIN_TOKEN
-```
-
-A `409` means a client is still connected or the world changed. No restore is applied. Re-inspect state and clock before retrying. If the restore command fails for another reason, clear the token manually with `unset CANVAS_ADMIN_TOKEN` before investigating.
-
-For PowerShell recovery, reuse the scoped `SecureString` conversion block from section 4, execute `list`, `get`, and `restore` inside its `try` block, and let the `finally` block remove `CANVAS_ADMIN_TOKEN`.
-
-The server validates the backup/schema and takes a new `before-restore` snapshot first. It restores records transactionally at a new synchronization clock rather than replaying old clocks/tombstones.
-
-Keep external downloaded exports before risky migrations. Rolling snapshots inside the same Durable Object cannot recover loss of the entire Cloudflare account/namespace.
-
-## 10. Upgrades
-
-Before changing the tldraw package family or persistent schema:
-
-1. export production;
-2. create a server snapshot;
-3. update all interoperating tldraw packages together;
-4. restore/migrate a copy into isolated local Worker storage;
-5. run unit + Worker + cross-browser multiplayer + reconnect + collaborative undo + media rejection + production preview tests;
-6. run the large-scene benchmark;
-7. deploy coordinated Worker/frontend versions;
-8. verify the production world before retiring the previous deployment.
-
-A source rollback is not a database rollback.
-
-## Troubleshooting
-
-**403 from Worker:** verify the exact frontend origin in `ALLOWED_ORIGINS`; do not include `/canvas/` there.
-
-**Canvas stays Connecting:** check `/health`, browser network/WebSocket errors, `VITE_CANVAS_API_URL`, Worker deployment, and origin configuration.
-
-**Production license error:** provide a valid tldraw key and rebuild Pages.
-
-**Old frontend after deploy:** close Canvas tabs and reload. The service worker is intentionally conservative around active editor sessions.
-
-**Missing world after infrastructure rename:** verify Cloudflare account, Worker binding/class/migration/namespace before restoring anything.
-
-**Backup failure:** investigate even if live editing still works; primary persistence and recovery are separate guarantees.
-
-**Large-scene slowdown:** 10,000 shapes is a stress ceiling. The measured benchmark reached ~825 MiB JS heap and ~26 ms p95 frame interval at that size. Organize/delete obsolete content or lower scene size rather than raising limits blindly.
+The design intentionally avoids application servers, object storage and scheduled background jobs. Static Pages hosting plus the existing Supabase project is the complete normal runtime. Monitor Supabase database/Realtime usage if the trusted-group usage pattern changes substantially.

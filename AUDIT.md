@@ -1,180 +1,201 @@
 # Canvas — final implementation and release audit
 
-**Candidate:** `1.0.0-rc.1`  
+**Candidate:** `1.0.0-rc.2`  
 **Assessment window:** 8–9 September 2026  
 **Repository:** `thiepn/canvas`  
-**Application release branch:** `main`  
-**Historical hardening PR:** #1 (merged)
+**Production architecture:** Excalidraw + Supabase Postgres/Realtime  
+**Release-hardening change set:** PR #4
 
-## Release assessment
+## Executive assessment
 
-The original uploaded source candidate was not releasable: its first GitHub Actions run could not install the declared tldraw 5.4.1 sync package, it had no genuine lockfile, several SDK boundaries were written against newer source than the npm-published package family, and runtime/browser behavior had not been certified.
+Canvas now ships the architecture actually intended for the public application: a static React/Vite frontend using **Excalidraw 0.18.1** and **Supabase Postgres + Realtime** for the one permanent shared canvas. Anonymous identity is local to the browser; there is no account, login, role, room picker, media upload, analytics layer, or application server required for normal production use.
 
-Those blockers were treated as implementation defects rather than documentation caveats. PR #1 hardened and certified the application, then was squash-merged to `main` as commit `f429294102146b61107de0427b360fab4c1f9f89`.
+The earlier tldraw + Cloudflare Worker/Durable Object implementation remains in the repository only as historical regression infrastructure. Its mature unit, protocol, persistence, recovery and cross-browser suites are still useful for detecting regressions in shared policies and legacy code, but they are **not** presented as proof of the shipped Supabase/Excalidraw runtime.
 
-### Certified source on `main`
+The release-hardening work corrected that evidence boundary. The live gate now drives real Excalidraw controls and persists through the isolated Supabase `canvas_ci_elements` table. The compiled-production gate builds the same Excalidraw/Supabase path deployed by GitHub Pages and verifies the built `/canvas/` application rather than forcing the legacy Worker harness.
 
-The exact squash-merge commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete **Canvas checks and Pages / quality** workflow in GitHub Actions run `34298529147`.
+A predecessor head of PR #4, commit `5ca7f14a523ed52664aa4d60652dcbd00ec9724e`, passed the complete quality workflow in Actions run `34324866947`: dependency install/audit, lint, strict TypeScript, unit tests, Worker regression tests, Worker dry-run, production build, the retained Playwright matrix, the real live Supabase gate, and the compiled-production Supabase smoke. The final release candidate additionally expands both real production-path Playwright gates to Chromium, Firefox and WebKit. **The PR must not be merged unless the exact final head passes those expanded gates.** The Actions workflow on the exact commit is the authoritative release record.
 
-The run passed every quality step:
+## What is actually shipped
 
-- `npm ci`;
-- full dependency audit capture;
-- `npm audit --audit-level=high`;
-- ESLint;
-- strict TypeScript;
-- 33 unit/storage tests;
-- 5 Worker/Durable Object integration tests;
-- Wrangler production dry-run;
-- optimized Vite build and bundle audit;
-- Chromium/Firefox/WebKit E2E;
-- optimized `/canvas/` production-preview smoke.
+### Frontend
 
-The retained exact-`main` artifact reports **zero vulnerabilities at every severity level**, **62 expected E2E passes, 4 intentional project-specific skips, 0 unexpected failures, 0 flaky tests**, and **1/1 production-preview pass**. The four E2E skips are limited to running the ten-client stress case once in Chromium and using Chromium-only CDP multi-touch injection; normal collaboration, required-tool, and responsive coverage remains cross-browser.
+- React 19 + TypeScript + Vite.
+- Excalidraw 0.18.1 is the production infinite-canvas engine.
+- GitHub Pages repository base path `/canvas/` is supported explicitly.
+- The legacy tldraw editor import is compile-time guarded so normal production builds do not intentionally select or require the legacy runtime.
+- The app exposes only the vector/document interactions appropriate to Canvas; image/file media paths are not part of the persistence model.
+- Anonymous display identity is generated and retained locally in the browser rather than stored as an account.
 
-The required-tool matrix explicitly drives the real toolbar/canvas in Chromium, Firefox, and WebKit to create and persist rectangle, ellipse, diamond, line, arrow, frame, and highlighter records, then erases a real target by crossing its outline. The first version of that regression revealed a test-assumption error—tldraw's hollow geo eraser correctly does not treat empty interior space as an erase hit—so the final test uses the natural outline-crossing gesture and passes in all three engines.
+### Persistence and realtime
 
-**Source certification is complete. Production deployment is separate.** The `deploy-pages` job on the certified `main` run was skipped because `CANVAS_DEPLOY_ENABLED` was not true; this is an intentional publication gate, not a failed quality check. Real Cloudflare hibernation wake, production license validation, production recovery routing, and physical stylus/palm behavior cannot be truthfully inferred from repository CI.
+Production state is row-based in `public.canvas_elements`. Each Excalidraw element is stored independently with:
 
-## Executed evidence
+- immutable row ID;
+- version and version nonce;
+- tombstone state;
+- validated JSON element body;
+- bounded updater identifier;
+- database update timestamp.
 
-| Layer | Result |
+Supabase Realtime publishes row changes to connected clients. The client reconciles snapshots and Realtime events by element version rather than replacing a stale whole-document blob. This is the central concurrency property of the production architecture.
+
+### Database protection
+
+The production schema enforces server-side constraints for:
+
+- element ID length and ID/body agreement;
+- version and nonce ranges;
+- JSON-object shape;
+- maximum serialized element size;
+- the allowed persistent vector element types: rectangle, diamond, ellipse, line, arrow, freedraw, text and frame.
+
+Row Level Security is enabled. Anonymous/authenticated public clients may read, insert and update the shared world as required by the open-link product model. Physical `DELETE` is not granted on the production table; ordinary deletion is represented by the element tombstone. The isolated CI table intentionally grants cleanup DELETE so automated runs can start and finish empty.
+
+The explicit security model remains: **anyone who has the public Canvas URL can read and edit the shared canvas.** This is a product decision, not authentication security.
+
+## Recovery and destructive-edit protection
+
+Production changes have an owner-only recovery layer in private schema `canvas_admin`:
+
+- each accepted production UPDATE or physical DELETE captures the previous row;
+- history records are grouped by PostgreSQL transaction ID;
+- history is capped to the newest 20 captured versions per element;
+- `canvas_admin.restore_transaction(txid)` restores the affected previous states using newer element versions, allowing Realtime clients to converge on the recovered state;
+- the private schema, history table and restore function are inaccessible to `public`, `anon` and `authenticated` roles.
+
+The recovery trigger was explicitly corrected so a `BEFORE UPDATE` returns `NEW` while a `DELETE` returns `OLD`; returning `OLD` for updates would have silently discarded edits. Recovery behavior was exercised with a rollback-only SQL self-test so validation did not leave synthetic content in the production world.
+
+This recovery mechanism deliberately requires privileged database access. Canvas does not expose a public restore HTTP endpoint or ship a service-role key to the browser.
+
+## Test and release evidence
+
+### Production-path gates
+
+These are the tests that certify what users actually receive:
+
+1. **Live Supabase collaboration test** — two independent browser contexts connect to the real Excalidraw/Supabase application using the isolated `canvas_ci_elements` table. Client A creates a real rectangle through Excalidraw UI; the row must persist; client B receives the shared world and deletes the rectangle; the database must converge to the tombstone. Browser page errors fail the test.
+2. **Compiled production smoke** — Vite builds the real `/canvas/` Excalidraw/Supabase bundle, Playwright opens the compiled preview, verifies the production engine marker and Live state, confirms no test bridge is shipped, creates a real rectangle, verifies Supabase persistence, checks the PWA manifest and repository-path assets, reloads, and verifies persistence remains.
+3. Both gates are configured sequentially for **Chromium, Firefox and WebKit**. Sequential execution prevents the shared isolated CI table from being cleaned by one browser while another test is using it.
+
+### Retained regression gates
+
+The repository also retains the earlier Worker/tldraw test harness. It is intentionally labeled as regression evidence rather than production certification. Its established evidence includes:
+
+- **33** unit/storage/security tests;
+- **5** Worker/Durable Object integration tests;
+- **62 expected Playwright passes with 4 intentional project-specific skips** across Chromium, Firefox and WebKit in the prior full matrix;
+- two-client collaboration, independent concurrent edits, local undo isolation, reconnect, presence, rename/disconnect cleanup, ten-context convergence, pointer drawing, text, resize, paste/media rejection, accessible controls, the requested viewport matrix, touch behavior, phone controls, required vector tools and eraser behavior;
+- Worker protocol limits, CORS, rate/size guards, historical SQLite snapshot/recovery behavior and restart persistence.
+
+These tests remain valuable because they exercise shared policies and protect the repository from accidental breakage, but a green legacy suite cannot substitute for the production-path gates above.
+
+### Static quality gates
+
+The CI workflow also requires:
+
+- `npm ci` from the committed lockfile;
+- full dependency audit capture and rejection of high/critical findings;
+- ESLint with zero warnings;
+- strict TypeScript for frontend and retained Worker code;
+- optimized Vite production build plus bundle audit;
+- retained Wrangler dry-run for the legacy Worker package;
+- diagnostic artifact retention on success or failure.
+
+At the predecessor certified PR head, npm reported zero known vulnerabilities and every quality step passed.
+
+## Deployment audit
+
+`.github/workflows/ci.yml` deploys GitHub Pages only after the `quality` job succeeds on `main`. Pull requests cannot deploy. A successful merge therefore does **not** bypass testing: the merged `main` commit is tested again, and only then may `actions/deploy-pages` publish `dist`.
+
+The deploy build uses `/canvas/` by default and can accept a repository variable override for a future custom-domain root. Supabase browser configuration is public by design; no service-role or recovery credential is embedded in the frontend.
+
+A release is complete only after all of the following are true:
+
+1. exact PR head is green;
+2. PR #4 is merged;
+3. merged `main` quality run is green;
+4. `deploy-pages` succeeds;
+5. the public GitHub Pages URL is fetched and verified to serve the Excalidraw/Supabase build.
+
+## Acceptance matrix
+
+| Area | Release status / gate |
 | --- | --- |
-| Dependency audit | **0 vulnerabilities** across info/low/moderate/high/critical on certified `main` run |
-| Unit/storage suite | **33 passed, 0 failed** |
-| Worker/Durable Object integration | **5 passed, 0 failed** |
-| Strict TypeScript | **Passed** frontend/shared and Worker projects |
-| Lint | **Passed** with zero warnings |
-| Worker production dry run | **Passed** |
-| Production Vite build | **Passed**; bundle audit executed; **601,531 bytes gzip JS** |
-| Cross-browser collaboration/interaction/tools | **62 expected, 4 intentional project-specific skips, 0 unexpected, 0 flaky** |
-| Required vector-tool matrix | **Passed in Chromium, Firefox, WebKit** |
-| Optimized production preview | **1/1 passed** |
-| Ten-client convergence | **Passed** in Chromium with ten isolated contexts |
-| Close-all/reopen persistence | **Passed** |
-| Collaborative undo isolation | **Passed** |
-| Network reconnect without page refresh | **Passed** |
-| Image/PDF/file rejection | **Passed** |
-| Administrative backup/restore | **Passed** locally through the real Worker path |
-| Large-scene benchmark | **Passed** at 100, 1k, 5k, and 10k persisted shapes |
+| One permanent shared world | Implemented; fixed production table/world |
+| No accounts or room UI | Implemented |
+| Anonymous local identity | Implemented |
+| Text/vector drawing/shapes/frames | Implemented through Excalidraw |
+| No persistent images/files/media | Enforced by production persistence type constraints and application behavior |
+| Server-authoritative persistence | Supabase Postgres |
+| Low-latency realtime | Supabase Realtime |
+| Stale whole-document overwrite avoidance | Per-element versioned rows |
+| Reconnect/convergence | Realtime client + live two-client gate |
+| Cross-browser production path | Chromium + Firefox + WebKit live and compiled gates |
+| GitHub Pages `/canvas/` | Build/deploy workflow configured |
+| Mobile viewport containment | Retained cross-browser regression matrix; production device/manual validation still appropriate |
+| Accessibility of application chrome | Retained automated regression coverage; manual screen-reader pass remains appropriate |
+| PWA manifest/shell | Compiled-production smoke verifies manifest; offline collaboration is not promised |
+| Backend RLS/validation | Implemented in committed Supabase migrations |
+| Media/type/record size bounds | Database constraints + client restrictions |
+| Destructive-edit recovery | Private transaction history + owner-only restore |
+| Reproducible backend | Supabase migrations committed |
+| Dependency/security audit | CI-enforced |
+| Production deployment | Automatic only after green `main`; must be externally verified after merge |
 
-## Performance findings
+## Known limitations and residual risk
 
-Dedicated GitHub-hosted Chromium measurements:
+### Open-link security model
 
-| Shapes | Generate + persist | Serialized size | Median frame | p95 frame | JS heap |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 2.18 s | 35.6 KB | 16.7 ms | 16.8 ms | 38 MiB |
-| 1,000 | 5.78 s | 358 KB | 16.7 ms | 16.9 ms | 88 MiB |
-| 5,000 | 26.9 s | 1.80 MB | 16.7 ms | 19.4 ms | 239 MiB |
-| 10,000 | 58.9 s | 3.59 MB | 18.5 ms | 26.0 ms | 825 MiB |
+There is intentionally no authentication or authorization boundary between trusted editors. Possession of the URL is effectively edit access. RLS protects the database from operations outside the intended anonymous capability set; it does not turn the product into a private authenticated workspace.
 
-Interpretation:
+### Supabase service dependence
 
-- 100–1,000 simple shapes are comfortably within the intended personal use case.
-- 5,000 remains responsive in the synthetic benchmark but uses materially more memory.
-- 10,000 is a stress ceiling, not a recommended everyday world size. Heap use near 825 MiB is the clearest measured scalability weakness.
-- Serialized current-state growth remains below the 8 MiB product world budget at 10,000 simple synthetic shapes.
-- Freehand geometry and rich text may be denser than this synthetic workload.
+Realtime collaboration and persistence depend on the availability and quotas of the configured Supabase project. The application has no separate paid failover service and promises no independent SLA.
 
-## Significant defects found and fixed
+### Conflict model is element-level, not character-level CRDT text
 
-1. **Unpublished dependency target.** `@tldraw/sync@5.4.1` was not available from npm despite the GitHub v5.4.1 release. The interoperating tldraw family is exact-pinned to published 5.4.0.
-2. **SDK API drift.** Obsolete editor asset props, external-text payload fields, context-menu typing, and Durable Object sync boundaries were updated to the installed 5.4.0 API instead of weakening TypeScript.
-3. **Vite asset-loader incompatibility.** The Vite-specific tldraw asset import caused Vite 8/Rolldown dependency-optimizer failures. Canvas now uses the compatible metadata-URL asset loader.
-4. **Second-build module-graph failure.** Build-path normalization was isolated inside Vite configuration instead of importing browser runtime configuration into the build config.
-5. **Cross-browser plain-text paste.** Canvas owns ordinary external plain-text paste while preserving tldraw structured internal vector clipboard data.
-6. **Reconnect transport model.** Reconnect tests isolate Canvas WebSocket failure from Vite dev-server/HMR transport behavior and still require automatic convergence without refresh.
-7. **Presence-only anonymous identity.** Anonymous user data remains local/ephemeral; persistent user records are rejected by the server.
-8. **Media bypasses.** Images/files are blocked in toolbar/content handlers, capture-phase paste/drop, asset storage, structured paste validation, and server authorization.
-9. **Hibernation reconstruction.** Authoritative state remains SQLite; bounded socket attachments contain only resumable session state. Invalid/oversized resume state falls back to reconnect.
-10. **Socket replacement race.** A stale closing WebSocket can no longer tear down a newer socket that reused the same tldraw session ID.
-11. **Unbounded input.** Frame/message/record/text/world/coordinate/connection limits and rate/byte token buckets protect the sync boundary.
-12. **World-budget efficiency.** Current-world bytes are tracked incrementally by record instead of reserializing the full world on every drag.
-13. **Recovery correctness.** Rolling snapshots, pre-deletion capture, pre-restore snapshots, checksums, bounded decompression, transactional chunk storage, exact-clock restore, and zero-client restore are implemented and tested.
-14. **Pages path mismatch.** The real repository is lowercase `thiepn/canvas`; build/test/deployment paths use `/canvas/`.
-15. **Dependency advisory.** Wrangler/Miniflare previously resolved advisory-affected `sharp 0.35.2`; the lockfile pins the patched transitive version `0.35.4`. The final audit now reports zero vulnerabilities.
-16. **License documentation drift.** Current tldraw license-key behavior is documented conservatively, including the requirement for a production key and hobby-watermark rules.
-17. **Release evidence drift.** Documentation is aligned to exact workflow artifacts rather than an older test-count estimate.
-18. **Required-tool evidence gap.** A dedicated real-editor cross-browser regression explicitly covers rectangle, ellipse, diamond, line, arrow, frame, highlighter, server persistence, and eraser deletion.
-19. **Eraser test semantics.** The initial regression pressed only inside a hollow rectangle; tldraw correctly uses outline hit-testing for hollow geos. The test now performs a natural sweep through the outline and passes in all three engines.
-20. **Post-merge status drift.** Release documentation previously still described PR #1 as pending after it had already merged. The release record now distinguishes certified source on `main` from the still-disabled production publication step.
-21. **Pages enablement procedure.** Changing `CANVAS_DEPLOY_ENABLED` alone does not create a push event. The runbook now explicitly requires a manual workflow dispatch on `main` when no subsequent push occurs.
+Independent elements converge by Excalidraw version/versionNonce ordering. Simultaneous conflicting modifications to the same element are resolved deterministically; Canvas does not implement a custom character-level collaborative text CRDT on top of Excalidraw.
 
-## Remaining limitations — not repository defects
+### Offline collaboration is not supported
 
-### Production Cloudflare hibernation is not yet empirically observed
+The PWA shell may cache static assets, but Canvas does not claim safe offline collaborative editing followed by arbitrary merge. Loss of connectivity should be treated as a collaboration interruption, not as a separate offline-authoritative branch.
 
-Canvas uses the current Cloudflare Hibernation WebSocket APIs, local Worker restart/reconnect behavior is tested, and no application heartbeat/interval is used to keep the Durable Object awake. Repository CI cannot force a production platform eviction. This is a deployment validation, not missing source functionality.
+### Physical stylus and palm rejection are not automated
 
-### Physical stylus/palm behavior is not certified
-
-Responsive and touch/pinch behavior is automated, including the requested viewport matrix. Playwright cannot substitute for Apple Pencil/Android stylus hardware and browser palm rejection.
+Playwright can exercise touch and browser input behavior, but it cannot replace physical Apple Pencil/S Pen/stylus hardware and palm-rejection testing.
 
 ### Infinite-canvas accessibility has inherent limits
 
-Application controls are named and keyboard-tested. A real screen-reader pass remains appropriate after deployment; spatial canvas content cannot be made equivalent to a semantically linear document solely through application chrome.
+Application chrome can be named and keyboard-operable, but spatial canvas content is not semantically equivalent to a linear document for assistive technology. A manual screen-reader pass remains appropriate after deployment.
 
-### 10,000-shape memory use is high
+### Legacy code remains in the repository
 
-The hard shape ceiling prevents unbounded growth, but approximately 825 MiB JS heap at 10,000 synthetic shapes is significant. The intended workload is far smaller; do not increase the ceiling without profiling.
+The old tldraw/Worker implementation is retained to preserve regression evidence and historical work. It increases dependency and maintenance surface even though the production build is guarded away from that runtime. A future cleanup release may remove it once equivalent production-path unit/integration coverage exists.
 
-### Open access is intentional
+## Final quality scoring
 
-Anyone who can use the permitted frontend can read/edit the world. Display names are not identities and origin checks are not authentication. This is the specified security model.
+Scores below assess the current release architecture and its implemented safeguards, while reserving perfect scores for evidence that cannot be automated here.
 
-## Quality scores
-
-| Dimension | Score / 10 | Basis |
+| Criterion | Score / 10 | Rationale |
 | --- | ---: | --- |
-| Architecture | **9.3** | One authoritative world, native record sync, one SQLite DO, hibernation, no unnecessary services |
-| Correctness | **9.3** | Strict types plus unit/Worker/cross-browser/required-tool/production regression |
-| Realtime collaboration | **9.3** | Two-way sync, concurrency, undo isolation, presence, reconnect, ten-client convergence tested |
-| Persistence | **9.3** | Server authority, restart/close-all persistence, recovery snapshots and restore tested |
-| Reliability | **9.0** | Reconnect/error/size/recovery safeguards; live platform hibernation drill remains operational |
-| Performance | **8.2** | Strong through 5k synthetic shapes; 10k memory cost is material |
-| Storage efficiency | **9.2** | Vector/text only, no binary storage, bounded records/world/backups |
-| Mobile UX | **8.3** | Required viewport/touch automation; physical hardware still separate |
-| Desktop UX | **9.0** | Native editor behavior retained with reduced product chrome and all required drawing tools exercised in three engines |
-| Visual polish | **8.4** | Clean minimal canvas-first UI and optimized-build screenshot evidence |
-| Accessibility | **7.9** | Named/keyboard controls; real screen-reader spatial-content audit remains manual |
-| Security within open-access model | **9.0** | Layered input/media/admin limits, strict origin handling, secret isolation, zero-vulnerability audit |
-| Maintainability | **9.1** | Strict TS, aligned engine versions, lockfile, recovery/deployment documentation |
-| Test quality | **9.4** | Real SQLite/Worker, three browser engines, full tool matrix, concurrency, restart/recovery, production preview, performance evidence |
-| Deployment readiness | **8.8** | Worker/Pages configs and source gates ready; external production configuration not supplied |
-| Documentation | **9.3** | Architecture, research, testing, deployment, recovery, licensing, limitations and exact evidence aligned |
+| Architecture | 9.0 | Simple static frontend + managed Postgres/Realtime; legacy code remains as debt |
+| Correctness | 9.0 | Versioned per-element state, DB constraints and real production-path tests |
+| Realtime collaboration | 9.0 | Real two-client Supabase gate; same-element conflicts are deterministic rather than CRDT text merging |
+| Persistence | 9.5 | Postgres-authoritative rows with reload verification |
+| Recovery | 9.0 | Private transaction history and restore; no scheduled full-world snapshot service |
+| Reliability | 8.5 | Managed backend and reconnect path; depends on Supabase availability/quota |
+| Storage efficiency | 9.0 | Per-element rows/tombstones; bounded individual record size |
+| Desktop UX | 9.0 | Mature Excalidraw interaction model with focused Canvas shell |
+| Mobile UX | 8.5 | Automated responsive/touch evidence plus remaining hardware validation |
+| Visual polish | 8.5 | Clean production editor shell; final subjective polish remains device-dependent |
+| Accessibility | 8.0 | Named chrome and automated checks; spatial-canvas limitations remain |
+| Security under open model | 9.0 | RLS, bounded schema, no service-role key, private recovery; public edit is intentional |
+| Maintainability | 8.5 | Strict TS and committed migrations; dual legacy/production code raises surface area |
+| Automated tests | 9.0 | Broad historical matrix plus real three-browser Supabase/compiled release gates |
+| Deployment | 9.0 | Pages gated on green main; public endpoint still requires post-merge verification |
+| Documentation | 9.5 | Architecture, security, testing, deployment/recovery, notices and migrations aligned |
 
-## Scope and simplicity audit
+**Overall release assessment: approximately 9.0/10, conditional on the exact final PR head, merged `main`, Pages deployment and public endpoint all passing their respective gates.**
 
-The release contains no:
-
-- accounts/OAuth/passwords;
-- workspace/board dashboard or room management;
-- image/video/audio/PDF/file storage;
-- R2/D1/Postgres/Supabase/Firebase/Redis;
-- comments/chat/notifications/social feed;
-- AI features;
-- task/calendar/database product layer;
-- analytics/tracking/advertising;
-- paid realtime service.
-
-The production concept remains:
-
-```text
-React/Vite/tldraw static frontend
-            │
-            ▼
-Cloudflare Worker
-            │
-            ▼
-one Durable Object: main
-            │
-            ▼
-SQLite sync state + bounded recovery snapshots
-```
-
-## Publication decision
-
-**The source release is certified on `main`.** Application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality gate in run `34298529147`. Future code/configuration changes must pass their own exact-SHA gate; documentation maintenance does not redefine the application release commit.
-
-Actual publication still requires the owner's Cloudflare deployment, `ADMIN_TOKEN`, production Worker URL, valid tldraw production key, and explicit `CANVAS_DEPLOY_ENABLED=true`. Once those are configured, manually dispatch **Canvas checks and Pages** on `main` if no later push occurs. After Pages is live, execute the hibernation, recovery, and physical-device checks in [DEPLOYMENT.md](DEPLOYMENT.md) and [TESTING.md](TESTING.md).
+The remaining gap to a higher score is no longer a missing basic implementation. It is primarily broader production-specific stress/device/accessibility evidence and the maintenance cost of retaining the historical Worker/tldraw implementation alongside the shipped Excalidraw/Supabase path.
