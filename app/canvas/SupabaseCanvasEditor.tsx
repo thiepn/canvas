@@ -150,6 +150,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const [status, setStatus] = useState<ConnectionState>('Connecting')
   const statusRef = useRef<ConnectionState>('Connecting')
   const [connectionAttempt, setConnectionAttempt] = useState(0)
+  const pageActiveRef = useRef(true)
   const channelCleanupRef = useRef<Promise<unknown>>(Promise.resolve())
   const retryDelayRef = useRef(1200)
   const [people, setPeople] = useState<PresencePerson[]>([])
@@ -183,10 +184,32 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   useEffect(() => { identityRef.current = identity }, [identity])
   useEffect(() => { apiRef.current = api }, [api])
-  useEffect(() => () => {
-    if (noticeTimer.current) clearTimeout(noticeTimer.current)
-    if (flushTimer.current) clearTimeout(flushTimer.current)
-  }, [])
+  useEffect(() => {
+    pageActiveRef.current = true
+    const hide = () => {
+      // Navigation may reject an outstanding save. Its recovery callback must
+      // not start another fetch in the document that is being torn down.
+      pageActiveRef.current = false
+      transition(navigator.onLine ? 'Reconnecting' : 'Offline')
+      if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
+      setConnectionAttempt(value => value + 1)
+    }
+    const show = () => {
+      if (pageActiveRef.current) return
+      pageActiveRef.current = true
+      retryDelayRef.current = 1200
+      setConnectionAttempt(value => value + 1)
+    }
+    window.addEventListener('pagehide', hide)
+    window.addEventListener('pageshow', show)
+    return () => {
+      pageActiveRef.current = false
+      window.removeEventListener('pagehide', hide)
+      window.removeEventListener('pageshow', show)
+      if (noticeTimer.current) clearTimeout(noticeTimer.current)
+      if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
+    }
+  }, [transition])
   useEffect(() => { document.documentElement.dataset.theme = resolvedTheme }, [resolvedTheme])
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)')
@@ -211,7 +234,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   const applyRows = useCallback((values: unknown[], replace = false) => {
     const editor = apiRef.current
-    if (!editor) return
+    if (!editor || !pageActiveRef.current) return
     const rows = values.map(normalizeRow).filter((row): row is SyncRow => row !== null)
     const localElements = replace ? [] : editor.getSceneElementsIncludingDeleted()
     const remoteElements: SceneElement[] = []
@@ -253,13 +276,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [])
 
   const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true) => {
+    if (!pageActiveRef.current) return
     const { data, error } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true }).abortSignal(AbortSignal.timeout(15_000))
     if (error) throw error
     if (isCurrent()) applyRows(data ?? [], pendingRef.current.size === 0)
   }, [applyRows, config.tableName, supabase])
 
   const flushPending = useCallback(async () => {
-    if (statusRef.current !== 'Live' || !navigator.onLine || pendingRef.current.size === 0) return
+    if (!pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || pendingRef.current.size === 0) return
     const elements = Array.from(pendingRef.current.values())
     pendingRef.current.clear()
     const rows = elements.map(element => ({
@@ -277,6 +301,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         const queued = pendingRef.current.get(element.id)
         if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
       }
+      if (!pageActiveRef.current) return
       if (!navigator.onLine) transition('Offline')
       notify(`Canvas could not save: ${error.message}`)
       if (navigator.onLine) {
@@ -286,12 +311,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           // Keep the local queue intact. The normal retry path below will try again.
         }
       }
-      if (navigator.onLine && pendingRef.current.size && !flushTimer.current) {
+      if (pageActiveRef.current && navigator.onLine && pendingRef.current.size && !flushTimer.current) {
         flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushPending() }, 1200)
       }
       return
     }
+    if (!pageActiveRef.current) return
     const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').in('id', ids)
+    if (!pageActiveRef.current) return
     if (readError) {
       notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
       return
@@ -300,7 +327,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [applyRows, config.tableName, loadAuthoritative, notify, supabase, transition])
 
   const scheduleFlush = useCallback(() => {
-    if (flushTimer.current) return
+    if (!pageActiveRef.current || flushTimer.current) return
     flushTimer.current = setTimeout(() => {
       flushTimer.current = null
       void flushPending()
@@ -343,19 +370,19 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     let syncGeneration = 0
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     const retry = () => {
-      if (disposed || retryTimer || !navigator.onLine) return
+      if (disposed || !pageActiveRef.current || retryTimer || !navigator.onLine) return
       const delay = retryDelayRef.current
       retryDelayRef.current = Math.min(delay * 2, 10_000)
       retryTimer = setTimeout(() => {
         retryTimer = null
-        if (!disposed) setConnectionAttempt(value => value + 1)
+        if (!disposed && pageActiveRef.current) setConnectionAttempt(value => value + 1)
       }, delay)
     }
     const start = async () => {
       // Removing a channel is asynchronous. Do not reuse a same-topic channel
       // while its predecessor is still leaving (including StrictMode cleanup).
       await channelCleanupRef.current
-      if (disposed) return
+      if (disposed || !pageActiveRef.current) return
       if (!navigator.onLine) { transition('Offline'); return }
       transition(connectionAttempt ? 'Reconnecting' : 'Connecting')
       collaboratorsRef.current.clear()
@@ -364,7 +391,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const currentChannel = supabase.channel(`canvas:${config.tableName}:v1`, { config: { presence: { key: identity.deviceId }, broadcast: { self: false } } })
       channel = currentChannel
       channelRef.current = currentChannel
-      const isCurrent = () => !disposed && navigator.onLine && channelRef.current === currentChannel
+      const isCurrent = () => !disposed && pageActiveRef.current && navigator.onLine && channelRef.current === currentChannel
       currentChannel
         .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {
           if (isCurrent() && payload.new && Object.keys(payload.new).length) applyRows([payload.new])
@@ -387,7 +414,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           apiRef.current?.updateScene({ collaborators: new Map(collaboratorsRef.current) })
         })
         .subscribe(subscriptionStatus => {
-          if (disposed) return
+          if (disposed || !pageActiveRef.current) return
           if (subscriptionStatus === 'SUBSCRIBED') {
             const generation = ++syncGeneration
             if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
@@ -418,7 +445,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         })
     }
     void start().catch(error => {
-      if (disposed) return
+      if (disposed || !pageActiveRef.current) return
       transition(navigator.onLine ? 'Error' : 'Offline')
       notify(`Canvas could not connect: ${error instanceof Error ? error.message : String(error)}`)
       retry()
@@ -436,7 +463,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   useEffect(() => {
     const channel = channelRef.current
-    if (!channel || (status !== 'Live' && status !== 'Synchronizing')) return
+    if (!pageActiveRef.current || !channel || (status !== 'Live' && status !== 'Synchronizing')) return
     void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, onlineAt: new Date().toISOString() }).catch(() => {})
   }, [identity, status])
 
