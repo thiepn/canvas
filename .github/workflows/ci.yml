@@ -37,7 +37,9 @@ jobs:
       - run: npm run test:worker
       - run: npm run check:worker
       - run: npm run build
-      - run: npx playwright install --with-deps chromium firefox webkit
+      - name: Install browser test runtimes
+        timeout-minutes: 6
+        run: npx playwright install --with-deps chromium firefox webkit
       - name: Real Excalidraw and Supabase regression gate
         run: npm run test:live
       - name: Preserve live-path browser diagnostics
@@ -88,7 +90,9 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v5.0.1
-      - run: npx playwright install --with-deps chromium
+      - name: Install deployed-site browser runtime
+        timeout-minutes: 6
+        run: npx playwright install --with-deps chromium
       - name: Verify published bundle, shared connection, reconnect and mobile menu
         run: node scripts/verify-deployed.mjs
         env:
