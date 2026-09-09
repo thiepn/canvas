@@ -182,11 +182,25 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     setStatus(next)
   }, [])
 
+  const captureCurrentScene = useCallback(() => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    // The editor model can be newer than its last React onChange callback.
+    // Preserve that final gesture before pagehide/offline locks callbacks.
+    // This only queues memory state; it never starts an unloading-page request.
+    for (const element of editor.getSceneElementsIncludingDeleted()) {
+      if (!isAllowedElement(element) || !isNewerVersion(stampOf(element), shadowRef.current.get(element.id))) continue
+      const queued = pendingRef.current.get(element.id)
+      if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
+    }
+  }, [])
+
   useEffect(() => { identityRef.current = identity }, [identity])
   useEffect(() => { apiRef.current = api }, [api])
   useEffect(() => {
     pageActiveRef.current = true
     const hide = () => {
+      captureCurrentScene()
       // Navigation may reject an outstanding save. Its recovery callback must
       // not start another fetch in the document that is being torn down.
       pageActiveRef.current = false
@@ -209,7 +223,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
       if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
     }
-  }, [transition])
+  }, [captureCurrentScene, transition])
   useEffect(() => { document.documentElement.dataset.theme = resolvedTheme }, [resolvedTheme])
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)')
@@ -219,6 +233,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [])
   useEffect(() => {
     const offline = () => {
+      captureCurrentScene()
       transition('Offline')
       setConnectionAttempt(value => value + 1)
     }
@@ -230,7 +245,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     window.addEventListener('offline', offline)
     window.addEventListener('online', online)
     return () => { window.removeEventListener('offline', offline); window.removeEventListener('online', online) }
-  }, [transition])
+  }, [captureCurrentScene, transition])
 
   const applyRows = useCallback((values: unknown[], replace = false) => {
     const editor = apiRef.current
