@@ -17,5 +17,5 @@
     "noEmit": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["app", "shared", "vite.config.ts", "playwright*.config.ts", "tests/e2e"]
+  "include": ["app", "shared", "vite.config.ts", "playwright*.config.ts", "tests/e2e", "tests/performance"]
 }
