@@ -123,16 +123,27 @@ read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
 export CANVAS_ADMIN_TOKEN
 npm run admin -- list
 npm run admin -- snapshot
+unset CANVAS_ADMIN_TOKEN
 ```
 
-PowerShell equivalent:
+PowerShell equivalent (keeps the prompt masked and removes the plaintext environment value immediately afterward):
 
 ```powershell
 $env:CANVAS_API_URL = "https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev"
-$env:CANVAS_ADMIN_TOKEN = Read-Host "Canvas admin token" -AsSecureString
+$secureToken = Read-Host "Canvas admin token" -AsSecureString
+$tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+try {
+    $env:CANVAS_ADMIN_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
+    npm run admin -- list
+    npm run admin -- snapshot
+}
+finally {
+    Remove-Item Env:CANVAS_ADMIN_TOKEN -ErrorAction SilentlyContinue
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr)
+}
 ```
 
-For PowerShell, expose the secure value only for the command process you actually use; do not save it to a script/history file.
+The admin CLI necessarily receives the token as a process environment string. The examples above keep that exposure scoped to the commands that require it and remove it afterward; do not save the token to scripts or shell profiles.
 
 ## 5. Configure GitHub Pages
 
@@ -239,11 +250,13 @@ The Canvas menu downloads a portable JSON backup. A disconnected export is marke
 
 ```sh
 export CANVAS_API_URL=https://canvas-realtime.YOUR_SUBDOMAIN.workers.dev
-export CANVAS_ADMIN_TOKEN=YOUR_PRIVATE_TOKEN
+read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
+export CANVAS_ADMIN_TOKEN
 
 npm run admin -- list
 npm run admin -- snapshot
 npm run admin -- export Canvas-before-maintenance.json
+unset CANVAS_ADMIN_TOKEN
 ```
 
 Avoid leaving the token in shell history. Prefer a secure prompt/environment mechanism.
