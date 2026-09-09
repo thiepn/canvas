@@ -3,18 +3,18 @@
 **Candidate:** `1.0.0-rc.1`  
 **Assessment window:** 8–9 September 2026  
 **Repository:** `thiepn/canvas`  
-**Release branch:** `release/canvas-v1-hardening`  
-**PR:** #1
+**Application release branch:** `main`  
+**Historical hardening PR:** #1 (merged)
 
 ## Release assessment
 
 The original uploaded source candidate was not releasable: its first GitHub Actions run could not install the declared tldraw 5.4.1 sync package, it had no genuine lockfile, several SDK boundaries were written against newer source than the npm-published package family, and runtime/browser behavior had not been certified.
 
-Those blockers were treated as implementation defects rather than documentation caveats. The hardening branch now has a real lockfile, an installable aligned tldraw 5.4.0 stack, strict frontend/Worker type compatibility, executable Worker/Durable Object integration, cross-browser multiplayer evidence, explicit required-tool coverage, optimized production-build evidence, zero dependency advisories, recovery coverage, and measured large-scene performance.
+Those blockers were treated as implementation defects rather than documentation caveats. PR #1 hardened and certified the application, then was squash-merged to `main` as commit `f429294102146b61107de0427b360fab4c1f9f89`.
 
-### Certified implementation head
+### Certified source on `main`
 
-Commit `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete **Canvas checks and Pages / quality** workflow in GitHub Actions run `34296811474`.
+The exact squash-merge commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete **Canvas checks and Pages / quality** workflow in GitHub Actions run `34298529147`.
 
 The run passed every quality step:
 
@@ -30,28 +30,26 @@ The run passed every quality step:
 - Chromium/Firefox/WebKit E2E;
 - optimized `/canvas/` production-preview smoke.
 
-The recorded npm audit contained **zero vulnerabilities at every severity level**. The E2E result was **62 passed, 4 intentional project-specific skips, 0 failed, 0 flaky**. The four skips are limited to running the ten-client stress case once in Chromium and using Chromium-only CDP multi-touch injection; normal collaboration, required-tool, and responsive coverage remains cross-browser.
+The retained exact-`main` artifact reports **zero vulnerabilities at every severity level**, **62 expected E2E passes, 4 intentional project-specific skips, 0 unexpected failures, 0 flaky tests**, and **1/1 production-preview pass**. The four E2E skips are limited to running the ten-client stress case once in Chromium and using Chromium-only CDP multi-touch injection; normal collaboration, required-tool, and responsive coverage remains cross-browser.
 
-The required-tool matrix now explicitly drives the real toolbar/canvas in Chromium, Firefox, and WebKit to create and persist rectangle, ellipse, diamond, line, arrow, frame, and highlighter records, then erases a real target by crossing its outline. The first version of that regression revealed a test-assumption error—tldraw's hollow geo eraser correctly does not treat empty interior space as an erase hit—so the final test uses the natural outline-crossing gesture and passes in all three engines.
+The required-tool matrix explicitly drives the real toolbar/canvas in Chromium, Firefox, and WebKit to create and persist rectangle, ellipse, diamond, line, arrow, frame, and highlighter records, then erases a real target by crossing its outline. The first version of that regression revealed a test-assumption error—tldraw's hollow geo eraser correctly does not treat empty interior space as an erase hit—so the final test uses the natural outline-crossing gesture and passes in all three engines.
 
-This audit update itself creates a later documentation-only commit. That exact final branch head must pass the same quality gate again. The final merge commit on `main` must also pass before publication.
-
-**Production deployment remains a separate operational step.** Real Cloudflare hibernation wake, production license validation, production recovery routing, and physical stylus/palm behavior cannot be truthfully inferred from repository CI.
+**Source certification is complete. Production deployment is separate.** The `deploy-pages` job on the certified `main` run was skipped because `CANVAS_DEPLOY_ENABLED` was not true; this is an intentional publication gate, not a failed quality check. Real Cloudflare hibernation wake, production license validation, production recovery routing, and physical stylus/palm behavior cannot be truthfully inferred from repository CI.
 
 ## Executed evidence
 
 | Layer | Result |
 | --- | --- |
-| Dependency audit | **0 vulnerabilities** across info/low/moderate/high/critical on certified implementation head |
+| Dependency audit | **0 vulnerabilities** across info/low/moderate/high/critical on certified `main` run |
 | Unit/storage suite | **33 passed, 0 failed** |
 | Worker/Durable Object integration | **5 passed, 0 failed** |
 | Strict TypeScript | **Passed** frontend/shared and Worker projects |
 | Lint | **Passed** with zero warnings |
 | Worker production dry run | **Passed** |
 | Production Vite build | **Passed**; bundle audit executed; **601,531 bytes gzip JS** |
-| Cross-browser collaboration/interaction/tools | **62 passed, 4 intentional project-specific skips, 0 failed, 0 flaky** |
+| Cross-browser collaboration/interaction/tools | **62 expected, 4 intentional project-specific skips, 0 unexpected, 0 flaky** |
 | Required vector-tool matrix | **Passed in Chromium, Firefox, WebKit** |
-| Optimized production preview | **Passed** |
+| Optimized production preview | **1/1 passed** |
 | Ten-client convergence | **Passed** in Chromium with ten isolated contexts |
 | Close-all/reopen persistence | **Passed** |
 | Collaborative undo isolation | **Passed** |
@@ -97,9 +95,11 @@ Interpretation:
 14. **Pages path mismatch.** The real repository is lowercase `thiepn/canvas`; build/test/deployment paths use `/canvas/`.
 15. **Dependency advisory.** Wrangler/Miniflare previously resolved advisory-affected `sharp 0.35.2`; the lockfile pins the patched transitive version `0.35.4`. The final audit now reports zero vulnerabilities.
 16. **License documentation drift.** Current tldraw license-key behavior is documented conservatively, including the requirement for a production key and hobby-watermark rules.
-17. **Release evidence drift.** Documentation was aligned to exact workflow artifacts rather than an older test-count estimate.
-18. **Required-tool evidence gap.** A dedicated real-editor cross-browser regression now explicitly covers rectangle, ellipse, diamond, line, arrow, frame, highlighter, server persistence, and eraser deletion.
+17. **Release evidence drift.** Documentation is aligned to exact workflow artifacts rather than an older test-count estimate.
+18. **Required-tool evidence gap.** A dedicated real-editor cross-browser regression explicitly covers rectangle, ellipse, diamond, line, arrow, frame, highlighter, server persistence, and eraser deletion.
 19. **Eraser test semantics.** The initial regression pressed only inside a hollow rectangle; tldraw correctly uses outline hit-testing for hollow geos. The test now performs a natural sweep through the outline and passes in all three engines.
+20. **Post-merge status drift.** Release documentation previously still described PR #1 as pending after it had already merged. The release record now distinguishes certified source on `main` from the still-disabled production publication step.
+21. **Pages enablement procedure.** Changing `CANVAS_DEPLOY_ENABLED` alone does not create a push event. The runbook now explicitly requires a manual workflow dispatch on `main` when no subsequent push occurs.
 
 ## Remaining limitations — not repository defects
 
@@ -175,6 +175,6 @@ SQLite sync state + bounded recovery snapshots
 
 ## Publication decision
 
-**The recorded implementation head is release-quality and its complete quality gate passed.** Because this audit update itself creates a later documentation-only commit, GitHub must rerun the same gate on the final branch head before merge. After merge, the `main` merge SHA must also be green.
+**The source release is certified on `main`.** Application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality gate in run `34298529147`. Future code/configuration changes must pass their own exact-SHA gate; documentation maintenance does not redefine the application release commit.
 
-Actual publication still requires the owner's Cloudflare deployment, `ADMIN_TOKEN`, production Worker URL, valid tldraw production key, and explicit `CANVAS_DEPLOY_ENABLED=true`. After live deployment, execute the hibernation, recovery, and physical-device checks in [DEPLOYMENT.md](DEPLOYMENT.md) and [TESTING.md](TESTING.md).
+Actual publication still requires the owner's Cloudflare deployment, `ADMIN_TOKEN`, production Worker URL, valid tldraw production key, and explicit `CANVAS_DEPLOY_ENABLED=true`. Once those are configured, manually dispatch **Canvas checks and Pages** on `main` if no later push occurs. After Pages is live, execute the hibernation, recovery, and physical-device checks in [DEPLOYMENT.md](DEPLOYMENT.md) and [TESTING.md](TESTING.md).
