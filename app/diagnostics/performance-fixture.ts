@@ -64,7 +64,7 @@ export function installPerformanceBridge(api: ExcalidrawImperativeAPI, setFixtur
       api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER })
     },
     selectFirst(count) {
-      const selectedElementIds = Object.fromEntries(api.getSceneElements().slice(0, count).map(element => [element.id, true]))
+      const selectedElementIds = Object.fromEntries(api.getSceneElements().slice(0, count).map(element => [element.id, true as const]))
       api.updateScene({ appState: { selectedElementIds }, captureUpdate: CaptureUpdateAction.NEVER })
     },
     serialize() {
