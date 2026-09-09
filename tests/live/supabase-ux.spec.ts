@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
 import { DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL } from '../../app/config/public-config.ts'
+import { dragOnCanvas, readScene } from './scene-helpers.ts'
 
 const TABLE = 'canvas_ci_elements'
 const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE_KEY, {
@@ -28,27 +29,9 @@ async function deletedCount(): Promise<number> {
   return count ?? 0
 }
 
-async function canvasBox(page: Page) {
-  const box = await page.locator('.live-excalidraw').boundingBox()
-  if (!box) throw new Error('Live Excalidraw surface has no bounding box.')
-  return box
-}
-
 async function selectTool(page: Page, title: RegExp, roleName: RegExp) {
   await page.getByTitle(title).click()
   await expect(page.getByRole('radio', { name: roleName })).toBeChecked()
-}
-
-async function selectFrameTool(page: Page) {
-  await page.getByRole('button', { name: 'Frame tool' }).click()
-}
-
-async function drag(page: Page, from: [number, number], to: [number, number], steps = 8) {
-  const box = await canvasBox(page)
-  await page.mouse.move(box.x + from[0], box.y + from[1])
-  await page.mouse.down()
-  await page.mouse.move(box.x + to[0], box.y + to[1], { steps })
-  await page.mouse.up()
 }
 
 async function waitForType(type: string) {
@@ -69,48 +52,56 @@ test('required vector tools persist through the real Excalidraw + Supabase path'
   await expect(page.getByTestId('toolbar-LaserPointer')).toBeHidden()
   await expect(page.getByRole('button', { name: 'Frame tool' })).toBeVisible()
 
+  // The properties panel occupies the left 220px when a drawing tool is active.
   await selectTool(page, /^Rectangle\b/i, /^Rectangle\b/i)
-  await drag(page, [180, 150], [290, 220])
+  await dragOnCanvas(page, [300, 150], [410, 220])
   await waitForType('rectangle')
 
   await selectTool(page, /^Ellipse\b/i, /^Ellipse\b/i)
-  await drag(page, [330, 150], [430, 225])
+  await dragOnCanvas(page, [480, 150], [580, 225])
   await waitForType('ellipse')
 
   await selectTool(page, /^Diamond\b/i, /^Diamond\b/i)
-  await drag(page, [470, 150], [570, 230])
+  await dragOnCanvas(page, [650, 150], [750, 230])
   await waitForType('diamond')
 
   await selectTool(page, /^Line\b/i, /^Line\b/i)
-  await drag(page, [190, 285], [310, 335])
+  await dragOnCanvas(page, [300, 285], [410, 335])
   await waitForType('line')
 
   await selectTool(page, /^Arrow\b/i, /^Arrow\b/i)
-  await drag(page, [350, 285], [470, 335])
+  await dragOnCanvas(page, [480, 285], [590, 335])
   await waitForType('arrow')
 
   await selectTool(page, /^Draw\b/i, /^Draw\b/i)
-  await drag(page, [510, 285], [600, 340], 14)
+  await dragOnCanvas(page, [660, 285], [750, 340], 14)
   await waitForType('freedraw')
 
   await selectTool(page, /^Text\b/i, /^Text\b/i)
-  const box = await canvasBox(page)
-  await page.mouse.click(box.x + 230, box.y + 410)
+  const box = await page.locator('.live-excalidraw').boundingBox()
+  if (!box) throw new Error('Live Excalidraw surface has no bounding box.')
+  await page.mouse.click(box.x + 300, box.y + 410)
   await page.keyboard.type('Production path text')
   await page.keyboard.press('Escape')
   await waitForType('text')
 
-  await selectFrameTool(page)
-  await drag(page, [420, 385], [610, 485])
+  await page.getByRole('button', { name: 'Frame tool' }).click()
+  await dragOnCanvas(page, [630, 385], [820, 485])
   await waitForType('frame')
 
   const beforeDelete = await deletedCount()
   await selectTool(page, /^Eraser\b/i, /^Eraser\b/i)
-  await drag(page, [170, 185], [300, 185], 14)
+  await dragOnCanvas(page, [280, 185], [430, 185], 14)
   await expect.poll(deletedCount).toBeGreaterThan(beforeDelete)
 
+  const expectedTypes = ['ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text', 'frame']
   const types = await activeTypes()
-  for (const type of ['ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text', 'frame']) expect(types).toContain(type)
+  for (const type of expectedTypes) expect(types).toContain(type)
+  await page.reload()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  const restored = await readScene(page)
+  for (const type of expectedTypes) expect(restored.map(element => element.type)).toContain(type)
+  expect(restored.some(element => element.type === 'rectangle')).toBe(false)
 })
 
 test('320px mobile shell stays contained and the identity/settings menu remains usable', async ({ page }) => {
@@ -149,9 +140,11 @@ test('offline state pauses editing and returns to Live after reconnect', async (
   await context.setOffline(true)
   await expect(page.getByText('Offline', { exact: true })).toBeVisible()
   await expect(page.getByText(/editing is paused until the shared canvas is synchronized/i)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Frame tool' })).toBeDisabled()
 
   await context.setOffline(false)
   await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
 })
 
 test('database independently rejects forbidden media records', async ({ browserName }) => {
