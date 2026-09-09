@@ -1,52 +1,93 @@
-# Security and privacy model
+# Security Model
 
-**Anyone who can reach Canvas can read and change the shared world.** There are no accounts, verified identities, private regions, roles, or invitations. A browser UUID is only a presence identifier. A deployment URL and CORS/origin checks are not cryptographic access control; a non-browser client can supply an allowed Origin header.
+## Deliberately open access
 
-Do not place confidential documents, credentials, personal records, or information requiring controlled access in this world. Anyone with editing access can select and delete content. Rolling backups reduce accidental-loss risk but do not make the editor access-controlled.
+Canvas has no authentication. Anyone who can reach the public URL can read and edit the single shared world. Display names and device IDs are attribution/presence metadata, not verified identities.
 
-## Implemented boundaries
+This means Canvas must not be used for secrets, private documents or sensitive personal information. There is no user-level authorization boundary to protect such data.
 
-The Worker accepts only the fixed public `main` world and configured browser origins. Public routes do not expose restore. The native sync library validates its protocol and schema; application rules reject assets, persistent user records, extra pages, unsupported shapes, binary payloads, unsafe JSON structure/keys, oversized records/text, excessive chunk streams, invalid coordinates, and operations above shape/byte quotas. The client additionally blocks file drops/paste and media handlers, strips pasted HTML to plain text, and reduces available tools. No preview URLs are fetched by the backend.
+The security objective is **containment, data integrity and recoverability under an intentionally open-write model**.
 
-Record metadata is not an arbitrary storage escape hatch. Current application records require empty `meta`. URLs in supported text/link fields accept only the allowed HTTP(S)/mailto schemes. Editor text is not rendered through application-controlled `innerHTML`. The full imported world is checked for duplicate records and invalid/cyclic parent trees, followed by native schema validation on restore.
+## Public browser capabilities
 
-Administration uses a separate at-least-32-character secret, compared through fixed-length SHA-256 digests. Admin endpoints reject browser Origin headers, require authorization, and disable caching. Restore additionally needs all clients closed, an exact clock precondition, explicit CLI acknowledgement, compatible schema/engine, and a successful safety backup. The example test token is not a production credential; the test Worker rejects non-local hostnames.
+The browser uses a Supabase publishable key. This is expected to be visible in JavaScript and network requests.
 
-No secret is embedded in frontend configuration. The tldraw license key is intentionally a public browser value. Cloudflare account credentials and `ADMIN_TOKEN` must remain private.
+For `public.canvas_elements`, RLS/table grants permit anonymous/authenticated clients to:
 
-## Persistence and collection
+- SELECT rows;
+- INSERT valid supported elements;
+- UPDATE valid supported elements.
 
-Local browser storage holds anonymous identity, appearance, hint dismissal, and native local preferences. The Worker stores shared vector/text records plus recovery snapshots. Transient presence is separate; persistent SDK user-attribution records are intentionally disabled. App-owned logs do not include entire records or cursor updates. The static service worker does not cache API responses or shared document snapshots.
+They cannot physically DELETE, TRUNCATE, alter triggers or access the private recovery schema. Canvas deletion is represented by a newer `is_deleted=true` element version.
 
-No analytics, advertising, tracking pixel, email collection, or added telemetry SDK is present. License-related behavior is documented in THIRD_PARTY_NOTICES.md. Cloudflare and GitHub remain the hosting providers and process requests under their own policies.
+The service-role key is never embedded in the frontend.
 
-## Verification evidence
+## Database integrity controls
 
-Security-relevant release checks execute in GitHub Actions rather than being inferred from source inspection.
+Postgres independently validates each production row:
 
-Application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality workflow on `main` in run `34298529147`, including:
+- ID length 1–128;
+- bounded version/version nonce;
+- updater attribution <=128 characters;
+- JSON must be an object;
+- serialized element JSON <=256 KiB;
+- element type must be one of the explicit vector allowlist;
+- JSON ID must match the row ID;
+- JSON version/nonce/deletion state must agree with relational columns through RLS checks;
+- stale/non-increasing update tuples are rejected by the version-order trigger.
 
-- reproducible `npm ci`;
-- full `npm audit --json` capture and `npm audit --audit-level=high` gate;
-- **zero npm vulnerabilities at info, low, moderate, high, and critical severities** in the retained exact-`main` artifact;
-- strict frontend/shared/Worker TypeScript and lint;
-- 33 unit/storage tests covering identity/configuration, input policy, limits, recovery, checksums, transaction rollback, and real SQLite storage;
-- 5 real local Wrangler Worker/Durable Object tests covering fixed-world routing, CORS/origin rejection, admin isolation, invalid restore protection, and SQLite persistence across Worker-process restart;
-- malformed/oversized WebSocket rejection in browser regression;
-- image paste and image/PDF/file drop rejection;
-- server asset rejection and structured-content validation;
-- cross-browser collaboration/reconnect/undo/persistence testing;
-- a retained E2E result of **62 expected, 4 intentional project-specific skips, 0 unexpected, 0 flaky** across Chromium, Firefox, and WebKit;
-- optimized production-preview smoke proving the test bridge is absent and no page/static-resource errors occur.
+The application also filters input client-side, but database constraints are the authoritative boundary.
 
-The required-tool E2E matrix also confirms that the reduced public toolbar creates only intended vector/text-compatible record types and that eraser deletion reaches authoritative server state.
+## Media/file rejection
 
-This evidence is not a penetration test and does not establish security against a malicious trusted editor beyond the documented quotas and validation model.
+The product has no upload/storage pipeline. File/image paste and drop are blocked in the browser, and media element types are rejected by Postgres. Supported stored types are limited to:
 
-## Residual risk and platform limits
+`rectangle`, `diamond`, `ellipse`, `line`, `arrow`, `freedraw`, `text`, `frame`.
 
-This is not a hardened public SaaS: it has no per-person access control, distributed abuse-control layer, audit attribution, end-to-end encryption, or protection from a trusted editor acting maliciously. Token buckets and quotas reduce accidents and simple floods, not all attacks. Public misuse can consume free-tier resources. Same-database snapshots do not cover deletion of the hosting account/namespace; retain owner-downloaded exports separately.
+Remote media previews are not an authorization mechanism and should not be added without a separate threat review.
 
-Production-specific checks remain after deployment: observe a real Cloudflare Durable Object hibernation/wake cycle, perform one noncritical production recovery drill, and verify operational secrets/routing. Physical stylus/palm behavior and a real screen-reader pass also require hardware/platform testing rather than repository CI.
+## Abuse limitations
 
-To report a sensitive defect, contact the repository owner privately; do not publish an active admin token or private canvas content in a public issue. Rotate a leaked admin token with `wrangler secret put ADMIN_TOKEN` and inspect exported backups before recovery.
+No-auth open-write collaboration cannot prevent a determined visitor with the URL from drawing unwanted content or modifying existing content. The current deployment is intended for a small trusted group, not an adversarial public board.
+
+Existing controls reduce blast radius:
+
+- per-record size limits;
+- vector-only type allowlist;
+- no public physical DELETE;
+- per-element conflict ordering instead of whole-document overwrite;
+- private history/recovery;
+- no file storage;
+- editing disabled when the client cannot establish a trustworthy live connection.
+
+If the URL becomes broadly distributed or adversarial traffic becomes a real problem, the appropriate next step is an access-control layer—not hiding the publishable key or relying on obscurity inside JavaScript.
+
+## Recovery security
+
+`canvas_admin` is private. Privileges are revoked from `public`, `anon`, and `authenticated` for its schema/table/view/functions.
+
+Before production UPDATE/DELETE, the previous row is recorded in `canvas_admin.element_history`, grouped by Postgres transaction ID. `canvas_admin.restore_transaction(bigint)` is owner-only and must be invoked through a privileged SQL session.
+
+Do **not** grant that function to `anon`/`authenticated` and do not expose it as an unauthenticated RPC endpoint.
+
+## CI isolation
+
+Automated browser tests use `public.canvas_ci_elements`, never the production world. That table intentionally permits DELETE for deterministic cleanup and therefore has broader policies than production. It must not be selected by the public deployment.
+
+The frontend defaults to `canvas_elements`; test configurations explicitly override `VITE_CANVAS_TABLE=canvas_ci_elements`.
+
+## Client-side identity
+
+Anonymous identity is stored in local browser storage. Names are bounded/sanitized for UI use. A visitor can change local storage or impersonate another display name; this is expected because identity is not authentication.
+
+Do not make security decisions based on `deviceId`, display name, color or presence metadata.
+
+## Dependencies and CI
+
+The workflow records an npm audit and fails on high-severity dependency findings. Lint, TypeScript, unit/integration tests, live Supabase tests, compiled-production tests and build audit are release gates.
+
+The historical tldraw/Worker harness is test-only and must not be considered the production security boundary.
+
+## Reporting
+
+For a vulnerability that would expose credentials, bypass intended database constraints, grant access to the private recovery schema, or corrupt other applications sharing the Supabase project, avoid demonstrating it destructively against the live world. Provide a minimal reproduction against the isolated CI table or a fresh project where possible.
