@@ -2,9 +2,19 @@ import { canvasDiagnostics } from './metrics.ts'
 
 const CANVAS_REST_PATH = '/rest/v1/canvas_'
 
-function requestInfo(input: RequestInfo | URL, init?: RequestInit): { url: string; method: string } {
-  if (input instanceof Request) return { url: input.url, method: (init?.method ?? input.method ?? 'GET').toUpperCase() }
-  return { url: String(input), method: (init?.method ?? 'GET').toUpperCase() }
+function requestInfo(input: RequestInfo | URL, init?: RequestInit): { url: string; method: string; body: BodyInit | null | undefined } {
+  if (input instanceof Request) return { url: input.url, method: (init?.method ?? input.method ?? 'GET').toUpperCase(), body: init?.body }
+  return { url: String(input), method: (init?.method ?? 'GET').toUpperCase(), body: init?.body }
+}
+
+function countBodyRows(body: BodyInit | null | undefined): number {
+  if (typeof body !== 'string') return 0
+  try {
+    const parsed: unknown = JSON.parse(body)
+    return Array.isArray(parsed) ? parsed.length : parsed && typeof parsed === 'object' ? 1 : 0
+  } catch {
+    return 0
+  }
 }
 
 function installNetworkMetrics(): () => void {
@@ -12,7 +22,7 @@ function installNetworkMetrics(): () => void {
   let inFlightWrites = 0
   const knownRows = new Map<string, boolean>()
 
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const instrumentedFetch: typeof window.fetch = async (input, init) => {
     const info = requestInfo(input, init)
     const isCanvas = info.url.includes(CANVAS_REST_PATH)
     const isWrite = isCanvas && ['POST', 'PATCH', 'PUT', 'DELETE'].includes(info.method)
@@ -21,6 +31,7 @@ function installNetworkMetrics(): () => void {
       inFlightWrites += 1
       canvasDiagnostics.gauge('pendingWrites', inFlightWrites)
       canvasDiagnostics.increment('dbWriteBatches')
+      canvasDiagnostics.increment('dbRowsWritten', countBodyRows(info.body))
     }
     try {
       const response = await originalFetch(input, init)
@@ -51,8 +62,39 @@ function installNetworkMetrics(): () => void {
       }
     }
   }
+  window.fetch = instrumentedFetch
 
   return () => { window.fetch = originalFetch }
+}
+
+function isPostgresRealtimeMessage(data: unknown): boolean {
+  if (typeof data !== 'string' || !data.includes('postgres_changes')) return false
+  try {
+    const parsed: unknown = JSON.parse(data)
+    if (Array.isArray(parsed)) return parsed[3] === 'postgres_changes'
+    return Boolean(parsed && typeof parsed === 'object' && (parsed as Record<string, unknown>).event === 'postgres_changes')
+  } catch {
+    return false
+  }
+}
+
+function installRealtimeMetrics(): () => void {
+  const NativeWebSocket = window.WebSocket
+  class DiagnosticsWebSocket extends NativeWebSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols)
+      const socketUrl = String(url)
+      if (!socketUrl.includes('supabase') && !socketUrl.includes('/realtime/')) return
+      this.addEventListener('message', event => {
+        if (!isPostgresRealtimeMessage(event.data)) return
+        const receivedAt = performance.now()
+        canvasDiagnostics.increment('realtimeMessages')
+        requestAnimationFrame(() => canvasDiagnostics.sample('realtimeReceiveToFrameMs', performance.now() - receivedAt))
+      })
+    }
+  }
+  window.WebSocket = DiagnosticsWebSocket
+  return () => { window.WebSocket = NativeWebSocket }
 }
 
 function installConnectionMetrics(): () => void {
@@ -115,6 +157,6 @@ function installGestureMetrics(): () => void {
 
 export function installDiagnosticsRuntime(): () => void {
   if (!canvasDiagnostics.enabled || typeof window === 'undefined') return () => {}
-  const cleanups = [installNetworkMetrics(), installConnectionMetrics(), installGestureMetrics()]
+  const cleanups = [installNetworkMetrics(), installRealtimeMetrics(), installConnectionMetrics(), installGestureMetrics()]
   return () => { for (const cleanup of cleanups.reverse()) cleanup() }
 }
