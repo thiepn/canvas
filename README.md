@@ -8,9 +8,9 @@ A lightweight persistent realtime infinite canvas for drawing, writing, and thin
 
 Canvas `1.0.0-rc.1` is implemented on the `release/canvas-v1-hardening` branch and tracked in PR #1. The application, Worker, recovery tooling, tests, lockfile, CI, Pages workflow, PWA assets, and deployment documentation are present.
 
-The previously incomplete release gate is now resolved. Commit `68f83d614a39388515cae2efe671832f07a65d00` passed the complete `Canvas checks and Pages / quality` workflow in GitHub Actions run `34294256800`: install, zero-vulnerability dependency audit, lint, strict type checking, 33 unit/storage tests, 5 Worker/Durable Object integration tests, Worker production dry-run, optimized build, Chromium/Firefox/WebKit E2E, and optimized production-preview smoke all passed. The final E2E result was **59 passed, 4 intentional project-specific skips, 0 failed, 0 flaky**.
+Commit `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete `Canvas checks and Pages / quality` workflow in GitHub Actions run `34296811474`: install, zero-vulnerability dependency audit, lint, strict type checking, 33 unit/storage tests, 5 Worker/Durable Object integration tests, Worker production dry-run, optimized build, Chromium/Firefox/WebKit E2E, and optimized production-preview smoke all passed. The E2E result was **62 passed, 4 intentional project-specific skips, 0 failed, 0 flaky**. The added all-tool regression explicitly created and server-persisted rectangle, ellipse, diamond, line, arrow, frame, and highlighter objects and erased a target using the real editor in all three browser engines.
 
-Any commit after that recorded head must pass the same gate again. The merge commit on `main` must also be green before publication. See [AUDIT.md](AUDIT.md), [TESTING.md](TESTING.md), and [docs/verification.json](docs/verification.json).
+This evidence update itself creates a later documentation-only commit, so that final branch head must pass the same gate again. The merge commit on `main` must also be green before publication. See [AUDIT.md](AUDIT.md), [TESTING.md](TESTING.md), and [docs/verification.json](docs/verification.json).
 
 ## What Canvas does
 
@@ -73,7 +73,7 @@ npm run test:production
 npm run test:performance
 ```
 
-The CI quality gate additionally records the full `npm audit --json` result and runs `npm audit --audit-level=high`. The final certified run reported **zero vulnerabilities at every severity level**. A patched `sharp 0.35.4` transitive override is retained because an earlier Wrangler/Miniflare dependency graph resolved an advisory-affected `sharp 0.35.2`; the current lockfile and Worker suite verify the patched graph.
+The CI quality gate additionally records the full `npm audit --json` result and runs `npm audit --audit-level=high`. The certified implementation run reported **zero vulnerabilities at every severity level**. A patched `sharp 0.35.4` transitive override is retained because an earlier Wrangler/Miniflare dependency graph resolved an advisory-affected `sharp 0.35.2`; the current lockfile and Worker suite verify the patched graph.
 
 ### Performance evidence
 
@@ -137,7 +137,7 @@ Application-specific source is MIT licensed. tldraw and its assets retain their 
 | `scripts/` | Local orchestration, administration, build/release checks |
 | `tests/unit/` | Identity/config/policy/recovery/storage unit coverage |
 | `tests/worker/` | Local Wrangler HTTP, persistence, restart, and backend guards |
-| `tests/e2e/` | Collaboration, reconnect, undo, media rejection, responsive and stress cases |
+| `tests/e2e/` | Collaboration, reconnect, undo, media rejection, required-tool, responsive and stress cases |
 | `.github/workflows/` | Read-only quality CI, gated Pages deployment, manual performance evidence |
 
 Future work should improve measured reliability, recovery, and large-scene efficiency before expanding the product surface.
