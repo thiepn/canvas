@@ -22,13 +22,13 @@ No analytics, advertising, tracking pixel, email collection, or added telemetry 
 
 ## Verification evidence
 
-Security-relevant release checks now execute in GitHub Actions rather than being inferred from source inspection.
+Security-relevant release checks execute in GitHub Actions rather than being inferred from source inspection.
 
-The certified implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed workflow run `34296811474`, including:
+Application release commit `f429294102146b61107de0427b360fab4c1f9f89` passed the complete post-merge quality workflow on `main` in run `34298529147`, including:
 
 - reproducible `npm ci`;
 - full `npm audit --json` capture and `npm audit --audit-level=high` gate;
-- **zero npm vulnerabilities at info, low, moderate, high, and critical severities**;
+- **zero npm vulnerabilities at info, low, moderate, high, and critical severities** in the retained exact-`main` artifact;
 - strict frontend/shared/Worker TypeScript and lint;
 - 33 unit/storage tests covering identity/configuration, input policy, limits, recovery, checksums, transaction rollback, and real SQLite storage;
 - 5 real local Wrangler Worker/Durable Object tests covering fixed-world routing, CORS/origin rejection, admin isolation, invalid restore protection, and SQLite persistence across Worker-process restart;
@@ -36,6 +36,7 @@ The certified implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` pas
 - image paste and image/PDF/file drop rejection;
 - server asset rejection and structured-content validation;
 - cross-browser collaboration/reconnect/undo/persistence testing;
+- a retained E2E result of **62 expected, 4 intentional project-specific skips, 0 unexpected, 0 flaky** across Chromium, Firefox, and WebKit;
 - optimized production-preview smoke proving the test bridge is absent and no page/static-resource errors occur.
 
 The required-tool E2E matrix also confirms that the reduced public toolbar creates only intended vector/text-compatible record types and that eraser deletion reaches authoritative server state.
