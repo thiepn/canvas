@@ -152,7 +152,7 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
     const operationStarted = Date.now()
     await pageA.getByTitle(/^Rectangle\b/i).click()
     await dragOnCanvas(pageA, [300, 250], [430, 330])
-    await expect.poll(() => pageB.locator('canvas.excalidraw__canvas.interactive').evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL() !== beforePixels), { message: 'Peer canvas pixels must change after the remote rectangle renders.' }).toBe(true)
+    await expect.poll(() => pageB.locator('canvas.excalidraw__canvas.interactive').evaluate((canvas: HTMLCanvasElement, baseline: string) => canvas.toDataURL() !== baseline, beforePixels), { message: 'Peer canvas pixels must change after the remote rectangle renders.' }).toBe(true)
     const remoteRenderMs = Date.now() - operationStarted
     await pageA.waitForTimeout(800)
     const afterWriteA = await diagnostics(pageA)
