@@ -51,7 +51,11 @@ test('two live clients persist and synchronize a real rectangle through Supabase
       const surfaceA = pageA.locator('.live-excalidraw')
       const boxA = await surfaceA.boundingBox()
       if (!boxA) throw new Error('Live Excalidraw surface has no bounding box.')
-      await pageA.getByRole('radio', { name: /^Rectangle\b/i }).click()
+
+      const rectangleTool = pageA.getByRole('radio', { name: /^Rectangle\b/i })
+      await pageA.getByTitle(/^Rectangle\b/i).click()
+      await expect(rectangleTool).toBeChecked()
+
       await pageA.mouse.move(boxA.x + 300, boxA.y + 250)
       await pageA.mouse.down()
       await pageA.mouse.move(boxA.x + 430, boxA.y + 330, { steps: 8 })
@@ -67,7 +71,11 @@ test('two live clients persist and synchronize a real rectangle through Supabase
       const surfaceB = pageB.locator('.live-excalidraw')
       const boxB = await surfaceB.boundingBox()
       if (!boxB) throw new Error('Peer Excalidraw surface has no bounding box.')
-      await pageB.getByRole('radio', { name: /^Eraser\b/i }).click()
+
+      const eraserTool = pageB.getByRole('radio', { name: /^Eraser\b/i })
+      await pageB.getByTitle(/^Eraser\b/i).click()
+      await expect(eraserTool).toBeChecked()
+
       await pageB.mouse.move(boxB.x + 280, boxB.y + 290)
       await pageB.mouse.down()
       await pageB.mouse.move(boxB.x + 450, boxB.y + 290, { steps: 12 })
