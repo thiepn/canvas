@@ -6,11 +6,11 @@ A lightweight persistent realtime infinite canvas for drawing, writing, and thin
 
 ## Release status
 
-Canvas `1.0.0-rc.1` is implemented on the `release/canvas-v1-hardening` branch and tracked in PR #1. The application, Worker, recovery tooling, tests, lockfile, CI, Pages workflow, PWA assets, and deployment documentation are present.
+Canvas `1.0.0-rc.1` is merged to `main`. PR #1 contains the historical release-hardening work; the application source release is represented by squash-merge commit `f429294102146b61107de0427b360fab4c1f9f89`.
 
-Commit `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete `Canvas checks and Pages / quality` workflow in GitHub Actions run `34296811474`: install, zero-vulnerability dependency audit, lint, strict type checking, 33 unit/storage tests, 5 Worker/Durable Object integration tests, Worker production dry-run, optimized build, Chromium/Firefox/WebKit E2E, and optimized production-preview smoke all passed. The E2E result was **62 passed, 4 intentional project-specific skips, 0 failed, 0 flaky**. The added all-tool regression explicitly created and server-persisted rectangle, ellipse, diamond, line, arrow, frame, and highlighter objects and erased a target using the real editor in all three browser engines.
+That exact `main` commit passed the complete `Canvas checks and Pages / quality` workflow in GitHub Actions run `34298529147`: install, zero-vulnerability dependency audit, lint, strict type checking, 33 unit/storage tests, 5 Worker/Durable Object integration tests, Worker production dry-run, optimized build, Chromium/Firefox/WebKit E2E, and optimized production-preview smoke all passed. The retained artifact records **62 expected E2E passes, 4 intentional project-specific skips, 0 unexpected failures, 0 flaky tests**, plus a **1/1 production-preview pass** and **0 npm vulnerabilities at every severity**. The all-tool regression creates and server-persists rectangle, ellipse, diamond, line, arrow, frame, and highlighter objects and erases a target using the real editor in all three browser engines.
 
-This evidence update itself creates a later documentation-only commit, so that final branch head must pass the same gate again. The merge commit on `main` must also be green before publication. See [AUDIT.md](AUDIT.md), [TESTING.md](TESTING.md), and [docs/verification.json](docs/verification.json).
+Source certification is complete. Production publication is not: the `deploy-pages` job in the same `main` run was intentionally skipped because the deployment-enable/configuration gate was not satisfied. Cloudflare deployment, the admin secret, production Worker URL, tldraw production key, and Pages enablement remain owner-controlled operational steps. See [AUDIT.md](AUDIT.md), [TESTING.md](TESTING.md), [DEPLOYMENT.md](DEPLOYMENT.md), and [docs/verification.json](docs/verification.json).
 
 ## What Canvas does
 
@@ -73,7 +73,7 @@ npm run test:production
 npm run test:performance
 ```
 
-The CI quality gate additionally records the full `npm audit --json` result and runs `npm audit --audit-level=high`. The certified implementation run reported **zero vulnerabilities at every severity level**. A patched `sharp 0.35.4` transitive override is retained because an earlier Wrangler/Miniflare dependency graph resolved an advisory-affected `sharp 0.35.2`; the current lockfile and Worker suite verify the patched graph.
+The CI quality gate additionally records the full `npm audit --json` result and runs `npm audit --audit-level=high`. The certified `main` run reported **zero vulnerabilities at every severity level**. A patched `sharp 0.35.4` transitive override is retained because an earlier Wrangler/Miniflare dependency graph resolved an advisory-affected `sharp 0.35.2`; the current lockfile and Worker suite verify the patched graph.
 
 ### Performance evidence
 
@@ -111,7 +111,7 @@ Deployment requires owner-controlled production configuration:
 5. set `VITE_BASE_PATH=/canvas/`;
 6. select GitHub Actions as the Pages source;
 7. set `CANVAS_DEPLOY_ENABLED=true` only when the backend configuration is ready;
-8. merge the certified release branch.
+8. run the **Canvas checks and Pages** workflow manually on `main` (or let a later `main` push trigger it) so the gated Pages job can execute.
 
 Exact commands and the recovery runbook are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
