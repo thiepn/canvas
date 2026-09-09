@@ -39,6 +39,11 @@ async function selectTool(page: Page, title: RegExp, roleName: RegExp) {
   await expect(page.getByRole('radio', { name: roleName })).toBeChecked()
 }
 
+async function selectFrameTool(page: Page) {
+  await page.locator('.App-toolbar__extra-tools-trigger').click()
+  await page.getByTestId('toolbar-frame').click()
+}
+
 async function drag(page: Page, from: [number, number], to: [number, number], steps = 8) {
   const box = await canvasBox(page)
   await page.mouse.move(box.x + from[0], box.y + from[1])
@@ -90,7 +95,7 @@ test('required vector tools persist through the real Excalidraw + Supabase path'
   await page.keyboard.press('Escape')
   await waitForType('text')
 
-  await selectTool(page, /^Frame\b/i, /^Frame\b/i)
+  await selectFrameTool(page)
   await drag(page, [420, 385], [610, 485])
   await waitForType('frame')
 
