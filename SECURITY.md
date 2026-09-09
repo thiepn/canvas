@@ -20,10 +20,32 @@ Local browser storage holds anonymous identity, appearance, hint dismissal, and 
 
 No analytics, advertising, tracking pixel, email collection, or added telemetry SDK is present. License-related behavior is documented in THIRD_PARTY_NOTICES.md. Cloudflare and GitHub remain the hosting providers and process requests under their own policies.
 
-## Residual risk and verification limits
+## Verification evidence
+
+Security-relevant release checks now execute in GitHub Actions rather than being inferred from source inspection.
+
+The certified implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed workflow run `34296811474`, including:
+
+- reproducible `npm ci`;
+- full `npm audit --json` capture and `npm audit --audit-level=high` gate;
+- **zero npm vulnerabilities at info, low, moderate, high, and critical severities**;
+- strict frontend/shared/Worker TypeScript and lint;
+- 33 unit/storage tests covering identity/configuration, input policy, limits, recovery, checksums, transaction rollback, and real SQLite storage;
+- 5 real local Wrangler Worker/Durable Object tests covering fixed-world routing, CORS/origin rejection, admin isolation, invalid restore protection, and SQLite persistence across Worker-process restart;
+- malformed/oversized WebSocket rejection in browser regression;
+- image paste and image/PDF/file drop rejection;
+- server asset rejection and structured-content validation;
+- cross-browser collaboration/reconnect/undo/persistence testing;
+- optimized production-preview smoke proving the test bridge is absent and no page/static-resource errors occur.
+
+The required-tool E2E matrix also confirms that the reduced public toolbar creates only intended vector/text-compatible record types and that eraser deletion reaches authoritative server state.
+
+This evidence is not a penetration test and does not establish security against a malicious trusted editor beyond the documented quotas and validation model.
+
+## Residual risk and platform limits
 
 This is not a hardened public SaaS: it has no per-person access control, distributed abuse-control layer, audit attribution, end-to-end encryption, or protection from a trusted editor acting maliciously. Token buckets and quotas reduce accidents and simple floods, not all attacks. Public misuse can consume free-tier resources. Same-database snapshots do not cover deletion of the hosting account/namespace; retain owner-downloaded exports separately.
 
-The dependency audit, real Worker admission tests, browser media tests, and runtime security regressions were not executable in the authoring runner because package installation was blocked. Their source exists, but those checks must pass before release. There is no claim of independent penetration testing or complete XSS/WCAG certification.
+Production-specific checks remain after deployment: observe a real Cloudflare Durable Object hibernation/wake cycle, perform one noncritical production recovery drill, and verify operational secrets/routing. Physical stylus/palm behavior and a real screen-reader pass also require hardware/platform testing rather than repository CI.
 
 To report a sensitive defect, contact the repository owner privately; do not publish an active admin token or private canvas content in a public issue. Rotate a leaked admin token with `wrangler secret put ADMIN_TOKEN` and inspect exported backups before recovery.
