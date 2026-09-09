@@ -7,8 +7,8 @@
     "fullName": "thiepn/canvas",
     "branch": "release/canvas-v1-hardening",
     "pullRequest": 1,
-    "certifiedHeadSha": "68f83d614a39388515cae2efe671832f07a65d00",
-    "certifiedWorkflowRun": 34294256800,
+    "lastFullyCertifiedImplementationHeadSha": "68f83d614a39388515cae2efe671832f07a65d00",
+    "lastFullyCertifiedWorkflowRun": 34294256800,
     "pagesBasePath": "/canvas/",
     "expectedPagesUrl": "https://thiepn.github.io/canvas/"
   },
@@ -145,16 +145,16 @@
   "releaseGates": {
     "exactHeadQualityWorkflow": {
       "required": true,
-      "status": "passed-for-recorded-head",
+      "status": "passed-for-recorded-implementation-head",
       "workflow": "Canvas checks and Pages",
       "evidenceRun": 34294256800,
-      "rule": "the final merge commit on main must also pass the same workflow; an older head run never certifies later changes"
+      "rule": "every later commit and the final main merge commit must pass the same workflow; documentation never claims that an older run certifies a newer SHA"
     },
     "dependencyAudit": {
       "required": true,
       "status": "passed",
       "command": "npm audit --audit-level=high",
-      "note": "final recorded audit reported zero vulnerabilities across all severities"
+      "note": "last fully certified run reported zero vulnerabilities across all severities"
     },
     "productionPreview": {
       "required": true,
