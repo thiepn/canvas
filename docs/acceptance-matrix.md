@@ -1,6 +1,6 @@
 # Release acceptance matrix
 
-**Assessment:** Canvas V1 source implementation is release-candidate complete. The recorded implementation head `68f83d614a39388515cae2efe671832f07a65d00` passed the complete quality workflow in GitHub Actions run `34294256800`. Because evidence/documentation updates create later commits, the final branch head and eventual `main` merge SHA must pass the same gate again. Production-only Cloudflare hibernation and physical stylus checks remain separate and are not falsely marked as CI passes.
+**Assessment:** Canvas V1 source implementation is release-candidate complete. Implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete quality workflow in GitHub Actions run `34296811474`, including the explicit required-tool matrix. Because this evidence/documentation update creates a later commit, the final branch head and eventual `main` merge SHA must pass the same gate again. Production-only Cloudflare hibernation and physical stylus checks remain separate and are not falsely marked as CI passes.
 
 Legend:
 
@@ -23,14 +23,14 @@ Legend:
 | Anonymous local identity | UUID/name/color local persistence; presence only | **PASS** |
 | Text | Native editor + pointer/text/browser persistence tests | **PASS** |
 | Freehand drawing | Native vector draw tool; pointer drawing test | **PASS** |
-| Highlighter | Native vector highlighter exposed and server-allowed | **IMPLEMENTED**; physical stylus review recommended |
-| Rectangle | Native reduced toolset + browser collaboration | **PASS** |
-| Ellipse | Native reduced toolset + reconnect follow-up edit | **PASS** |
-| Diamond | Native reduced geo tool + server allowlist | **IMPLEMENTED**; native engine behavior retained |
-| Line | Native line tool + server allowlist | **IMPLEMENTED** |
-| Arrow/connectors | Native arrow/binding support retained | **IMPLEMENTED** |
-| Frame | Native frame tool, one page | **IMPLEMENTED** |
-| Eraser | Native eraser retained in toolbar | **IMPLEMENTED** |
+| Highlighter | Real toolbar drag + server-persistence assertion in Chromium/Firefox/WebKit | **PASS** |
+| Rectangle | Real toolbar drag + persistence; collaboration coverage | **PASS** |
+| Ellipse | Real toolbar drag + persistence; reconnect follow-up edit | **PASS** |
+| Diamond | Real toolbar drag + server persistence in all three engines | **PASS** |
+| Line | Real toolbar drag + server persistence in all three engines | **PASS** |
+| Arrow/connectors | Real toolbar drag + server persistence in all three engines; native bindings retained | **PASS** |
+| Frame | Real toolbar drag + server persistence in all three engines | **PASS** |
+| Eraser | Real editor eraser sweep crosses hollow-geo outline; client/server deletion asserted in all three engines | **PASS** |
 | Selection/multi-select/move/resize/rotate | Native engine behavior; move/resize browser assertions | **PASS** for representative operations; native remainder retained |
 | Group/ungroup/duplicate | Native actions retained in context menu | **IMPLEMENTED** |
 | Copy/paste supported Canvas objects | tldraw structured clipboard deliberately preserved | **IMPLEMENTED**; plain-text cross-browser paste **PASS** |
@@ -54,9 +54,9 @@ Legend:
 | Backup/recovery | Real SQLite backups/checksums/rollback + owner restore browser/Worker scenario | **PASS** locally |
 | Export | Portable JSON export path | **PASS** implementation/build; deployed download drill recommended |
 | Input/rate/size limits | Unit policy tests + malformed/oversize WebSocket browser tests | **PASS** |
-| Tests | 33 unit + 5 Worker + 59 E2E + production-preview gate; 4 deliberate project-specific skips | **PASS** on recorded exact head |
-| CI | Read-only quality workflow and gated Pages deployment | **PASS** configuration and recorded exact-head run |
-| Dependency security | Final recorded npm audit | **PASS — 0 vulnerabilities** |
+| Tests | 33 unit + 5 Worker + 62 E2E + production-preview gate; 4 deliberate project-specific skips | **PASS** on recorded implementation head |
+| CI | Read-only quality workflow and gated Pages deployment | **PASS** configuration and recorded implementation run |
+| Dependency security | Recorded npm audit | **PASS — 0 vulnerabilities** |
 | Documentation | README/architecture/research/testing/deployment/security/license/audit | **PASS** |
 | No required paid infrastructure | No paid database/realtime/asset service | **PASS**, subject to Cloudflare/tldraw eligibility/usage |
 | No app analytics/tracking | None implemented | **PASS** |
@@ -70,7 +70,7 @@ Legend:
 | A — Fresh browser | Immediate editor, no login, generated local identity | **PASS** |
 | B — Draw + refresh | Real pointer stroke then persistence/reload coverage | **PASS** |
 | C — Text + refresh | Text creation, cross-client observation, reload | **PASS** |
-| D — Shapes/transforms + refresh | Rectangle/ellipse create, move/resize and persistence; remaining native tools retained | **PASS** representative; all-tool physical/manual sweep optional |
+| D — Shapes/transforms + refresh | Required-tool matrix covers rectangle/ellipse/diamond/line/arrow/frame/highlighter + server persistence; separate move/resize/reload coverage | **PASS** |
 | E — Two users | Independent contexts, realtime shapes/text/presence | **PASS** |
 | F — Simultaneous edits | Concurrent creates/moves; local undo isolation | **PASS** |
 | G — Zero clients | Close all contexts; new context sees state; Worker restart persistence | **PASS** |
