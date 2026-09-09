@@ -13,7 +13,11 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'live-chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'live-chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'live-firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'live-webkit', use: { ...devices['Desktop Safari'] } },
+  ],
   webServer: {
     command: 'npx vite --mode live-test --host 127.0.0.1 --port 5190 --strictPort',
     url: 'http://127.0.0.1:5190/canvas/',
