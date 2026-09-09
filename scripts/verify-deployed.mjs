@@ -1,26 +1,27 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { chromium, expect, request } from '@playwright/test'
+import { deploymentUrl, requireSecureResponse } from './deployment-url.mjs'
 
-const url = new URL(process.env.CANVAS_DEPLOYED_URL || '')
-if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Expected a public HTTPS deployment URL.')
+const url = deploymentUrl(process.env.CANVAS_DEPLOYED_URL)
 url.searchParams.set('release', process.env.GITHUB_SHA || 'verified')
 const html = await readFile('dist/index.html', 'utf8')
 const expectedAsset = html.match(/<script\b[^>]*\bsrc="([^"]+)"/)?.[1]
 if (!expectedAsset) throw new Error('Built index.html has no entry module.')
 await mkdir('artifacts/deployed', { recursive: true })
 
-const http = await request.newContext()
+const http = await request.newContext({ ignoreHTTPSErrors: false })
 try {
   await expect.poll(async () => {
-    const response = await http.get(url.href)
+    const response = await http.get(url.href, { timeout: 20_000 })
+    requireSecureResponse(response.url())
     return response.ok() && (await response.text()).includes(expectedAsset)
-  }, { timeout: 120_000, intervals: [1000, 2000, 5000], message: 'Pages must serve this release, not an older cached bundle.' }).toBe(true)
+  }, { timeout: 120_000, intervals: [1000, 2000, 5000], message: 'Pages must serve this release over HTTPS, not an older cached bundle.' }).toBe(true)
 } finally {
   await http.dispose()
 }
 
 const browser = await chromium.launch()
-const context = await browser.newContext({ viewport: { width: 1366, height: 768 } })
+const context = await browser.newContext({ viewport: { width: 1366, height: 768 }, ignoreHTTPSErrors: false })
 const page = await context.newPage()
 const pageErrors = []
 const failedAssets = []
@@ -30,6 +31,7 @@ page.on('response', response => {
 })
 try {
   await page.goto(url.href, { waitUntil: 'domcontentloaded' })
+  requireSecureResponse(page.url())
   await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible({ timeout: 45_000 })
   await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 45_000 })
   await expect(page.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
@@ -60,7 +62,7 @@ try {
   await page.screenshot({ path: 'artifacts/deployed/mobile-menu.png' })
   expect(pageErrors).toEqual([])
   expect(failedAssets).toEqual([])
-  const evidence = { commit: process.env.GITHUB_SHA, url: url.origin + url.pathname, expectedAsset, checkedAt: new Date().toISOString(), checks: ['exact-published-bundle', 'real-supabase-live', 'no-test-bridge', 'offline-reconnect', '320px-menu', 'no-page-errors', 'no-missing-assets'], layout }
+  const evidence = { commit: process.env.GITHUB_SHA, reportedUrl: process.env.CANVAS_DEPLOYED_URL, url: url.origin + url.pathname, finalUrl: page.url(), expectedAsset, checkedAt: new Date().toISOString(), checks: ['https-with-valid-certificate', 'exact-published-bundle', 'real-supabase-live', 'no-test-bridge', 'offline-reconnect', '320px-menu', 'no-page-errors', 'no-missing-assets'], layout }
   await writeFile('artifacts/deployed/verification.json', JSON.stringify(evidence, null, 2))
   console.log(JSON.stringify(evidence))
 } finally {
