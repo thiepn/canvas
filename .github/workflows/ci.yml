@@ -9,12 +9,18 @@ permissions:
 concurrency:
   group: canvas-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
 env:
   WRANGLER_SEND_METRICS: 'false'
 jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -23,8 +29,19 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Verify version-matched preinstalled browser runtimes
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const { chromium, firefox, webkit } = require('@playwright/test');
+          assert.equal(require('@playwright/test/package.json').version, '1.63.0', 'Update the Playwright image and package version together.');
+          for (const browser of [chromium, firefox, webkit]) {
+            fs.accessSync(browser.executablePath(), fs.constants.X_OK);
+            console.log(`${browser.name()}: ${browser.executablePath()}`);
+          }
+          NODE
       - name: Record source and full dependency audit
-        shell: bash
         run: |
           mkdir -p artifacts
           git archive --format=zip --output=artifacts/source.zip HEAD
@@ -37,9 +54,6 @@ jobs:
       - run: npm run test:worker
       - run: npm run check:worker
       - run: npm run build
-      - name: Install browser test runtimes
-        timeout-minutes: 6
-        run: npx playwright install --with-deps chromium firefox webkit
       - name: Real Excalidraw and Supabase regression gate
         run: npm run test:live
       - name: Preserve live-path browser diagnostics
@@ -66,6 +80,9 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --init --ipc=host
     permissions:
       contents: read
       pages: write
@@ -80,6 +97,14 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Verify version-matched deployed-site browser runtime
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          assert.equal(require('@playwright/test/package.json').version, '1.63.0', 'Update the Playwright image and package version together.');
+          fs.accessSync(require('@playwright/test').chromium.executablePath(), fs.constants.X_OK);
+          NODE
       - run: npm run build
         env:
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/canvas/' }}
@@ -90,9 +115,6 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v5.0.1
-      - name: Install deployed-site browser runtime
-        timeout-minutes: 6
-        run: npx playwright install --with-deps chromium
       - name: Verify published bundle, shared connection, reconnect and mobile menu
         run: node scripts/verify-deployed.mjs
         env:
