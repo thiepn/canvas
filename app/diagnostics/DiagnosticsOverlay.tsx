@@ -29,7 +29,7 @@ export function DiagnosticsOverlay() {
     <span>Frame p95 <b>{ms(snapshot, 'frameMs')}</b></span>
     <span>Long frames <b>{snapshot.counters.longFramesOver50ms ?? 0}</b></span>
     <span>Elements <b>{number(snapshot.gauges.sceneElements)}</b></span>
-    <span>Pending <b>{number(snapshot.gauges.pendingWrites)}</b></span>
+    <span>In-flight saves <b>{number(snapshot.gauges.pendingWrites)}</b></span>
     <span>Write p95 <b>{ms(snapshot, 'supabaseWriteMs')}</b></span>
     <span>Realtime→frame p95 <b>{ms(snapshot, 'realtimeReceiveToFrameMs')}</b></span>
     <span>Initial sync <b>{ms(snapshot, 'initialHydrationMs')}</b></span>
