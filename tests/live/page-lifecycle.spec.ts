@@ -50,6 +50,18 @@ test('pagehide stops recovery fetches and pageshow saves the interrupted gesture
     await dragOnCanvas(page, [300, 250], [430, 330])
     await expect.poll(() => interceptedWrites).toBeGreaterThan(0)
 
+    // The fault is an interrupted SAVE of a finished local gesture. A first
+    // intercepted POST may contain only an intermediate pointer position.
+    // Observe the actual client model before suspending it, without a test API.
+    let expectedId = ''
+    let expectedVersion = 0
+    await expect.poll(async () => {
+      const element = (await readScene(page)).find(value => value.type === 'rectangle' && value.width === 130 && value.height === 80)
+      expectedId = element ? String(element.id) : ''
+      expectedVersion = element ? Number(element.version) : 0
+      return Boolean(element)
+    }, { message: 'The complete 130 by 80 rectangle must exist locally before its save is interrupted.' }).toBe(true)
+
     suspended = true
     // Explicit lifecycle fault injection; this does not claim real BFCache
     // eligibility or stand in for physical Safari/stylus certification.
@@ -68,11 +80,13 @@ test('pagehide stops recovery fetches and pageshow saves the interrupted gesture
     await expect(page.getByText('Live', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
     await expect.poll(async () => {
-      const { data, error } = await supabase.from(TABLE).select('element').eq('is_deleted', false)
+      const { data, error } = await supabase.from(TABLE).select('id,version,element').eq('id', expectedId).eq('is_deleted', false)
       if (error) throw error
-      return (data ?? []).some(row => row.element?.type === 'rectangle' && row.element.width === 130 && row.element.height === 80)
+      return (data ?? []).some(row => row.version >= expectedVersion && row.element?.type === 'rectangle' && row.element.width === 130 && row.element.height === 80)
     }).toBe(true)
-    expect((await readScene(page)).some(element => element.type === 'rectangle' && element.width === 130 && element.height === 80)).toBe(true)
+    const restored = (await readScene(page)).find(element => element.id === expectedId)
+    expect(restored).toMatchObject({ type: 'rectangle', width: 130, height: 80 })
+    expect(Number(restored?.version)).toBeGreaterThanOrEqual(expectedVersion)
     expect(postResumeErrors).toEqual([])
   } finally {
     interruptWrites = false
