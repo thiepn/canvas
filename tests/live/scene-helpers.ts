@@ -25,8 +25,27 @@ export async function exportElement(page: Page, id: string): Promise<Record<stri
   return (await readScene(page)).find(element => element.id === id) ?? null
 }
 
-/** Fail at the pointer target, rather than timing out later on a database assertion. */
+async function renderGestureFrame(page: Page) {
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    let firstFrame = 0
+    let secondFrame = 0
+    const timeout = setTimeout(() => {
+      cancelAnimationFrame(firstFrame)
+      cancelAnimationFrame(secondFrame)
+      reject(new Error('The drawing page did not render the pointer gesture.'))
+    }, 5000)
+    firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => { clearTimeout(timeout); resolve() })
+    })
+  }))
+}
+
+/** Use real, frame-paced pointer input; assert exact geometry in the caller. */
 export async function dragOnCanvas(page: Page, from: [number, number], to: [number, number], steps = 8) {
+  if (!Number.isInteger(steps) || steps < 1 || steps > 100) throw new Error('Expected 1–100 pointer steps.')
+  // Peer contexts may be background tabs. Foreground the page before relying
+  // on animation frames; never change the scene through an internal test API.
+  await page.bringToFront()
   const box = await page.locator('.live-excalidraw').boundingBox()
   if (!box) throw new Error('Live Excalidraw surface has no bounding box.')
   for (const [x, y] of [from, to]) {
@@ -36,6 +55,19 @@ export async function dragOnCanvas(page: Page, from: [number, number], to: [numb
   }
   await page.mouse.move(box.x + from[0], box.y + from[1])
   await page.mouse.down()
-  await page.mouse.move(box.x + to[0], box.y + to[1], { steps })
-  await page.mouse.up()
+  try {
+    await renderGestureFrame(page)
+    // A burst of eight moves can finish before Excalidraw handles its next
+    // render. Let each real move reach the editor before sending mouse-up.
+    for (let step = 1; step <= steps; step++) {
+      await page.mouse.move(
+        box.x + from[0] + (to[0] - from[0]) * step / steps,
+        box.y + from[1] + (to[1] - from[1]) * step / steps,
+      )
+      await renderGestureFrame(page)
+    }
+  } finally {
+    await page.mouse.up()
+  }
+  await renderGestureFrame(page)
 }
