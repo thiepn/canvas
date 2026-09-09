@@ -35,8 +35,12 @@ async function cleanWorld() {
   if (error) throw error
 }
 
-async function waitForBridge(page: Page) {
+async function waitForFixtureBridge(page: Page) {
   await expect.poll(() => page.evaluate(() => Boolean(window.__CANVAS_PERF__ && window.__CANVAS_DIAGNOSTICS__))).toBe(true)
+}
+
+async function waitForDiagnostics(page: Page) {
+  await expect.poll(() => page.evaluate(() => Boolean(window.__CANVAS_DIAGNOSTICS__))).toBe(true)
 }
 
 async function frameBenchmark(page: Page, action: 'pan' | 'moveOne' | 'moveTwenty', frames = 90): Promise<FrameStats> {
@@ -86,9 +90,9 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
   const fixtureResults: FixtureResult[] = []
   const fixtureContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const fixturePage = await fixtureContext.newPage()
-  await fixturePage.goto('./?debug=1')
-  await expect(fixturePage.getByText('Live', { exact: true })).toBeVisible()
-  await waitForBridge(fixturePage)
+  await fixturePage.goto('./?debug=1&fixture=1')
+  await expect(fixturePage.locator('[data-canvas-engine="excalidraw-performance-fixture"]')).toBeVisible()
+  await waitForFixtureBridge(fixturePage)
 
   try {
     for (const count of FIXTURE_COUNTS) {
@@ -140,14 +144,15 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
       expect(pageA.getByText('Live', { exact: true })).toBeVisible(),
       expect(pageB.getByText('Live', { exact: true })).toBeVisible(),
     ])
-    await Promise.all([waitForBridge(pageA), waitForBridge(pageB)])
+    await Promise.all([waitForDiagnostics(pageA), waitForDiagnostics(pageB)])
     const readyAt = Date.now()
 
     const beforeA = await diagnostics(pageA)
+    const beforePixels = await pageB.locator('canvas.excalidraw__canvas.interactive').evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL())
     const operationStarted = Date.now()
     await pageA.getByTitle(/^Rectangle\b/i).click()
     await dragOnCanvas(pageA, [300, 250], [430, 330])
-    await expect.poll(() => pageB.evaluate(() => window.__CANVAS_PERF__?.elements().some(element => element.type === 'rectangle' && !element.isDeleted) ?? false)).toBe(true)
+    await expect.poll(() => pageB.locator('canvas.excalidraw__canvas.interactive').evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL() !== beforePixels), { message: 'Peer canvas pixels must change after the remote rectangle renders.' }).toBe(true)
     const remoteRenderMs = Date.now() - operationStarted
     await pageA.waitForTimeout(800)
     const afterWriteA = await diagnostics(pageA)
