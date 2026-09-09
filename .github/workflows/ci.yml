@@ -23,10 +23,11 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Record full dependency audit
+      - name: Record source and full dependency audit
         shell: bash
         run: |
           mkdir -p artifacts
+          git archive --format=zip --output=artifacts/source.zip HEAD
           npm audit --json > artifacts/npm-audit.json || true
       - name: Reject high-severity dependency vulnerabilities
         run: npm audit --audit-level=high
@@ -37,8 +38,16 @@ jobs:
       - run: npm run check:worker
       - run: npm run build
       - run: npx playwright install --with-deps chromium firefox webkit
+      - name: Real Excalidraw and Supabase regression gate
+        run: npm run test:live
+      - name: Preserve live-path browser diagnostics
+        if: always()
+        run: |
+          if [ -d test-results ]; then
+            mkdir -p artifacts/live-test-results
+            cp -R test-results/. artifacts/live-test-results/
+          fi
       - run: npm run test:e2e
-      - run: npm run test:live
       - run: npm run test:production
       - name: Retain diagnostics
         if: always()
@@ -54,6 +63,7 @@ jobs:
     needs: quality
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     permissions:
       contents: read
       pages: write
@@ -78,3 +88,14 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v5.0.1
+      - run: npx playwright install --with-deps chromium
+      - name: Verify published bundle, shared connection, reconnect and mobile menu
+        run: node scripts/verify-deployed.mjs
+        env:
+          CANVAS_DEPLOYED_URL: ${{ steps.deployment.outputs.page_url }}
+      - name: Retain deployed-site verification
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: canvas-deployed-verification
+          path: artifacts/deployed/

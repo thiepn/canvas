@@ -1,11 +1,20 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
 import { DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL } from '../../app/config/public-config.ts'
+import { dragOnCanvas, exportElement, readScene } from './scene-helpers.ts'
 
 const TABLE = 'canvas_ci_elements'
 const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 })
+
+type StoredRow = {
+  id: string
+  version: number
+  version_nonce: number
+  is_deleted: boolean
+  element: Record<string, unknown>
+}
 
 async function cleanTestWorld() {
   const { error } = await supabase.from(TABLE).delete().neq('id', '')
@@ -13,15 +22,40 @@ async function cleanTestWorld() {
 }
 
 async function latestActiveId(): Promise<string> {
-  const { data, error } = await supabase.from(TABLE).select('id,is_deleted,updated_at').eq('is_deleted', false).order('updated_at', { ascending: false }).limit(1)
+  const { data, error } = await supabase.from(TABLE).select('id,element,is_deleted,updated_at').eq('is_deleted', false).order('updated_at', { ascending: false }).limit(1)
   if (error) throw error
-  return data?.[0]?.id ?? ''
+  const row = data?.[0]
+  // A real drag emits intermediate versions before mouse-up. An ID alone is
+  // not a save barrier: wait for the final gesture geometry (130 by 80).
+  if (row?.element?.type !== 'rectangle' || row.element.width !== 130 || row.element.height !== 80) return ''
+  return row.id
+}
+
+async function activeRow(id: string): Promise<StoredRow | null> {
+  const { data, error } = await supabase.from(TABLE).select('id,version,version_nonce,is_deleted,element').eq('id', id).eq('is_deleted', false).maybeSingle()
+  if (error) throw error
+  if (!data || !data.element || typeof data.element !== 'object') return null
+  return data as StoredRow
 }
 
 async function isDeleted(id: string): Promise<boolean> {
   const { data, error } = await supabase.from(TABLE).select('is_deleted').eq('id', id).maybeSingle()
   if (error) throw error
   return data?.is_deleted === true
+}
+
+async function createRectangle(page: Page): Promise<string> {
+  const rectangleTool = page.getByRole('radio', { name: /^Rectangle\b/i })
+  await page.getByTitle(/^Rectangle\b/i).click()
+  await expect(rectangleTool).toBeChecked()
+  await dragOnCanvas(page, [300, 250], [430, 330])
+
+  let id = ''
+  await expect.poll(async () => {
+    id = await latestActiveId()
+    return id
+  }).not.toBe('')
+  return id
 }
 
 test.beforeEach(cleanTestWorld)
@@ -46,45 +80,134 @@ test('two live clients persist and synchronize a real rectangle through Supabase
       await expect(pageB.getByLabel('2 people connected')).toBeVisible()
     })
 
-    let elementId = ''
-    await test.step('client A creates and persists a rectangle', async () => {
-      const surfaceA = pageA.locator('.live-excalidraw')
-      const boxA = await surfaceA.boundingBox()
-      if (!boxA) throw new Error('Live Excalidraw surface has no bounding box.')
-
-      const rectangleTool = pageA.getByRole('radio', { name: /^Rectangle\b/i })
-      await pageA.getByTitle(/^Rectangle\b/i).click()
-      await expect(rectangleTool).toBeChecked()
-
-      await pageA.mouse.move(boxA.x + 300, boxA.y + 250)
-      await pageA.mouse.down()
-      await pageA.mouse.move(boxA.x + 430, boxA.y + 330, { steps: 8 })
-      await pageA.mouse.up()
-
-      await expect.poll(async () => {
-        elementId = await latestActiveId()
-        return elementId
-      }).not.toBe('')
-    })
+    const elementId = await test.step('client A creates and persists a rectangle', () => createRectangle(pageA))
 
     await test.step('client B receives and deletes the rectangle', async () => {
-      const surfaceB = pageB.locator('.live-excalidraw')
-      const boxB = await surfaceB.boundingBox()
-      if (!boxB) throw new Error('Peer Excalidraw surface has no bounding box.')
-
+      // A successful database write does not mean B has rendered the event yet.
+      await expect.poll(async () => Boolean(await exportElement(pageB, elementId))).toBe(true)
       const eraserTool = pageB.getByRole('radio', { name: /^Eraser\b/i })
       await pageB.getByTitle(/^Eraser\b/i).click()
       await expect(eraserTool).toBeChecked()
-
-      await pageB.mouse.move(boxB.x + 280, boxB.y + 290)
-      await pageB.mouse.down()
-      await pageB.mouse.move(boxB.x + 450, boxB.y + 290, { steps: 12 })
-      await pageB.mouse.up()
-
+      await dragOnCanvas(pageB, [280, 290], [450, 290], 12)
       await expect.poll(() => isDeleted(elementId)).toBe(true)
+      await expect.poll(() => exportElement(pageA, elementId)).toBeNull()
     })
 
+    await test.step('both clients reload the durable deletion', async () => {
+      await Promise.all([pageA.reload(), pageB.reload()])
+      for (const page of [pageA, pageB]) {
+        await expect(page.getByText('Live', { exact: true })).toBeVisible()
+        expect(await exportElement(page, elementId)).toBeNull()
+      }
+    })
     expect(pageErrors).toEqual([])
+  } finally {
+    await Promise.allSettled([contextA.close(), contextB.close()])
+  }
+})
+
+test('same-element equal-version conflict converges in both real clients', async ({ browser }) => {
+  const contextA = await browser.newContext()
+  const contextB = await browser.newContext()
+  const pageA = await contextA.newPage()
+  const pageB = await contextB.newPage()
+  const pageErrors: string[] = []
+  pageA.on('pageerror', error => pageErrors.push(`A: ${error.message}`))
+  pageB.on('pageerror', error => pageErrors.push(`B: ${error.message}`))
+
+  try {
+    await Promise.all([pageA.goto('./'), pageB.goto('./')])
+    await Promise.all([
+      expect(pageA.getByText('Live', { exact: true })).toBeVisible(),
+      expect(pageB.getByText('Live', { exact: true })).toBeVisible(),
+    ])
+
+    const elementId = await createRectangle(pageA)
+    await expect.poll(async () => Boolean(await exportElement(pageB, elementId))).toBe(true)
+
+    // Inject the tie only after both clients and the database agree on the
+    // finished drag. Otherwise an in-flight higher version legitimately wins.
+    await expect.poll(async () => {
+      const [row, a, b] = await Promise.all([
+        activeRow(elementId), exportElement(pageA, elementId), exportElement(pageB, elementId),
+      ])
+      return Boolean(row && a && b && [a, b].every(element =>
+        element.version === row.version && element.versionNonce === row.version_nonce &&
+        element.width === 130 && element.height === 80,
+      ))
+    }, { message: 'Both client scenes and the database must agree on the finished rectangle.' }).toBe(true)
+
+    const stored = await activeRow(elementId)
+    if (!stored) throw new Error('Persisted rectangle disappeared before conflict test.')
+    const currentX = Number(stored.element.x)
+    if (!Number.isFinite(currentX)) throw new Error('Persisted rectangle has an invalid x coordinate.')
+
+    const winningNonce = stored.version_nonce - 1
+    const winningX = currentX + 180
+    const winningElement = { ...stored.element, x: winningX, versionNonce: winningNonce }
+    const { error } = await supabase.from(TABLE).update({
+      version_nonce: winningNonce,
+      element: winningElement,
+      updated_by: 'same-element-conflict-test',
+    }).eq('id', elementId)
+    expect(error).toBeNull()
+    await expect.poll(() => activeRow(elementId)).toMatchObject({
+      version: stored.version, version_nonce: winningNonce, element: { x: winningX },
+    })
+
+    await expect.poll(async () => Number((await exportElement(pageA, elementId))?.x)).toBe(winningX)
+    await expect.poll(async () => Number((await exportElement(pageB, elementId))?.x)).toBe(winningX)
+    await expect.poll(async () => Number((await exportElement(pageA, elementId))?.versionNonce)).toBe(winningNonce)
+    await expect.poll(async () => Number((await exportElement(pageB, elementId))?.versionNonce)).toBe(winningNonce)
+
+    expect(pageErrors).toEqual([])
+  } finally {
+    await Promise.allSettled([contextA.close(), contextB.close()])
+  }
+})
+
+test('repeated reconnects recover missed peer edits and resume real drawing without reload', async ({ browser }) => {
+  test.setTimeout(120_000)
+  const contextA = await browser.newContext()
+  const contextB = await browser.newContext()
+  const pageA = await contextA.newPage()
+  const pageB = await contextB.newPage()
+  const errors: string[] = []
+  pageA.on('pageerror', error => errors.push(error.message))
+  pageB.on('pageerror', error => errors.push(error.message))
+  try {
+    await Promise.all([pageA.goto('./'), pageB.goto('./')])
+    for (const page of [pageA, pageB]) await expect(page.getByText('Live', { exact: true })).toBeVisible()
+    const id = await createRectangle(pageB)
+    await expect.poll(async () => Boolean(await exportElement(pageA, id))).toBe(true)
+    const stored = await activeRow(id)
+    if (!stored) throw new Error('Missing reconnect test shape.')
+
+    for (let cycle = 1; cycle <= 2; cycle++) {
+      await contextA.setOffline(true)
+      await expect(pageA.getByText('Offline', { exact: true })).toBeVisible()
+      await expect(pageA.getByRole('button', { name: 'Frame tool' })).toBeDisabled()
+      const version = stored.version + cycle
+      const element = { ...stored.element, x: Number(stored.element.x) + cycle * 70, version, versionNonce: 100 + cycle }
+      const { error } = await supabase.from(TABLE).update({ version, version_nonce: 100 + cycle, element, updated_by: 'reconnect-peer' }).eq('id', id)
+      expect(error).toBeNull()
+      await expect.poll(async () => (await exportElement(pageB, id))?.x).toBe(element.x)
+
+      await contextA.setOffline(false)
+      await expect(pageA.getByText('Live', { exact: true })).toBeVisible()
+      await expect(pageA.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
+      await expect.poll(async () => (await exportElement(pageA, id))?.x).toBe(element.x)
+      await expect(pageA.getByLabel('2 people connected')).toBeVisible()
+    }
+
+    await pageA.getByTitle(/^Ellipse\b/i).click()
+    await expect(pageA.getByRole('radio', { name: /^Ellipse\b/i })).toBeChecked()
+    await dragOnCanvas(pageA, [600, 250], [710, 330])
+    await expect.poll(async () => (await readScene(pageB)).some(element => element.type === 'ellipse')).toBe(true)
+    await pageA.reload()
+    await expect(pageA.getByText('Live', { exact: true })).toBeVisible()
+    expect((await readScene(pageA)).some(element => element.type === 'ellipse')).toBe(true)
+    expect(errors).toEqual([])
   } finally {
     await Promise.allSettled([contextA.close(), contextB.close()])
   }

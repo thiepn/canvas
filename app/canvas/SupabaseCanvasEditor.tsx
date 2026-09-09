@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { CaptureUpdateAction, Excalidraw } from '@excalidraw/excalidraw'
+import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, reconcileElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import type { Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
@@ -7,10 +7,10 @@ import { Icon } from '../components/Icon.tsx'
 import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity } from '../presence/identity.ts'
 import { loadTheme, writePreference, type ThemePreference } from '../storage/preferences.ts'
 import type { LiveConfig } from '../config/public-config.ts'
+import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = 'Connecting' | 'Synchronizing' | 'Live' | 'Reconnecting' | 'Offline' | 'Error'
-type VersionStamp = { version: number; versionNonce: number; isDeleted: boolean }
 type PresencePerson = { deviceId: string; displayName: string; color: string }
 type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown }
 type CursorPayload = {
@@ -38,11 +38,6 @@ const UI_OPTIONS = {
 
 function stampOf(element: SceneElement): VersionStamp {
   return { version: element.version, versionNonce: element.versionNonce, isDeleted: element.isDeleted }
-}
-
-function isNewer(next: VersionStamp, previous: VersionStamp | undefined): boolean {
-  if (!previous) return true
-  return next.version > previous.version || (next.version === previous.version && next.versionNonce > previous.versionNonce)
 }
 
 function normalizeRow(value: unknown): SyncRow | null {
@@ -116,11 +111,17 @@ function LiveHeader({ api, identity, people, status, theme, rename, changeTheme 
     const elements = api?.getSceneElements() ?? []
     if (api && elements.length) api.scrollToContent(elements, { fitToViewport: true, animate: true })
   }
+  const activateFrame = () => {
+    if (!api || status !== 'Live') return
+    api.setActiveTool({ type: 'frame' })
+    setMenu(false)
+  }
   return <header className="canvas-header live-canvas-header">
     <h1>Canvas<span className="brand-period" aria-hidden="true">.</span></h1>
     <div role="status" aria-live="polite" className={`connection connection--${status.toLowerCase()}`}><span aria-hidden="true" />{status}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
+    <button type="button" className="icon-button frame-button" aria-label="Frame tool" title="Frame tool" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" /></button>
     <button type="button" className="icon-button fit-button" aria-label="Fit content" title="Fit all content" disabled={!api} onClick={fit}><Icon name="fit" /></button>
     <button ref={triggerRef} type="button" className="identity-trigger" aria-label="Canvas menu and presence" aria-expanded={menu} aria-controls={menu ? 'live-canvas-menu' : undefined} onClick={() => setMenu(!menu)}><span className="identity-initial" style={{ borderColor: safeColor(identity.color) }}>{identity.displayName.slice(0, 1).toUpperCase()}</span><span className="identity-name">{identity.displayName}</span><Icon name="more" /></button>
     {menu && <div ref={menuRef} id="live-canvas-menu" className="canvas-menu" aria-label="Canvas settings">
@@ -129,10 +130,11 @@ function LiveHeader({ api, identity, people, status, theme, rename, changeTheme 
       <form onSubmit={submit}><label htmlFor="live-display-name">Display name</label><div className="name-input"><input id="live-display-name" autoComplete="off" maxLength={32} value={name} onChange={event => setName(event.target.value)} /><button type="submit">Save</button></div></form>
       <label htmlFor="live-theme">Appearance</label><select id="live-theme" value={theme} onChange={event => changeTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
       <div className="menu-heading menu-tools-heading">CANVAS CONTROLS</div>
+      <button type="button" className="menu-action" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" />Frame tool</button>
       <button type="button" className="menu-action" disabled={!api} onClick={() => downloadBackup(api)}><Icon name="download" />Export JSON backup</button>
       <button type="button" className="menu-action" disabled={!api} onClick={() => { fit(); setMenu(false) }}><Icon name="fit" />Fit all content</button>
       <p className="privacy-note">One shared canvas. Anyone with the link can read and change everything. Names are not verified identities.</p>
-      <p className="shortcut-note">V Select · R Rectangle · O Ellipse · A Arrow · D Draw · T Text<br />E Eraser · Space Pan · Ctrl/⌘ Z Undo</p>
+      <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Draw · T Text · E Eraser · F Frame · Space Pan · Ctrl/⌘ Z Undo</p>
     </div>}
   </header>
 }
@@ -147,6 +149,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const [status, setStatus] = useState<ConnectionState>('Connecting')
   const statusRef = useRef<ConnectionState>('Connecting')
+  const [connectionAttempt, setConnectionAttempt] = useState(0)
+  const pageActiveRef = useRef(true)
+  const channelCleanupRef = useRef<Promise<unknown>>(Promise.resolve())
+  const retryDelayRef = useRef(1200)
   const [people, setPeople] = useState<PresencePerson[]>([])
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -170,13 +176,40 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     noticeTimer.current = setTimeout(() => setNotice(''), 6000)
   }, [])
 
-  useEffect(() => { identityRef.current = identity }, [identity])
-  useEffect(() => { statusRef.current = status }, [status])
-  useEffect(() => { apiRef.current = api }, [api])
-  useEffect(() => () => {
-    if (noticeTimer.current) clearTimeout(noticeTimer.current)
-    if (flushTimer.current) clearTimeout(flushTimer.current)
+  // Network callbacks must lock writes immediately, before React commits a render.
+  const transition = useCallback((next: ConnectionState) => {
+    statusRef.current = next
+    setStatus(next)
   }, [])
+
+  useEffect(() => { identityRef.current = identity }, [identity])
+  useEffect(() => { apiRef.current = api }, [api])
+  useEffect(() => {
+    pageActiveRef.current = true
+    const hide = () => {
+      // Navigation may reject an outstanding save. Its recovery callback must
+      // not start another fetch in the document that is being torn down.
+      pageActiveRef.current = false
+      transition(navigator.onLine ? 'Reconnecting' : 'Offline')
+      if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
+      setConnectionAttempt(value => value + 1)
+    }
+    const show = () => {
+      if (pageActiveRef.current) return
+      pageActiveRef.current = true
+      retryDelayRef.current = 1200
+      setConnectionAttempt(value => value + 1)
+    }
+    window.addEventListener('pagehide', hide)
+    window.addEventListener('pageshow', show)
+    return () => {
+      pageActiveRef.current = false
+      window.removeEventListener('pagehide', hide)
+      window.removeEventListener('pageshow', show)
+      if (noticeTimer.current) clearTimeout(noticeTimer.current)
+      if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
+    }
+  }, [transition])
   useEffect(() => { document.documentElement.dataset.theme = resolvedTheme }, [resolvedTheme])
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)')
@@ -185,48 +218,72 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     return () => media.removeEventListener('change', update)
   }, [])
   useEffect(() => {
-    const offline = () => setStatus('Offline')
-    const online = () => setStatus(current => current === 'Live' ? current : 'Reconnecting')
+    const offline = () => {
+      transition('Offline')
+      setConnectionAttempt(value => value + 1)
+    }
+    const online = () => {
+      transition('Reconnecting')
+      retryDelayRef.current = 1200
+      setConnectionAttempt(value => value + 1)
+    }
     window.addEventListener('offline', offline)
     window.addEventListener('online', online)
     return () => { window.removeEventListener('offline', offline); window.removeEventListener('online', online) }
-  }, [])
+  }, [transition])
 
   const applyRows = useCallback((values: unknown[], replace = false) => {
     const editor = apiRef.current
-    if (!editor) return
+    if (!editor || !pageActiveRef.current) return
     const rows = values.map(normalizeRow).filter((row): row is SyncRow => row !== null)
-    const currentElements = replace ? new Map<string, SceneElement>() : new Map(editor.getSceneElementsIncludingDeleted().map(element => [element.id, element]))
+    const localElements = replace ? [] : editor.getSceneElementsIncludingDeleted()
+    const remoteElements: SceneElement[] = []
     if (replace) shadowRef.current.clear()
     let changed = replace
+
     for (const row of rows) {
       const element = elementFromRow(row)
       if (!element) continue
       const nextStamp = { version: row.version, versionNonce: row.version_nonce, isDeleted: row.is_deleted }
-      if (!replace && !isNewer(nextStamp, shadowRef.current.get(row.id))) continue
       const pending = pendingRef.current.get(row.id)
-      if (!replace && pending && isNewer(stampOf(pending), nextStamp)) {
+
+      // Equal or losing pending work has been accepted/superseded and must not
+      // survive merely because this authoritative row was already observed.
+      if (pending && !shouldKeepPending(stampOf(pending), nextStamp)) pendingRef.current.delete(row.id)
+
+      if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue
+
+      const survivingPending = pendingRef.current.get(row.id)
+      if (!replace && survivingPending && shouldKeepPending(stampOf(survivingPending), nextStamp)) {
         shadowRef.current.set(row.id, nextStamp)
         continue
       }
+
       shadowRef.current.set(row.id, nextStamp)
-      currentElements.set(row.id, element)
+      remoteElements.push(element)
       changed = true
     }
+
     if (!changed) return
+    const reconciled = reconcileElements(
+      localElements as Parameters<typeof reconcileElements>[0],
+      remoteElements as unknown as Parameters<typeof reconcileElements>[1],
+      editor.getAppState(),
+    )
     applyingRemote.current = true
-    editor.updateScene({ elements: Array.from(currentElements.values()), captureUpdate: CaptureUpdateAction.NEVER })
+    editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
     queueMicrotask(() => { applyingRemote.current = false })
   }, [])
 
-  const loadAuthoritative = useCallback(async () => {
-    const { data, error } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true })
+  const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true) => {
+    if (!pageActiveRef.current) return
+    const { data, error } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true }).abortSignal(AbortSignal.timeout(15_000))
     if (error) throw error
-    applyRows(data ?? [], pendingRef.current.size === 0)
+    if (isCurrent()) applyRows(data ?? [], pendingRef.current.size === 0)
   }, [applyRows, config.tableName, supabase])
 
   const flushPending = useCallback(async () => {
-    if (statusRef.current !== 'Live' || !navigator.onLine || pendingRef.current.size === 0) return
+    if (!pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || pendingRef.current.size === 0) return
     const elements = Array.from(pendingRef.current.values())
     pendingRef.current.clear()
     const rows = elements.map(element => ({
@@ -242,25 +299,35 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (error) {
       for (const element of elements) {
         const queued = pendingRef.current.get(element.id)
-        if (!queued || isNewer(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
+        if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
       }
-      if (!navigator.onLine) setStatus('Offline')
+      if (!pageActiveRef.current) return
+      if (!navigator.onLine) transition('Offline')
       notify(`Canvas could not save: ${error.message}`)
-      if (navigator.onLine && !flushTimer.current) {
+      if (navigator.onLine) {
+        try {
+          await loadAuthoritative()
+        } catch {
+          // Keep the local queue intact. The normal retry path below will try again.
+        }
+      }
+      if (pageActiveRef.current && navigator.onLine && pendingRef.current.size && !flushTimer.current) {
         flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushPending() }, 1200)
       }
       return
     }
+    if (!pageActiveRef.current) return
     const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').in('id', ids)
+    if (!pageActiveRef.current) return
     if (readError) {
       notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
       return
     }
     applyRows(data ?? [])
-  }, [applyRows, config.tableName, notify, supabase])
+  }, [applyRows, config.tableName, loadAuthoritative, notify, supabase, transition])
 
   const scheduleFlush = useCallback(() => {
-    if (flushTimer.current) return
+    if (!pageActiveRef.current || flushTimer.current) return
     flushTimer.current = setTimeout(() => {
       flushTimer.current = null
       void flushPending()
@@ -299,55 +366,105 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => {
     if (!api) return
     let disposed = false
-    const channel = supabase.channel(`canvas:${config.tableName}:v1`, { config: { presence: { key: identity.deviceId }, broadcast: { self: false } } })
-    channelRef.current = channel
-    channel
-      .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {
-        if (payload.new && Object.keys(payload.new).length) applyRows([payload.new])
-      })
-      .on('presence', { event: 'sync' }, () => syncPresence(channel))
-      .on('broadcast', { event: 'cursor' }, message => {
-        const payload = message.payload as Partial<CursorPayload>
-        if (!payload.deviceId || payload.deviceId === identityRef.current.deviceId || !payload.pointer) return
-        if (typeof payload.pointer.x !== 'number' || typeof payload.pointer.y !== 'number') return
-        const socketId = payload.deviceId as SocketId
-        const existing = collaboratorsRef.current.get(socketId)
-        collaboratorsRef.current.set(socketId, {
-          ...existing,
-          username: cleanName(payload.displayName ?? 'Guest'),
-          pointer: { x: payload.pointer.x, y: payload.pointer.y, tool: payload.pointer.tool === 'laser' ? 'laser' : 'pointer' },
-          button: payload.button === 'down' ? 'down' : 'up',
-          selectedElementIds: payload.selectedElementIds && typeof payload.selectedElementIds === 'object' ? payload.selectedElementIds : {},
-        } as Collaborator)
-        apiRef.current?.updateScene({ collaborators: new Map(collaboratorsRef.current) })
-      })
-      .subscribe(subscriptionStatus => {
-        if (disposed) return
-        if (subscriptionStatus === 'SUBSCRIBED') {
-          setStatus('Synchronizing')
-          void channel.track({ deviceId: identityRef.current.deviceId, displayName: identityRef.current.displayName, color: identityRef.current.color, onlineAt: new Date().toISOString() })
-            .then(() => loadAuthoritative())
-            .then(() => {
-              if (disposed) return
-              setStatus(navigator.onLine ? 'Live' : 'Offline')
-              if (navigator.onLine && pendingRef.current.size) scheduleFlush()
-            })
-            .catch(error => { if (!disposed) { setStatus('Error'); notify(`Canvas could not synchronize: ${error instanceof Error ? error.message : String(error)}`) } })
-        } else if (subscriptionStatus === 'CHANNEL_ERROR' || subscriptionStatus === 'TIMED_OUT' || subscriptionStatus === 'CLOSED') {
-          setStatus(navigator.onLine ? 'Reconnecting' : 'Offline')
-        }
-      })
+    let channel: RealtimeChannel | null = null
+    let syncGeneration = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    const retry = () => {
+      if (disposed || !pageActiveRef.current || retryTimer || !navigator.onLine) return
+      const delay = retryDelayRef.current
+      retryDelayRef.current = Math.min(delay * 2, 10_000)
+      retryTimer = setTimeout(() => {
+        retryTimer = null
+        if (!disposed && pageActiveRef.current) setConnectionAttempt(value => value + 1)
+      }, delay)
+    }
+    const start = async () => {
+      // Removing a channel is asynchronous. Do not reuse a same-topic channel
+      // while its predecessor is still leaving (including StrictMode cleanup).
+      await channelCleanupRef.current
+      if (disposed || !pageActiveRef.current) return
+      if (!navigator.onLine) { transition('Offline'); return }
+      transition(connectionAttempt ? 'Reconnecting' : 'Connecting')
+      collaboratorsRef.current.clear()
+      setPeople([])
+      api.updateScene({ collaborators: new Map() })
+      const currentChannel = supabase.channel(`canvas:${config.tableName}:v1`, { config: { presence: { key: identity.deviceId }, broadcast: { self: false } } })
+      channel = currentChannel
+      channelRef.current = currentChannel
+      const isCurrent = () => !disposed && pageActiveRef.current && navigator.onLine && channelRef.current === currentChannel
+      currentChannel
+        .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {
+          if (isCurrent() && payload.new && Object.keys(payload.new).length) applyRows([payload.new])
+        })
+        .on('presence', { event: 'sync' }, () => { if (isCurrent()) syncPresence(currentChannel) })
+        .on('broadcast', { event: 'cursor' }, message => {
+          if (!isCurrent()) return
+          const payload = message.payload as Partial<CursorPayload>
+          if (!payload.deviceId || payload.deviceId === identityRef.current.deviceId || !payload.pointer) return
+          if (typeof payload.pointer.x !== 'number' || typeof payload.pointer.y !== 'number') return
+          const socketId = payload.deviceId as SocketId
+          const existing = collaboratorsRef.current.get(socketId)
+          collaboratorsRef.current.set(socketId, {
+            ...existing,
+            username: cleanName(payload.displayName ?? 'Guest'),
+            pointer: { x: payload.pointer.x, y: payload.pointer.y, tool: payload.pointer.tool === 'laser' ? 'laser' : 'pointer' },
+            button: payload.button === 'down' ? 'down' : 'up',
+            selectedElementIds: payload.selectedElementIds && typeof payload.selectedElementIds === 'object' ? payload.selectedElementIds : {},
+          } as Collaborator)
+          apiRef.current?.updateScene({ collaborators: new Map(collaboratorsRef.current) })
+        })
+        .subscribe(subscriptionStatus => {
+          if (disposed || !pageActiveRef.current) return
+          if (subscriptionStatus === 'SUBSCRIBED') {
+            const generation = ++syncGeneration
+            if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+            if (!isCurrent()) return
+            transition('Synchronizing')
+            // Presence is ephemeral. An unavailable presence acknowledgement must
+            // not prevent a successfully joined client from loading durable data.
+            void currentChannel.track({ deviceId: identityRef.current.deviceId, displayName: identityRef.current.displayName, color: identityRef.current.color, onlineAt: new Date().toISOString() }).catch(() => {})
+            const stillCurrent = () => isCurrent() && generation === syncGeneration
+            void loadAuthoritative(stillCurrent)
+              .then(() => {
+                if (!stillCurrent()) return
+                retryDelayRef.current = 1200
+                transition('Live')
+                if (pendingRef.current.size) scheduleFlush()
+              })
+              .catch(error => {
+                if (!stillCurrent()) return
+                transition('Error')
+                notify(`Canvas could not synchronize: ${error instanceof Error ? error.message : String(error)}`)
+                retry()
+              })
+          } else if (subscriptionStatus === 'CHANNEL_ERROR' || subscriptionStatus === 'TIMED_OUT' || subscriptionStatus === 'CLOSED') {
+            ++syncGeneration
+            transition(navigator.onLine ? 'Reconnecting' : 'Offline')
+            retry()
+          }
+        })
+    }
+    void start().catch(error => {
+      if (disposed || !pageActiveRef.current) return
+      transition(navigator.onLine ? 'Error' : 'Offline')
+      notify(`Canvas could not connect: ${error instanceof Error ? error.message : String(error)}`)
+      retry()
+    })
     return () => {
       disposed = true
-      channelRef.current = null
-      void supabase.removeChannel(channel)
+      ++syncGeneration
+      if (retryTimer) clearTimeout(retryTimer)
+      if (channel) {
+        if (channelRef.current === channel) channelRef.current = null
+        channelCleanupRef.current = supabase.removeChannel(channel).catch(() => {})
+      }
     }
-  }, [api, applyRows, config.tableName, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence])
+  }, [api, applyRows, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence, transition])
 
   useEffect(() => {
     const channel = channelRef.current
-    if (!channel || (status !== 'Live' && status !== 'Synchronizing')) return
-    void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, onlineAt: new Date().toISOString() })
+    if (!pageActiveRef.current || !channel || (status !== 'Live' && status !== 'Synchronizing')) return
+    void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, onlineAt: new Date().toISOString() }).catch(() => {})
   }, [identity, status])
 
   const onChange = useCallback((elements: readonly SceneElement[]) => {
@@ -361,14 +478,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     for (const element of allowed) {
       const nextStamp = stampOf(element)
-      if (!isNewer(nextStamp, shadowRef.current.get(element.id))) continue
+      if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
       const queued = pendingRef.current.get(element.id)
-      if (!queued || isNewer(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
+      if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
     }
     if (pendingRef.current.size) scheduleFlush()
   }, [notify, scheduleFlush])
 
-  const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'down' | 'up' }) => {
+  const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return
     const now = performance.now()
     if (now - cursorAt.current < 45 && payload.button !== 'down') return
@@ -407,11 +524,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           viewModeEnabled={status !== 'Live'}
           isCollaborating={status === 'Live'}
           UIOptions={UI_OPTIONS}
+          aiEnabled={false}
           name="Canvas"
           langCode="en"
-        />
+        >
+          <MainMenu />
+          <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
+        </Excalidraw>
       </div>
-      {status !== 'Live' && <div className="network-banner" role="status">{status === 'Error' ? 'Canvas could not synchronize. Check the connection and reload.' : `${status} — editing is paused until the shared canvas is synchronized.`}</div>}
+      {status !== 'Live' && <div className="network-banner" role="status">{status === 'Error' ? 'Canvas could not synchronize. Retrying automatically; editing remains paused.' : `${status} — editing is paused until the shared canvas is synchronized.`}</div>}
       {notice && <div className="canvas-notice" role="status">{notice}</div>}
     </main>
   </div>

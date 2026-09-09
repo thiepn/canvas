@@ -7,7 +7,9 @@ export default defineConfig({
   timeout: 60000,
   expect: { timeout: 30000 },
   retries: process.env.CI ? 1 : 0,
-  reporter: [['list']],
+  failOnFlakyTests: Boolean(process.env.CI),
+  forbidOnly: Boolean(process.env.CI),
+  reporter: [['list'], ['json', { outputFile: 'artifacts/live-results.json' }]],
   use: {
     baseURL: 'http://127.0.0.1:5190/canvas/',
     trace: 'retain-on-failure',
