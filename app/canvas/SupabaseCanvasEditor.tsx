@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { CaptureUpdateAction, Excalidraw } from '@excalidraw/excalidraw'
+import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, reconcileElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import type { Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
@@ -111,11 +111,17 @@ function LiveHeader({ api, identity, people, status, theme, rename, changeTheme 
     const elements = api?.getSceneElements() ?? []
     if (api && elements.length) api.scrollToContent(elements, { fitToViewport: true, animate: true })
   }
+  const activateFrame = () => {
+    if (!api || status !== 'Live') return
+    api.setActiveTool({ type: 'frame' })
+    setMenu(false)
+  }
   return <header className="canvas-header live-canvas-header">
     <h1>Canvas<span className="brand-period" aria-hidden="true">.</span></h1>
     <div role="status" aria-live="polite" className={`connection connection--${status.toLowerCase()}`}><span aria-hidden="true" />{status}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
+    <button type="button" className="icon-button frame-button" aria-label="Frame tool" title="Frame tool" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" /></button>
     <button type="button" className="icon-button fit-button" aria-label="Fit content" title="Fit all content" disabled={!api} onClick={fit}><Icon name="fit" /></button>
     <button ref={triggerRef} type="button" className="identity-trigger" aria-label="Canvas menu and presence" aria-expanded={menu} aria-controls={menu ? 'live-canvas-menu' : undefined} onClick={() => setMenu(!menu)}><span className="identity-initial" style={{ borderColor: safeColor(identity.color) }}>{identity.displayName.slice(0, 1).toUpperCase()}</span><span className="identity-name">{identity.displayName}</span><Icon name="more" /></button>
     {menu && <div ref={menuRef} id="live-canvas-menu" className="canvas-menu" aria-label="Canvas settings">
@@ -124,10 +130,11 @@ function LiveHeader({ api, identity, people, status, theme, rename, changeTheme 
       <form onSubmit={submit}><label htmlFor="live-display-name">Display name</label><div className="name-input"><input id="live-display-name" autoComplete="off" maxLength={32} value={name} onChange={event => setName(event.target.value)} /><button type="submit">Save</button></div></form>
       <label htmlFor="live-theme">Appearance</label><select id="live-theme" value={theme} onChange={event => changeTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
       <div className="menu-heading menu-tools-heading">CANVAS CONTROLS</div>
+      <button type="button" className="menu-action" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" />Frame tool</button>
       <button type="button" className="menu-action" disabled={!api} onClick={() => downloadBackup(api)}><Icon name="download" />Export JSON backup</button>
       <button type="button" className="menu-action" disabled={!api} onClick={() => { fit(); setMenu(false) }}><Icon name="fit" />Fit all content</button>
       <p className="privacy-note">One shared canvas. Anyone with the link can read and change everything. Names are not verified identities.</p>
-      <p className="shortcut-note">V Select · R Rectangle · O Ellipse · A Arrow · D Draw · T Text<br />E Eraser · Space Pan · Ctrl/⌘ Z Undo</p>
+      <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Draw · T Text · E Eraser · F Frame · Space Pan · Ctrl/⌘ Z Undo</p>
     </div>}
   </header>
 }
@@ -191,27 +198,42 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const editor = apiRef.current
     if (!editor) return
     const rows = values.map(normalizeRow).filter((row): row is SyncRow => row !== null)
-    const currentElements = replace ? new Map<string, SceneElement>() : new Map(editor.getSceneElementsIncludingDeleted().map(element => [element.id, element]))
+    const localElements = replace ? [] : editor.getSceneElementsIncludingDeleted()
+    const remoteElements: SceneElement[] = []
     if (replace) shadowRef.current.clear()
     let changed = replace
+
     for (const row of rows) {
       const element = elementFromRow(row)
       if (!element) continue
       const nextStamp = { version: row.version, versionNonce: row.version_nonce, isDeleted: row.is_deleted }
-      if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue
       const pending = pendingRef.current.get(row.id)
-      if (!replace && pending && shouldKeepPending(stampOf(pending), nextStamp)) {
+
+      // Equal or losing pending work has been accepted/superseded and must not
+      // survive merely because this authoritative row was already observed.
+      if (pending && !shouldKeepPending(stampOf(pending), nextStamp)) pendingRef.current.delete(row.id)
+
+      if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue
+
+      const survivingPending = pendingRef.current.get(row.id)
+      if (!replace && survivingPending && shouldKeepPending(stampOf(survivingPending), nextStamp)) {
         shadowRef.current.set(row.id, nextStamp)
         continue
       }
-      if (pending) pendingRef.current.delete(row.id)
+
       shadowRef.current.set(row.id, nextStamp)
-      currentElements.set(row.id, element)
+      remoteElements.push(element)
       changed = true
     }
+
     if (!changed) return
+    const reconciled = reconcileElements(
+      localElements as Parameters<typeof reconcileElements>[0],
+      remoteElements as Parameters<typeof reconcileElements>[1],
+      editor.getAppState(),
+    )
     applyingRemote.current = true
-    editor.updateScene({ elements: Array.from(currentElements.values()), captureUpdate: CaptureUpdateAction.NEVER })
+    editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
     queueMicrotask(() => { applyingRemote.current = false })
   }, [])
 
@@ -410,9 +432,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           viewModeEnabled={status !== 'Live'}
           isCollaborating={status === 'Live'}
           UIOptions={UI_OPTIONS}
+          aiEnabled={false}
           name="Canvas"
           langCode="en"
-        />
+        >
+          <MainMenu />
+          <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
+        </Excalidraw>
       </div>
       {status !== 'Live' && <div className="network-banner" role="status">{status === 'Error' ? 'Canvas could not synchronize. Check the connection and reload.' : `${status} — editing is paused until the shared canvas is synchronized.`}</div>}
       {notice && <div className="canvas-notice" role="status">{notice}</div>}
