@@ -259,13 +259,15 @@ npm run admin -- export Canvas-before-maintenance.json
 unset CANVAS_ADMIN_TOKEN
 ```
 
-Avoid leaving the token in shell history. Prefer a secure prompt/environment mechanism.
+Avoid leaving the token in shell history. Prefer a secure prompt/environment mechanism. On PowerShell, use the scoped SecureString-to-environment pattern from section 4 around the equivalent admin commands.
 
 ### Recover from accidental deletion
 
-Find and download the desired recovery point:
+Start a fresh scoped admin-token session before recovery; the export example intentionally removed its token:
 
 ```sh
+read -r -s -p "Canvas admin token: " CANVAS_ADMIN_TOKEN; echo
+export CANVAS_ADMIN_TOKEN
 npm run admin -- list
 npm run admin -- get SNAPSHOT_UUID Canvas-recovered.json
 ```
@@ -279,9 +281,12 @@ Then:
 
 ```sh
 npm run admin -- restore Canvas-recovered.json --expect-clock CURRENT_CLOCK --yes
+unset CANVAS_ADMIN_TOKEN
 ```
 
-A `409` means a client is still connected or the world changed. No restore is applied. Re-inspect state and clock before retrying.
+A `409` means a client is still connected or the world changed. No restore is applied. Re-inspect state and clock before retrying. If the restore command fails for another reason, clear the token manually with `unset CANVAS_ADMIN_TOKEN` before investigating.
+
+For PowerShell recovery, reuse the scoped `SecureString` conversion block from section 4, execute `list`, `get`, and `restore` inside its `try` block, and let the `finally` block remove `CANVAS_ADMIN_TOKEN`.
 
 The server validates the backup/schema and takes a new `before-restore` snapshot first. It restores records transactionally at a new synchronization clock rather than replaying old clocks/tombstones.
 
