@@ -74,7 +74,8 @@ export class CanvasRoom extends DurableObject<CanvasEnv> {
           return permitted
         },
       },
-      onAfterReceiveMessage: ({ message, stringified }) => {
+      onAfterReceiveMessage: ({ stringified }) => {
+        const message: unknown = JSON.parse(stringified)
         if (byteLength(stringified) > LIMITS.messageBytes || !isSafeJson(message)) throw new Error('Invalid sync payload.')
         this.pendingCreates.clear()
         this.pendingBefore.clear()
@@ -133,14 +134,28 @@ export class CanvasRoom extends DurableObject<CanvasEnv> {
     if (url.pathname === '/api/connect/main') {
       const sessionId = url.searchParams.get('sessionId')
       if (!sessionId || !/^[A-Za-z0-9_:-]{1,160}$/.test(sessionId)) return new Response('Invalid session ID.', { status: 400 })
-      if (this.ctx.getWebSockets().filter(ws => ws.readyState === WebSocket.OPEN).length >= LIMITS.connections) return new Response('Canvas has reached its connection limit.', { status: 503 })
-      const existing = this.sockets.get(sessionId)
-      if (existing && existing.readyState === WebSocket.OPEN) return new Response('Session is already connected.', { status: 409 })
+
+      // A browser tab deliberately reconnects with the same tldraw session ID. During a real
+      // network loss, Cloudflare can still report the old server-side transport as OPEN briefly.
+      // Treat same-session sockets as replaceable transports rather than rejecting the reconnect.
+      const openSockets = this.ctx.getWebSockets().filter(ws => ws.readyState === WebSocket.OPEN)
+      const replacedSockets = openSockets.filter(ws => attachmentOf(ws)?.sessionId === sessionId)
+      if (openSockets.length - replacedSockets.length >= LIMITS.connections) return new Response('Canvas has reached its connection limit.', { status: 503 })
+
       const { 0: client, 1: server } = new WebSocketPair()
       this.ctx.acceptWebSocket(server)
       this.saveAttachment(server, { sessionId, snapshot: null, rate: newRateState(Date.now()), frame: { ...EMPTY_FRAME_STATE } })
+
+      // Publish ownership before closing stale transports. Their asynchronous close callbacks see
+      // the replacement in `this.sockets` and therefore cannot tear down the new session.
       this.sockets.set(sessionId, server)
       room.handleSocketConnect({ sessionId, socket: minimalSocket(server) })
+      for (const stale of replacedSockets) {
+        if (stale !== server) {
+          try { stale.close(1012, 'Session replaced by reconnect.') } catch { /* already closing */ }
+        }
+      }
+
       return new Response(null, { status: 101, webSocket: client })
     }
     if (url.pathname === '/api/snapshot' && request.method === 'GET') return Response.json(this.exportSnapshot())
@@ -174,7 +189,7 @@ export class CanvasRoom extends DurableObject<CanvasEnv> {
         await this.ctx.blockConcurrencyWhile(async () => {
           await this.backups.create(this.exportSnapshot(), 'before-restore')
           // Drop imported clocks/tombstones. loadSnapshot applies records transactionally at a new server clock.
-          room.loadSnapshot({ schema: schema.serialize(), documents: candidate.snapshot.documents.map(item => ({ state: item.state, lastChangedClock: 0 })) } as RoomSnapshot)
+          room.loadSnapshot({ schema: schema.serialize(), documents: candidate.snapshot.documents.map(item => ({ state: item.state, lastChangedClock: 0 })) } as unknown as RoomSnapshot)
           this.budget.initialize(candidate.snapshot.documents.map(item => item.state as unknown as { id: string }))
           this.shapeIds.clear()
           for (const item of candidate.snapshot.documents) if (item.state.typeName === 'shape') this.shapeIds.add(String(item.state.id))
@@ -197,12 +212,15 @@ export class CanvasRoom extends DurableObject<CanvasEnv> {
 
   private exportSnapshot(): BackupEnvelope {
     const snapshot = this.getRoom().getCurrentSnapshot()
-    return wrapBackup(snapshot as BackupEnvelope['snapshot'])
+    return wrapBackup(snapshot as unknown as BackupEnvelope['snapshot'])
   }
 
   override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
     const attachment = attachmentOf(ws)
     if (!attachment) { ws.close(1008, 'Invalid session.'); return }
+    // A replaced transport may emit one final queued message before its close event arrives. Only
+    // the socket that currently owns the session is allowed to feed the sync room.
+    if (this.sockets.get(attachment.sessionId) !== ws) return
     const room = this.getRoom()
     if (ws.readyState !== WebSocket.OPEN) return
     try {

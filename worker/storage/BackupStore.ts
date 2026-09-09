@@ -90,6 +90,6 @@ export class BackupStore {
     }
     if (offset !== info.bytes || await digest(compressed) !== info.checksum) throw new Error('Backup integrity check failed.')
     const plain = await readBytes(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip')), LIMITS.backupBytes)
-    return parseBackup(new TextDecoder('utf-8', { fatal: true }).decode(plain))
+    return parseBackup(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(plain))
   }
 }

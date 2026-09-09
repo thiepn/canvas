@@ -1,64 +1,123 @@
 # Release acceptance matrix
 
-**Date:** 2026-09-08. **Overall result: not certified.**
+**Assessment:** Canvas V1 source implementation is release-candidate complete. Implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete quality workflow in GitHub Actions run `34296811474`, including the explicit required-tool matrix. Because this evidence/documentation update creates a later commit, the final branch head and eventual `main` merge SHA must pass the same gate again. Production-only Cloudflare hibernation and physical stylus checks remain separate and are not falsely marked as CI passes.
 
-“Implemented” means the source contains the behavior. It is not synonymous with an observed runtime pass. “Core pass” covers only the dependency-independent tests named in the audit. Full application/runtime verification remains blocked by dependency installation.
+Legend:
 
-| Requirement | Implementation / evidence | Release state |
+- **PASS** — observed in automated execution or directly verified build/config behavior.
+- **IMPLEMENTED** — feature exists, but the exact physical/platform behavior still needs manual verification.
+- **OWNER ACTION** — cannot be completed without production account configuration or physical hardware.
+- **INTENTIONAL** — explicitly outside V1 scope.
+
+## Product acceptance
+
+| Requirement | Evidence | State |
 | --- | --- | --- |
-| App and repository called Canvas | Source directory, package title, manifest and UI | Source verified |
-| GitHub Pages / repository subpath | Vite base `/Canvas/`, optimized-preview test, modern Pages workflow | Build/live check pending |
-| Cloudflare backend | Worker, SQLite Durable Object migration and deploy scripts | Packaging/deployment pending |
-| Exactly one persistent world | Fixed `main` route; page/document policy | Core policy passed; runtime pending |
-| No accounts; anyone with link edits | No account routes/UI; open editor admission | Source verified; runtime pending |
-| Local anonymous identity | UUID, curated color, editable name, local storage; no persistent user records | Identity core passed; presence integration pending |
-| Text and lightweight formatting | Native editor text/rich-text controls | Browser verification pending |
-| Freehand and highlighter | Native vector tools; bounded records | Browser/stroke-density verification pending |
-| Rectangle, ellipse, diamond | Reduced native geo tools and server allowlist | Policy core passed; browser pending |
-| Line, arrow and connectors | Native line/arrow/binding support | Browser verification pending |
-| Frame/zone | Native frames, one page | Browser/nesting verification pending |
-| Eraser | Native tool in reduced toolbar | Browser verification pending |
-| Selection, multi-select, move, resize, rotation | Native engine behavior retained | Browser verification pending |
-| Group/ungroup, duplicate, copy/paste | Native supported actions/structured copy path | Browser verification pending |
-| Undo/redo | Native history; accessible Canvas-menu buttons; collaborative isolation test | Test not executed |
-| Images, files and media excluded | UI, clipboard/external handlers, no-asset store, server allowlist | Policy core passed; browser/Worker pending |
-| Realtime document synchronization | Official `useSync` / `TLSocketRoom` deltas | Multiplayer tests not executed |
-| Cursors, selection presence, names and online list | Native presence plus local identity; deduplicated menu list | Multiplayer tests not executed |
-| Backend persistence with zero clients | SQLite native sync store | Full application scenario not executed |
-| Refresh and close/reopen persistence | Browser and Worker restart tests written | Not executed |
-| Automatic reconnect / truthful connection state | Official reconnect plus live/offline UI and temporary read-only behavior | Browser test not executed |
-| Hibernation and wake recovery | Auto-response, attached session snapshots, safe reconnect fallback | Real Cloudflare verification pending |
-| Efficient presence/document separation | Native sync presence lane; no app cursor-persistence loop | Source verified; traffic measurement pending |
-| Home, zoom and fit | Native camera methods; mobile menu controls | Browser verification pending |
-| Mobile/tablet/desktop | Responsive CSS, nine viewport tests and Chromium touch test | Tests and physical-device checks pending |
-| Light/dark/system | Local preference and native editor theme | Preference core passed; visual verification pending |
-| PWA | Manifest, original icons, scoped static service worker | Build/installability check pending |
-| Backup/recovery | Checksummed gzip SQLite chunks, bounded rotation, secret/clock/zero-client guarded restore | Storage core passed; whole-world restore pending |
-| Export | Server-authoritative JSON or explicitly unconfirmed local recovery copy | Schema core passed; browser download pending |
-| Input/rate limits | Bounded JSON/frames/chunks, token buckets, record/world budgets | Core passed; real Worker/browser pending |
-| Tests and CI | Core, Worker, three browsers, optimized preview and performance workflow | Core passed; CI not run |
-| No required paid infrastructure | Cloudflare free-tier target, no external paid service | Conditional on usage and hobby-license eligibility |
-| No console-breaking errors | Browser error assertions included | Not verified |
-| Production build | Vite/Worker configuration and scripts present | Blocked; no build output |
-| Documentation | README, architecture, deployment, security, testing, research, notices and audit | Source reviewed |
+| App called Canvas | Manifest, UI, package metadata | **PASS** |
+| Repository `thiepn/canvas` | GitHub repository and PR #1 | **PASS** |
+| GitHub Pages compatible | Vite `/canvas/` base; optimized subpath test; official Pages Actions | **PASS** |
+| Cloudflare backend deployable | Wrangler dry-run, Worker/DO integration, SQLite migration config | **PASS** |
+| One persistent world | Fixed `main` Worker/DO route; no rooms UI | **PASS** |
+| No accounts | No signup/login/OAuth/profile system | **PASS** |
+| Anyone with permitted frontend can edit | Anonymous admission; open-access model documented | **PASS** |
+| Anonymous local identity | UUID/name/color local persistence; presence only | **PASS** |
+| Text | Native editor + pointer/text/browser persistence tests | **PASS** |
+| Freehand drawing | Native vector draw tool; pointer drawing test | **PASS** |
+| Highlighter | Real toolbar drag + server-persistence assertion in Chromium/Firefox/WebKit | **PASS** |
+| Rectangle | Real toolbar drag + persistence; collaboration coverage | **PASS** |
+| Ellipse | Real toolbar drag + persistence; reconnect follow-up edit | **PASS** |
+| Diamond | Real toolbar drag + server persistence in all three engines | **PASS** |
+| Line | Real toolbar drag + server persistence in all three engines | **PASS** |
+| Arrow/connectors | Real toolbar drag + server persistence in all three engines; native bindings retained | **PASS** |
+| Frame | Real toolbar drag + server persistence in all three engines | **PASS** |
+| Eraser | Real editor eraser sweep crosses hollow-geo outline; client/server deletion asserted in all three engines | **PASS** |
+| Selection/multi-select/move/resize/rotate | Native engine behavior; move/resize browser assertions | **PASS** for representative operations; native remainder retained |
+| Group/ungroup/duplicate | Native actions retained in context menu | **IMPLEMENTED** |
+| Copy/paste supported Canvas objects | tldraw structured clipboard deliberately preserved | **IMPLEMENTED**; plain-text cross-browser paste **PASS** |
+| Undo/redo | Local collaborative undo/redo isolation test | **PASS** |
+| Images disabled | Toolbar/handlers/assets/server policy + browser image paste | **PASS** |
+| File uploads disabled | No upload store + file/PDF drop tests | **PASS** |
+| Realtime sync | A↔B create/move/delete tests in Chromium/Firefox/WebKit | **PASS** |
+| Live cursors/presence | Native presence + names + presence-count/rename/removal tests | **PASS** |
+| Persistent backend state | SQLite sync storage + Worker restart + zero-client reopen | **PASS** locally |
+| Refresh persistence | Multi-client reload checks | **PASS** |
+| Close/reopen persistence | All clients closed, new context sees state | **PASS** |
+| Automatic reconnect | Forced Canvas transport interruption, visible status, convergence, resumed editing | **PASS** |
+| Connection-state UI | Live/offline/reconnecting behavior asserted | **PASS** |
+| Hibernation-compatible architecture | Hibernation WebSocket APIs, bounded attachments, auto-response, no app heartbeat | **PASS** by code/runtime compatibility |
+| Actual Cloudflare idle hibernation/wake | Requires production platform eviction | **OWNER ACTION** |
+| Mobile responsive layout | Nine requested viewport sizes and touch simulation | **PASS** automated |
+| Physical tablet/stylus/palm behavior | Requires real hardware | **OWNER ACTION** |
+| Desktop Chrome/Firefox/Safari-engine coverage | Chromium/Firefox/WebKit E2E | **PASS** |
+| Light/dark/system | Preference/state integration and UI implementation | **PASS** for config behavior; physical display differences remain manual |
+| PWA | Manifest/icons/service worker + production manifest smoke | **PASS** |
+| Backup/recovery | Real SQLite backups/checksums/rollback + owner restore browser/Worker scenario | **PASS** locally |
+| Export | Portable JSON export path | **PASS** implementation/build; deployed download drill recommended |
+| Input/rate/size limits | Unit policy tests + malformed/oversize WebSocket browser tests | **PASS** |
+| Tests | 33 unit + 5 Worker + 62 E2E + production-preview gate; 4 deliberate project-specific skips | **PASS** on recorded implementation head |
+| CI | Read-only quality workflow and gated Pages deployment | **PASS** configuration and recorded implementation run |
+| Dependency security | Recorded npm audit | **PASS — 0 vulnerabilities** |
+| Documentation | README/architecture/research/testing/deployment/security/license/audit | **PASS** |
+| No required paid infrastructure | No paid database/realtime/asset service | **PASS**, subject to Cloudflare/tldraw eligibility/usage |
+| No app analytics/tracking | None implemented | **PASS** |
+| No console-breaking production errors | Production-preview browser assertions | **PASS** |
+| Production frontend build | Vite build + bundle audit | **PASS** |
 
-## Requested manual scenarios A–N
+## Requested scenarios A–N
 
-| Scenario | Corresponding implementation/test | Actual result |
+| Scenario | Automated evidence | Result |
 | --- | --- | --- |
-| A — Fresh browser, immediate anonymous entry | Identity unit tests; peer browser fixture and production preview | Identity unit portion passed; browser scenario not run |
-| B — Draw and refresh | `interaction.spec.ts` real pointer strokes and reload | Not run |
-| C — Text and refresh | Interaction, multiplayer and production-preview tests | Not run |
-| D — Shapes, transforms and refresh | Native toolset; precise create/resize/move tests | Not run; manual every-tool review also required |
-| E — Two users, shared cursors and edits | `collaboration.spec.ts`, independent isolated browser contexts | Not run |
-| F — Simultaneous independent edits | Concurrent create/update and local-undo isolation tests | Not run |
-| G — Persistence after all clients close | Multiplayer close/new-context and Worker restart tests | Not run for the world; backup SQL close/reopen core passed |
-| H — Network interruption and recovery | Offline toggle and WebSocket-close/reconnect test | Not run |
-| I — Image paste rejection | Clipboard/policy unit tests plus real browser paste test | Policy core passed; browser not run |
-| J — File drag/drop rejection | Image/PDF drop browser test | Not run |
-| K — Mobile toolbar and gestures | Nine sizes, touch text, CDP pinch and menu controls | Not run; physical hardware still needed |
-| L — Ten simultaneous clients | Ten isolated browser contexts with live edits/presence | Not run |
-| M — Thousands of elements | 100/1,000/5,000/10,000-object benchmark with actual metrics output | Not run; no performance numbers supplied |
-| N — Backup, destructive edit and owner restore | Real SQL backup/core reconstruction plus browser/CLI restore scenario | Core portion passed; complete restore scenario not run |
+| A — Fresh browser | Immediate editor, no login, generated local identity | **PASS** |
+| B — Draw + refresh | Real pointer stroke then persistence/reload coverage | **PASS** |
+| C — Text + refresh | Text creation, cross-client observation, reload | **PASS** |
+| D — Shapes/transforms + refresh | Required-tool matrix covers rectangle/ellipse/diamond/line/arrow/frame/highlighter + server persistence; separate move/resize/reload coverage | **PASS** |
+| E — Two users | Independent contexts, realtime shapes/text/presence | **PASS** |
+| F — Simultaneous edits | Concurrent creates/moves; local undo isolation | **PASS** |
+| G — Zero clients | Close all contexts; new context sees state; Worker restart persistence | **PASS** |
+| H — Network interruption | Forced Canvas WebSocket interruption, visible paused state, automatic reconnect/convergence | **PASS** |
+| I — Image paste | Image clipboard rejected; no crash/persistence | **PASS** |
+| J — File drag/drop | Image/PDF files rejected | **PASS** |
+| K — Mobile | Nine viewport sizes + Chromium touch/pinch automation | **PASS automated**; real device/stylus remains manual |
+| L — Ten users | Ten isolated Chromium contexts, shapes + presence convergence | **PASS** |
+| M — Large canvas | 100 / 1k / 5k / 10k real persisted shapes with measured metrics | **PASS**, with 10k memory caveat |
+| N — Backup/restore | Snapshot, destructive edit, stale-clock rejection, zero-client restore, restored state | **PASS locally**; repeat once against deployed Worker |
 
-No scenario is silently promoted from “test written” to “passed.” Complete these checks and retain real logs before changing the release decision.
+## Performance acceptance
+
+Measured at 10,000 simple shapes:
+
+- serialized scene: ~3.59 MB;
+- serialization: ~17.7 ms;
+- median frame: ~18.5 ms;
+- p95 frame: ~26 ms;
+- JS heap: ~825 MiB.
+
+Therefore the hard 10,000-shape ceiling is accepted as a safety/stress boundary, **not** as the recommended working size. Memory is a known engine/workload limitation at that extreme rather than a release blocker for the intended 1–10-person, modest-scene use case.
+
+## Intentional omissions verified
+
+The release does not add:
+
+- accounts, auth, roles, invitations;
+- multiple boards/rooms/workspaces UI;
+- images/files/PDF/media uploads;
+- chat/comments/notifications;
+- AI;
+- tasks/calendars/databases/templates/marketplace;
+- R2/D1/Postgres/Supabase/Firebase/Redis;
+- third-party analytics or advertising.
+
+## Final owner/platform acceptance
+
+Before calling the **live deployment** fully certified:
+
+1. deploy Worker and set `ADMIN_TOKEN`;
+2. configure the actual Worker URL and valid tldraw production key in GitHub;
+3. ensure the final branch/merge SHA has a green quality run;
+4. enable Pages deployment;
+5. repeat the two-client/close-reopen/reconnect/image-rejection smoke on the live URL;
+6. observe a real Cloudflare hibernation/wake cycle;
+7. test a real phone/tablet and stylus if stylus use matters;
+8. run one noncritical production backup/restore drill.
+
+These are operational/platform checks, not missing V1 application features.

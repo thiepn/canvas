@@ -5,7 +5,10 @@ const CONTEXT_ACTIONS = ['undo', 'redo', 'cut', 'copy', 'paste', 'duplicate', 'd
 function CanvasContextMenu(props: TLUiContextMenuProps) {
   const actions = useActions(), editor = useEditor()
   const readonly = useValue('context.readonly', () => editor.getInstanceState().isReadonly, [editor])
-  return <DefaultContextMenu {...props}>{CONTEXT_ACTIONS.map(id => actions[id] ? <TldrawUiMenuItem key={id} {...actions[id]} disabled={readonly && id !== 'copy'} /> : null)}</DefaultContextMenu>
+  return <DefaultContextMenu {...props}>{CONTEXT_ACTIONS.map(id => {
+    const action = actions[id]
+    return action ? <TldrawUiMenuItem key={id} id={action.id} label={action.label} kbd={action.kbd} onSelect={action.onSelect} readonlyOk={action.readonlyOk} disabled={readonly && id !== 'copy'} /> : null
+  })}</DefaultContextMenu>
 }
 export const UI_COMPONENTS: TLComponents = {
   Toolbar: CanvasToolbar, ContextMenu: CanvasContextMenu,

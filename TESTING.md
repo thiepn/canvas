@@ -1,50 +1,188 @@
 # Verification strategy and evidence
 
-## What actually ran in the authoring environment
+Canvas uses layered verification because a collaborative editor can compile successfully while still failing persistence, browser interaction, or concurrency behavior.
 
-On 2026-09-08, Node 22.16.0 executed `npm test` without installing editor dependencies: **33 tests passed, none failed or skipped**. The suite uses the real `node:sqlite` driver, Web Streams gzip, Web Crypto, file close/reopen, deliberate corruption, and a failed SQL transaction. It does not claim to emulate Cloudflare hibernation or prove tldraw interoperability.
+## Automated evidence obtained
 
-A strict TypeScript 5.8.3 check of the tested core, including unused-local/parameter checks, passed. All 52 then-current TS/TSX/JS sources passed syntax checks. Syntax checking is not module resolution, an SDK typecheck, lint, or a production build. Actual logs are retained in `docs/evidence/` and machine-readable status in `docs/verification.json`.
+### Certified implementation quality run
 
-Npm registry access failed from the runner; a bounded dependency-install attempt timed out. Therefore the full commands below were **not certified there**. No lockfile, dependency-audit result, production bundle, browser screenshot, performance number, Lighthouse score, or deployed-worker result is fabricated.
+The fully integrated release gate passed on commit `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` in GitHub Actions run `34296811474`.
 
-## Test layers
+That run completed all of the following successfully:
+
+- reproducible `npm ci` installation;
+- full dependency audit capture;
+- `npm audit --audit-level=high`;
+- ESLint with zero warnings;
+- strict frontend/shared/Worker TypeScript;
+- unit/storage tests;
+- Worker/Durable Object integration tests;
+- Wrangler production dry-run;
+- optimized Vite build and bundle audit;
+- Chromium/Firefox/WebKit E2E;
+- optimized production-preview smoke.
+
+The recorded npm audit for that run contains **zero vulnerabilities at every severity level**.
+
+### Unit and storage layer
+
+The core suite contains **33 passing tests**. It covers local identity/configuration, URL/base parsing, bounded JSON, record/media policy, rate/chunk guards, world byte accounting, backup envelopes/retention/reconstruction, and real SQLite backup storage including close/reopen persistence, corruption detection, and transactional rollback.
+
+### Worker integration
+
+The local Wrangler suite contains **5 passing integration tests** against the actual Worker/Durable Object runtime rather than a hand-written HTTP mock. It covers admission/CORS, administration guards, invalid restore handling, persistence across Worker-process restart, and backend state behavior.
+
+`npm run check:worker` additionally performs a Wrangler production dry-run bundle.
+
+### Cross-browser E2E
+
+The certified Chromium/Firefox/WebKit run passed with:
+
+- **62 passed**;
+- **4 intentional project-specific skips**;
+- **0 failures**;
+- **0 flaky tests**.
+
+The four skips are not untested core functionality:
+
+- the ten-context load case is executed once in Chromium instead of three times; ordinary multiplayer/concurrency behavior still runs in Chromium, Firefox, and WebKit;
+- CDP multi-touch injection is Chromium-only; responsive and non-CDP interaction coverage still runs cross-browser, while physical stylus/palm behavior remains a hardware check.
+
+Critical automated scenarios include:
+
+- A creates `Hello from A`; B receives it;
+- B creates a rectangle; A receives it;
+- A moves the rectangle; B receives the final position;
+- B deletes A's text; A observes deletion;
+- both clients refresh and converge;
+- all clients close, a new client opens, and server state remains;
+- simultaneous independent edits survive;
+- local undo/redo does not remove an unrelated remote edit;
+- independent concurrent moves converge;
+- a client loses its Canvas transport, editing visibly pauses, the peer edits, transport returns, the client reconnects without page refresh, receives the missed edit, and can continue editing;
+- collaborator presence/rename appears and disappears after disconnect;
+- owner snapshot → destructive edit → administrative restore returns known state and stale restore clocks are rejected;
+- ten isolated Chromium contexts connect and converge on ten shapes/presence;
+- pointer-based drawing, text creation, shape resizing and persistence;
+- a dedicated real-editor tool matrix creates rectangle, ellipse, diamond, line, arrow, frame, and highlighter content through the actual toolbar, confirms every record reaches the authoritative server, then erases a target by sweeping across its outline; this passed in Chromium, Firefox, and WebKit;
+- plain-text paste in Chromium/Firefox/WebKit;
+- pasted images and dropped image/PDF files are rejected;
+- malformed/oversized WebSocket traffic is rejected;
+- application controls have accessible names and keyboard behavior;
+- required responsive viewports remain usable without body-scroll/tool overflow;
+- Chromium touch/pinch simulation changes the canvas camera rather than scrolling the page;
+- phone-native menu controls expose undo, redo, zoom, and fit behavior when desktop navigation is hidden.
+
+The eraser regression deliberately crosses a shape outline. tldraw's hollow geo eraser semantics use outline hit-testing rather than treating the empty interior as filled content, so pressing only inside a rectangle is correctly not an erase hit.
+
+Required viewports automated:
+
+- 320×568
+- 360×800
+- 390×844
+- 430×932
+- 768×1024
+- 1024×768
+- 1366×768
+- 1440×900
+- 1920×1080
+
+### Production-mode smoke
+
+`npm run test:production` creates a separate optimized build in `.preview-dist`, starts it under the repository subpath `/canvas/`, connects it only to isolated local Worker storage, and verifies:
+
+- optimized static assets load from the project Pages base;
+- the test bridge is absent from the production bundle;
+- a real text interaction persists through the Worker;
+- manifest/PWA assets are reachable;
+- reload reconnects;
+- no page errors or failed frontend assets are observed;
+- an actual editor screenshot is captured as CI evidence.
+
+The certified production-preview test passed. `scripts/audit-build.mjs` also rejects accidental test-bridge inclusion and records bundle measurements. The production JavaScript payload measured **601,531 bytes gzip** across application chunks, dominated by the canvas engine.
+
+### Performance evidence
+
+The dedicated Chromium benchmark persisted real shared-state scenes through the Worker:
+
+| Shapes | Generate + persist | Serialize | Serialized bytes | Median frame | p95 frame | JS heap |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 2.18 s | 0.4 ms | 35,625 | 16.7 ms | 16.8 ms | 38 MiB |
+| 1,000 | 5.78 s | 2.0 ms | 358,041 | 16.7 ms | 16.9 ms | 88 MiB |
+| 5,000 | 26.9 s | 9.1 ms | 1,795,001 | 16.7 ms | 19.4 ms | 239 MiB |
+| 10,000 | 58.9 s | 17.7 ms | 3,592,101 | 18.5 ms | 26.0 ms | 825 MiB |
+
+The benchmark intentionally reports measured behavior rather than inventing a pass threshold. The 10,000-shape case is the configured stress ceiling and shows substantial memory growth; it should not be interpreted as the preferred everyday scene size.
+
+## Test commands
 
 | Command | Scope |
 | --- | --- |
-| `npm test` | Identity/configuration, bounded JSON, media/record policy, backup schema/reconstruction, origin/rate/chunk guards, byte budget, real SQLite backup storage/rotation/recovery |
-| `npm run typecheck` | Wrangler-generated runtime types plus strict frontend, shared, browser-test, and Worker TypeScript |
-| `npm run test:worker` | Real local Wrangler process: HTTP admission, CORS, administration, invalid restore, persistent state across process restart |
-| `npm run test:e2e` | Chromium, Firefox and WebKit against real local Worker and Vite test-mode editor |
-| `npm run test:production` | Separate optimized production-mode preview under `/Canvas/`, no test bridge, real input/persistence, assets, console errors, manifest, actual screenshot |
-| `npm run test:performance` | 100 / 1,000 / 5,000 / 10,000 objects, persistence, serialization size/time, pan-frame timing and Chromium heap metrics |
-| `npm run source:syntax` | Syntax-only diagnostics for project source, useful but not a substitute for the above |
+| `npm run lint` | ESLint, zero warnings |
+| `npm run typecheck` | Wrangler-generated Cloudflare types plus strict frontend/shared/Worker TypeScript |
+| `npm test` | 33 unit/storage tests |
+| `npm run test:worker` | Local Wrangler/DO integration and restart tests |
+| `npm run check:worker` | Production Worker dry-run bundle |
+| `npm run build` | Optimized Vite build plus bundle audit |
+| `npm run test:e2e` | Chromium, Firefox and WebKit collaboration/interaction/tool/responsive regression |
+| `npm run test:production` | Optimized `/canvas/` preview smoke against isolated Worker state |
+| `npm run test:performance` | Real persisted large-scene measurement |
+| `npm run check` | Main quality sequence excluding the separately invoked large-scene benchmark |
 
-Install browser runtimes with `npx playwright install --with-deps chromium firefox webkit`. On systems without support for a particular browser runner, use GitHub's Linux workflow to obtain that browser's evidence instead of marking it passed locally.
+CI additionally records `npm audit --json` and rejects high/critical dependency findings. The certified audit reported zero findings across all severities.
 
-The editor's narrow test bridge is dynamically imported only in Vite `test` mode. Production build auditing refuses its marker. The optimized preview is built into `.preview-dist` with an explicit loopback backend and a separate persisted test directory; production API values from the developer's shell cannot redirect its data writes.
+## Test isolation
 
-## Critical automated scenarios
+The narrow `window.__CANVAS_TEST__` bridge is dynamically imported only in Vite `test` mode. Production bundle auditing refuses its marker.
 
-The multiplayer test creates `Hello from A`, observes it from B, creates B's rectangle, moves it from A, deletes the text from B, reloads both, closes all clients, and opens a new client against the same state. Other cases cover independent concurrent edits, local undo/redo in the presence of another user's change, disconnect/reconnect without refresh, presence rename/removal, owner recovery, and ten simultaneous isolated contexts.
+E2E and production-preview tests use isolated local Durable Object persistence directories and known test-only admin tokens. They do not point at a deployed production world. Production API environment values from the developer shell are overridden during the preview smoke test.
 
-Interaction tests use actual pointer drawing and text input as well as the bridge for precise object assertions. They reject image/PDF file paste/drop, check oversized/binary socket handling, verify visible button naming/menu keyboard behavior, and inspect all nine requested viewports: 320×568, 360×800, 390×844, 430×932, 768×1024, 1024×768, 1366×768, 1440×900, and 1920×1080. A Chromium multi-touch test checks pinch zoom changes the camera and does not scroll the document. A narrow-phone test uses the actual Canvas-menu undo, redo and zoom buttons rather than keyboard shortcuts.
+The performance run also uses isolated local Worker storage.
 
-The stress/performance scripts write measurements only after real execution. Ten thousand shapes is a practical test target within the separate 8 MiB record budget, not an established performance guarantee. Failure must not be hidden by reducing the test scene and reporting the original target as passed.
+## Remaining manual/platform release checks
 
-## Manual release gates
+Automation materially reduces risk but does not certify hardware/platform behavior that it does not execute.
 
-Execute against a staging or newly deployed world with recoverable test data; keep production backups first. Record device/browser/version and pass/fail notes rather than checking every box speculatively.
+### Real Cloudflare hibernation
 
-- Fresh storage: immediate editor without login; stable local guest identity after refresh; no user record in the server export. Test light, dark, and system appearance and blocked localStorage.
-- Draw, highlight, type, format, create every listed shape/line/arrow/frame, resize, rotate, group, duplicate, erase, copy/paste, undo and redo. Verify both clients, then close all tabs and reopen. Test nested frames and bound arrows after grouping/deletion.
-- Disconnect one client, make a near-disconnect edit, reconnect, and verify authoritative convergence. Do not reload the disconnected tab before checking its pending work/local export. Exercise a same-object concurrent edit as well as independent objects; document the engine's observed resolution.
-- Idle connected clients on the real Cloudflare deployment, then edit again without refresh. Inspect logs/analytics to verify session recovery and idle resource behavior. Local process restart and pure unit tests do not prove platform eviction.
-- On real phone/tablet hardware: portrait/landscape, soft keyboard, one-finger interaction, two-finger pan, pinch, text selection, selection handles, safe areas, pull-to-refresh/overscroll, stylus and palm handling. Desktop WebKit is not iPad Safari or Apple Pencil hardware.
-- Check all toolbar/menu states, context menu reopen, focus visibility/order, native style panels, contrast, reduced motion, error/loading states and long guest names. Use a screen reader and an accessibility scanner; the included button-name checks are not a complete accessibility audit.
-- Create a known backup, perform a destructive edit, restore administratively with all clients closed, and verify the exact known state from a new browser. Verify malformed/version-mismatched restores leave the world unchanged.
-- Run synthetic scenes plus many freehand strokes at large spatial coordinates. Inspect CPU, frames, memory, server errors, vector density and bundle output. Run Lighthouse on the actual built shell, recognizing that an editor differs from a static article.
+After deployment:
+
+1. connect one or more production clients;
+2. leave them idle long enough for Cloudflare to hibernate the Durable Object when the platform chooses;
+3. interact again without refreshing;
+4. verify synchronization resumes;
+5. inspect Cloudflare logs/analytics for errors and unexpected active duration.
+
+Local Wrangler restart/reconnect tests validate the hibernation-compatible architecture but cannot prove a real Cloudflare platform eviction occurred.
+
+### Physical phone/tablet/stylus
+
+On actual hardware verify:
+
+- portrait and landscape;
+- soft keyboard behavior;
+- one-finger object interaction;
+- two-finger pan/pinch;
+- text selection/editing;
+- selection handles;
+- safe-area positioning;
+- browser overscroll/pull-to-refresh interference;
+- stylus input and palm behavior.
+
+Desktop WebKit/Playwright touch emulation is not Apple Pencil or physical iPad certification.
+
+### Accessibility
+
+The automated suite verifies accessible control names and keyboard interactions. Before calling accessibility complete, perform at least one real screen-reader pass and an automated scanner against the deployed build. Infinite-canvas content itself has inherent accessibility limitations even when application chrome is accessible.
+
+### Production recovery drill
+
+After deployment, use noncritical test state to run a real server snapshot/destructive edit/restore cycle with every client closed, then verify the restored state from a clean browser. CI already exercises the same logic locally; the deployment drill validates secrets/routing/operator procedure.
+
+### Optional Lighthouse/web-quality check
+
+The production build already checks console/static-asset/PWA basics. A Lighthouse run on the deployed Pages shell remains useful as a secondary web-quality measure. Do not optimize an infinite editor solely to maximize a static-page score.
 
 ## Release rule
 
-Successful core tests are necessary but insufficient. Every critical integration, build, deployment and recovery gate must pass; investigate and fix failures, then rerun affected and full suites. Add actual evidence and a dated certification record before changing the candidate's release status. Do not infer real touch performance, successful hibernation, or safe collaborative undo from architectural intent alone.
+The recorded implementation head `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete quality workflow in run `34296811474`. This documentation update creates a later head, so that exact head must pass the same gate before merge, and the final merge commit on `main` must also be green. Deployment-specific checks remain explicitly separate from repository CI rather than being inferred from source design.

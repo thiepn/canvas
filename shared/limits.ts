@@ -1,7 +1,7 @@
 /** Product limits, shared by input guards and the Worker. Not a security identity system. */
 export const WORLD_ID = 'main' as const
 export const PRIMARY_PAGE_ID = 'page:page'
-export const ENGINE_VERSION = '5.4.1'
+export const ENGINE_VERSION = '5.4.0'
 export const BACKUP_VERSION = 1
 export const LIMITS = Object.freeze({
   worldBytes: 8 * 1024 * 1024,

@@ -28,12 +28,28 @@ test('independent concurrent edits remain and local undo does not undo another u
 test('disconnected client pauses edits, reconnects and receives independent changes', async ({ peer }) => {
   const a = await peer(), b = await peer()
   const first = await create(a.page, 'rectangle'); await waitShape(b.page, first)
-  await b.context.setOffline(true)
-  await b.page.evaluate(() => { for (const ws of window.__TEST_SOCKETS__ ?? []) ws.close(4000, 'Test network interruption') })
+
+  // Block only the Canvas WebSocket path. This models the realtime backend becoming unreachable
+  // while keeping the Vite test page itself healthy, so dev-server HMR cannot contaminate the
+  // reconnect scenario with a page reload/beforeunload cycle.
+  await b.page.evaluate(() => {
+    window.__TEST_BLOCK_CANVAS_WS__ = true
+    for (const ws of window.__TEST_SOCKETS__ ?? []) ws.close(4000, 'Test Canvas transport interruption')
+  })
   await expect(b.page.getByText(/editing is paused/i)).toBeVisible()
+
   const second = await create(a.page, 'text', 'While B was offline')
-  await b.context.setOffline(false)
-  await expect(b.page.getByRole('status').filter({ hasText: /^Live$/ })).toBeVisible()
+  await expect.poll(() => b.page.evaluate(id => window.__CANVAS_TEST__!.shapes().some(shape => shape.id === id), second), { timeout: 1500 }).toBe(false)
+
+  await b.page.bringToFront()
+  await b.page.evaluate(() => {
+    window.__TEST_BLOCK_CANVAS_WS__ = false
+    // The real browser uses online/visibility changes as reconnect hints. Dispatch the same hint
+    // after releasing the test-only backend block so the retry is immediate rather than waiting
+    // for the current exponential-backoff slot.
+    window.dispatchEvent(new Event('online'))
+  })
+  await expect(b.page.getByRole('status').filter({ hasText: /^Live$/ })).toBeVisible({ timeout: 15000 })
   await waitShape(b.page, second)
   const third = await create(b.page, 'ellipse'); await waitShape(a.page, third)
 })

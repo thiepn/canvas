@@ -20,11 +20,11 @@ export function installContentPolicy(editor: Editor, notify: (message: string) =
   editor.registerExternalContentHandler('text', async content => {
     if (content.text.length > LIMITS.textCharacters) { notify('Text is limited to 20,000 characters per object.'); return }
     // Never pass pasted HTML into rich-text conversion. Ordinary text remains fully supported.
-    await defaultHandleExternalTextContent(editor, { type: 'text', text: content.text, point: content.point })
+    await defaultHandleExternalTextContent(editor, { text: content.text, point: content.point })
   })
   editor.registerExternalContentHandler('url', async content => {
     if (!isAllowedUrl(content.url)) { notify('That link format is not supported.'); return }
-    await defaultHandleExternalTextContent(editor, { type: 'text', text: content.url, point: content.point })
+    await defaultHandleExternalTextContent(editor, { text: content.url, point: content.point })
   })
   editor.registerExternalContentHandler('tldraw', async content => {
     const payload = content.content

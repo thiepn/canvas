@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
+import { getAssetUrlsByMetaUrl } from '@tldraw/assets/urls'
 import { useSync } from '@tldraw/sync'
 import { atom, createUserId, getDefaultUserPresence, Tldraw, type Editor, type TLUser } from 'tldraw'
 import 'tldraw/tldraw.css'
@@ -13,7 +13,7 @@ import { LIMITS } from '../../shared/limits.ts'
 import { UI_COMPONENTS, UI_OVERRIDES } from './editor-ui.tsx'
 import type { PublicConfig } from '../config/public-config.ts'
 
-const ASSET_URLS = getAssetUrlsByImport()
+const ASSET_URLS = getAssetUrlsByMetaUrl()
 const EDITOR_OPTIONS = { maxPages: 1, maxShapesPerPage: LIMITS.shapes }
 const NO_MIMES: readonly string[] = []
 export default function CanvasEditor({ config }: { config: PublicConfig }) {
@@ -29,7 +29,7 @@ export default function CanvasEditor({ config }: { config: PublicConfig }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const initialIdentity = useRef(identity)
   const presenceIdentity = useMemo(() => atom('canvas.presence-identity', initialIdentity.current), [])
-  // A non-null currentUser enables persistent attribution in tldraw 5.4. Canvas has NO accounts.
+  // A null currentUser keeps anonymous identity ephemeral; presence is supplied separately below.
   const users = useMemo(() => ({ currentUser: atom<TLUser | null>('canvas.anonymous-user', null) }), [])
   const getUserPresence = useCallback<NonNullable<Parameters<typeof useSync>[0]['getUserPresence']>>((store, user) => {
     const base = getDefaultUserPresence(store, user)
@@ -58,9 +58,9 @@ export default function CanvasEditor({ config }: { config: PublicConfig }) {
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
   }, [])
   useEffect(() => {
-    if (!rootRef.current) return
-    return installClipboardGuards(rootRef.current, notify)
-  }, [notify])
+    if (!rootRef.current || !editor) return
+    return installClipboardGuards(rootRef.current, editor, notify)
+  }, [editor, notify])
   useEffect(() => {
     presenceIdentity.set(identity)
     editor?.user.updateUserPreferences({ id: identity.deviceId, name: identity.displayName, color: identity.color })
@@ -101,7 +101,7 @@ export default function CanvasEditor({ config }: { config: PublicConfig }) {
   return <div className="canvas-app" ref={rootRef}>
     <Header editor={editor} identity={identity} status={status} theme={theme} rename={rename} changeTheme={changeTheme} exportState={() => exportCanvas(config.apiUrl, editor, online, notify)} />
     <main className="canvas-workspace" aria-label="Shared infinite canvas">
-      {sync.status === 'error' ? <div className="app-message" role="alert"><h2>Canvas could not connect</h2><p>{sync.error.message}</p><p>Check the backend URL, allowed origin, and deployment. No local document has replaced the shared world.</p><button type="button" onClick={() => location.reload()}>Try again</button></div> : <Tldraw store={sync} assets={NO_ASSETS} assetUrls={ASSET_URLS} licenseKey={config.licenseKey} components={UI_COMPONENTS} overrides={UI_OVERRIDES} acceptedImageMimeTypes={NO_MIMES} acceptedVideoMimeTypes={NO_MIMES} maxAssetSize={0} locale="en" options={EDITOR_OPTIONS} onMount={onMount} />}
+      {sync.status === 'error' ? <div className="app-message" role="alert"><h2>Canvas could not connect</h2><p>{sync.error.message}</p><p>Check the backend URL, allowed origin, and deployment. No local document has replaced the shared world.</p><button type="button" onClick={() => location.reload()}>Try again</button></div> : <Tldraw store={sync} assetUrls={ASSET_URLS} licenseKey={config.licenseKey} components={UI_COMPONENTS} overrides={UI_OVERRIDES} acceptedImageMimeTypes={NO_MIMES} acceptedVideoMimeTypes={NO_MIMES} maxAssetSize={0} locale="en" options={EDITOR_OPTIONS} onMount={onMount} />}
       {connectionSlow && sync.status === 'loading' && <div className="network-banner" role="status">Still connecting. Check your internet connection and that the Canvas backend is deployed and permits this site’s origin. Connection attempts continue automatically.</div>}
       {!online && sync.status === 'synced-remote' && <div className="network-banner" role="status">{browserOnline ? 'Reconnecting' : 'Offline'} — editing is paused. Keep this tab open; pending changes will reconnect automatically. You can export a local recovery copy.</div>}
       {online && !hintDismissed && <div className="empty-hint"><span>Draw, type, or make shapes anywhere.</span><button type="button" aria-label="Dismiss hint" onClick={() => { setHintDismissed(true); writePreference(storage, 'canvas.hint.dismissed', 'yes') }}>×</button></div>}

@@ -16,22 +16,36 @@ test('real pointer drawing, text typing, shape resize and reload', async ({ peer
   await page.reload(); await page.waitForFunction(() => !!window.__CANVAS_TEST__); await waitShape(page, shape)
   expect(await page.evaluate(() => window.__CANVAS_TEST__!.shapes().some(shape => shape.type === 'draw'))).toBe(true)
 })
-test('native plain-text paste works; image/file paste and drop never persist media', async ({ peer, request }) => {
+test('plain-text paste works; image/file paste and drop never persist media', async ({ peer, request }) => {
   const { page } = await peer()
   await page.mouse.click(400, 300)
   await page.evaluate(() => {
     const target = document.querySelector('.tl-canvas') ?? document.querySelector('.canvas-workspace')!
     const data = new DataTransfer(); data.setData('text/plain', 'Pasted plain text')
-    target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+    // Firefox does not reliably expose DataTransfer passed through a constructed ClipboardEvent.
+    // Define clipboardData directly so the test exercises Canvas's real paste event boundary in
+    // the same deterministic way across Chromium, Firefox, and WebKit.
+    const event = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'clipboardData', { value: data })
+    target.dispatchEvent(event)
   })
   await expect.poll(async () => JSON.stringify(await world(request))).toContain('Pasted plain text')
   await page.evaluate(() => {
     const target = document.querySelector('.tl-canvas') ?? document.querySelector('.canvas-workspace')!
+    const dispatchPaste = (data: DataTransfer) => {
+      const event = new Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'clipboardData', { value: data })
+      target.dispatchEvent(event)
+    }
+    const dispatchDrop = (data: DataTransfer) => {
+      const event = new Event('drop', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'dataTransfer', { value: data })
+      target.dispatchEvent(event)
+    }
     const data = new DataTransfer(); data.items.add(new File(['not-an-upload'], 'image.png', { type: 'image/png' }))
-    target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
-    target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }))
+    dispatchPaste(data); dispatchDrop(data)
     const pdf = new DataTransfer(); pdf.items.add(new File(['%PDF'], 'file.pdf', { type: 'application/pdf' }))
-    target.dispatchEvent(new DragEvent('drop', { dataTransfer: pdf, bubbles: true, cancelable: true }))
+    dispatchDrop(pdf)
   })
   await expect(page.getByRole('status').filter({ hasText: /not supported/ })).toBeVisible()
   await expect(page.getByRole('toolbar', { name: 'Drawing tools' }).getByRole('button', { name: /image|upload|media/i })).toHaveCount(0)
