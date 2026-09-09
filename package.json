@@ -30,7 +30,8 @@
     "legacy:worker:admin": "node scripts/admin.mjs",
     "release:verify": "node scripts/release-verify.mjs",
     "test:production": "node scripts/test-production.mjs",
-    "source:syntax": "node scripts/check-source.mjs"
+    "source:syntax": "node scripts/check-source.mjs",
+    "performance:report": "node scripts/render-performance-report.mjs"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
