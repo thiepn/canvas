@@ -10,11 +10,11 @@
 
 The original uploaded source candidate was not releasable: its first GitHub Actions run could not install the declared tldraw 5.4.1 sync package, it had no genuine lockfile, several SDK boundaries were written against newer source than the npm-published package family, and runtime/browser behavior had not been certified.
 
-Those blockers were treated as implementation defects rather than documentation caveats. The hardening branch now has a real lockfile, an installable aligned tldraw 5.4.0 stack, strict frontend/Worker type compatibility, executable Worker/Durable Object integration, cross-browser multiplayer evidence, optimized production-build evidence, zero dependency advisories, recovery coverage, and measured large-scene performance.
+Those blockers were treated as implementation defects rather than documentation caveats. The hardening branch now has a real lockfile, an installable aligned tldraw 5.4.0 stack, strict frontend/Worker type compatibility, executable Worker/Durable Object integration, cross-browser multiplayer evidence, explicit required-tool coverage, optimized production-build evidence, zero dependency advisories, recovery coverage, and measured large-scene performance.
 
-### Exact-head certification
+### Certified implementation head
 
-Commit `68f83d614a39388515cae2efe671832f07a65d00` passed the complete **Canvas checks and Pages / quality** workflow in GitHub Actions run `34294256800`.
+Commit `44acf2d7d492be2f3a0afaa31748f7d4e87a2f1f` passed the complete **Canvas checks and Pages / quality** workflow in GitHub Actions run `34296811474`.
 
 The run passed every quality step:
 
@@ -30,9 +30,11 @@ The run passed every quality step:
 - Chromium/Firefox/WebKit E2E;
 - optimized `/canvas/` production-preview smoke.
 
-The recorded npm audit contained **zero vulnerabilities at every severity level**. The exact-head E2E result was **59 passed, 4 intentional project-specific skips, 0 failed, 0 flaky**. The four skips are limited to running the ten-client stress case once in Chromium and using Chromium-only CDP multi-touch injection; normal collaboration/responsive coverage remains cross-browser.
+The recorded npm audit contained **zero vulnerabilities at every severity level**. The E2E result was **62 passed, 4 intentional project-specific skips, 0 failed, 0 flaky**. The four skips are limited to running the ten-client stress case once in Chromium and using Chromium-only CDP multi-touch injection; normal collaboration, required-tool, and responsive coverage remains cross-browser.
 
-Any later commit—including documentation-only changes—must pass the same quality gate again. The final merge commit on `main` must also pass before publication.
+The required-tool matrix now explicitly drives the real toolbar/canvas in Chromium, Firefox, and WebKit to create and persist rectangle, ellipse, diamond, line, arrow, frame, and highlighter records, then erases a real target by crossing its outline. The first version of that regression revealed a test-assumption error—tldraw's hollow geo eraser correctly does not treat empty interior space as an erase hit—so the final test uses the natural outline-crossing gesture and passes in all three engines.
+
+This audit update itself creates a later documentation-only commit. That exact final branch head must pass the same quality gate again. The final merge commit on `main` must also pass before publication.
 
 **Production deployment remains a separate operational step.** Real Cloudflare hibernation wake, production license validation, production recovery routing, and physical stylus/palm behavior cannot be truthfully inferred from repository CI.
 
@@ -40,14 +42,15 @@ Any later commit—including documentation-only changes—must pass the same qua
 
 | Layer | Result |
 | --- | --- |
-| Dependency audit | **0 vulnerabilities** across info/low/moderate/high/critical on certified head |
+| Dependency audit | **0 vulnerabilities** across info/low/moderate/high/critical on certified implementation head |
 | Unit/storage suite | **33 passed, 0 failed** |
 | Worker/Durable Object integration | **5 passed, 0 failed** |
 | Strict TypeScript | **Passed** frontend/shared and Worker projects |
 | Lint | **Passed** with zero warnings |
 | Worker production dry run | **Passed** |
-| Production Vite build | **Passed**; bundle audit executed |
-| Cross-browser collaboration/interaction | **59 passed, 4 intentional project-specific skips, 0 failed, 0 flaky** |
+| Production Vite build | **Passed**; bundle audit executed; **601,531 bytes gzip JS** |
+| Cross-browser collaboration/interaction/tools | **62 passed, 4 intentional project-specific skips, 0 failed, 0 flaky** |
+| Required vector-tool matrix | **Passed in Chromium, Firefox, WebKit** |
 | Optimized production preview | **Passed** |
 | Ten-client convergence | **Passed** in Chromium with ten isolated contexts |
 | Close-all/reopen persistence | **Passed** |
@@ -94,7 +97,9 @@ Interpretation:
 14. **Pages path mismatch.** The real repository is lowercase `thiepn/canvas`; build/test/deployment paths use `/canvas/`.
 15. **Dependency advisory.** Wrangler/Miniflare previously resolved advisory-affected `sharp 0.35.2`; the lockfile pins the patched transitive version `0.35.4`. The final audit now reports zero vulnerabilities.
 16. **License documentation drift.** Current tldraw license-key behavior is documented conservatively, including the requirement for a production key and hobby-watermark rules.
-17. **Release evidence drift.** Documentation was updated from an older 61-test run to the exact final observed 59-pass/4-skip run and records the authoritative workflow run explicitly.
+17. **Release evidence drift.** Documentation was aligned to exact workflow artifacts rather than an older test-count estimate.
+18. **Required-tool evidence gap.** A dedicated real-editor cross-browser regression now explicitly covers rectangle, ellipse, diamond, line, arrow, frame, highlighter, server persistence, and eraser deletion.
+19. **Eraser test semantics.** The initial regression pressed only inside a hollow rectangle; tldraw correctly uses outline hit-testing for hollow geos. The test now performs a natural sweep through the outline and passes in all three engines.
 
 ## Remaining limitations — not repository defects
 
@@ -123,21 +128,21 @@ Anyone who can use the permitted frontend can read/edit the world. Display names
 | Dimension | Score / 10 | Basis |
 | --- | ---: | --- |
 | Architecture | **9.3** | One authoritative world, native record sync, one SQLite DO, hibernation, no unnecessary services |
-| Correctness | **9.2** | Strict types plus unit/Worker/cross-browser/production regression |
+| Correctness | **9.3** | Strict types plus unit/Worker/cross-browser/required-tool/production regression |
 | Realtime collaboration | **9.3** | Two-way sync, concurrency, undo isolation, presence, reconnect, ten-client convergence tested |
 | Persistence | **9.3** | Server authority, restart/close-all persistence, recovery snapshots and restore tested |
 | Reliability | **9.0** | Reconnect/error/size/recovery safeguards; live platform hibernation drill remains operational |
 | Performance | **8.2** | Strong through 5k synthetic shapes; 10k memory cost is material |
 | Storage efficiency | **9.2** | Vector/text only, no binary storage, bounded records/world/backups |
 | Mobile UX | **8.3** | Required viewport/touch automation; physical hardware still separate |
-| Desktop UX | **8.9** | Native editor behavior retained with reduced product chrome and three-engine interaction tests |
+| Desktop UX | **9.0** | Native editor behavior retained with reduced product chrome and all required drawing tools exercised in three engines |
 | Visual polish | **8.4** | Clean minimal canvas-first UI and optimized-build screenshot evidence |
 | Accessibility | **7.9** | Named/keyboard controls; real screen-reader spatial-content audit remains manual |
 | Security within open-access model | **9.0** | Layered input/media/admin limits, strict origin handling, secret isolation, zero-vulnerability audit |
 | Maintainability | **9.1** | Strict TS, aligned engine versions, lockfile, recovery/deployment documentation |
-| Test quality | **9.3** | Real SQLite/Worker, three browser engines, concurrency, restart/recovery, production preview, performance evidence |
+| Test quality | **9.4** | Real SQLite/Worker, three browser engines, full tool matrix, concurrency, restart/recovery, production preview, performance evidence |
 | Deployment readiness | **8.8** | Worker/Pages configs and source gates ready; external production configuration not supplied |
-| Documentation | **9.2** | Architecture, research, testing, deployment, recovery, licensing, limitations and exact evidence aligned |
+| Documentation | **9.3** | Architecture, research, testing, deployment, recovery, licensing, limitations and exact evidence aligned |
 
 ## Scope and simplicity audit
 
@@ -170,6 +175,6 @@ SQLite sync state + bounded recovery snapshots
 
 ## Publication decision
 
-**The recorded source head is release-quality and its complete quality gate passed.** Because this audit update itself creates a later commit, GitHub must rerun the same gate on the final branch head before merge. After merge, the `main` merge SHA must also be green.
+**The recorded implementation head is release-quality and its complete quality gate passed.** Because this audit update itself creates a later documentation-only commit, GitHub must rerun the same gate on the final branch head before merge. After merge, the `main` merge SHA must also be green.
 
 Actual publication still requires the owner's Cloudflare deployment, `ADMIN_TOKEN`, production Worker URL, valid tldraw production key, and explicit `CANVAS_DEPLOY_ENABLED=true`. After live deployment, execute the hibernation, recovery, and physical-device checks in [DEPLOYMENT.md](DEPLOYMENT.md) and [TESTING.md](TESTING.md).
