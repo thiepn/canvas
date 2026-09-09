@@ -1,12 +1,12 @@
 # Release acceptance matrix
 
-**Assessment:** Canvas V1 source implementation is release-candidate complete. Repository acceptance requires a green quality check on the exact merge SHA. Production-only Cloudflare hibernation and physical stylus checks remain separate and are not falsely marked as CI passes.
+**Assessment:** Canvas V1 source implementation is release-candidate complete. The recorded implementation head `68f83d614a39388515cae2efe671832f07a65d00` passed the complete quality workflow in GitHub Actions run `34294256800`. Because evidence/documentation updates create later commits, the final branch head and eventual `main` merge SHA must pass the same gate again. Production-only Cloudflare hibernation and physical stylus checks remain separate and are not falsely marked as CI passes.
 
 Legend:
 
 - **PASS** — observed in automated execution or directly verified build/config behavior.
 - **IMPLEMENTED** — feature exists, but the exact physical/platform behavior still needs manual verification.
-- **OWNER ACTION** — cannot be completed without the owner's Cloudflare/tldraw production configuration.
+- **OWNER ACTION** — cannot be completed without production account configuration or physical hardware.
 - **INTENTIONAL** — explicitly outside V1 scope.
 
 ## Product acceptance
@@ -15,7 +15,7 @@ Legend:
 | --- | --- | --- |
 | App called Canvas | Manifest, UI, package metadata | **PASS** |
 | Repository `thiepn/canvas` | GitHub repository and PR #1 | **PASS** |
-| GitHub Pages compatible | Vite `/canvas/` base; optimized subpath tests; official Pages Actions | **PASS** |
+| GitHub Pages compatible | Vite `/canvas/` base; optimized subpath test; official Pages Actions | **PASS** |
 | Cloudflare backend deployable | Wrangler dry-run, Worker/DO integration, SQLite migration config | **PASS** |
 | One persistent world | Fixed `main` Worker/DO route; no rooms UI | **PASS** |
 | No accounts | No signup/login/OAuth/profile system | **PASS** |
@@ -26,7 +26,7 @@ Legend:
 | Highlighter | Native vector highlighter exposed and server-allowed | **IMPLEMENTED**; physical stylus review recommended |
 | Rectangle | Native reduced toolset + browser collaboration | **PASS** |
 | Ellipse | Native reduced toolset + reconnect follow-up edit | **PASS** |
-| Diamond | Native reduced geo tool + server allowlist | **IMPLEMENTED**; engine behavior retained |
+| Diamond | Native reduced geo tool + server allowlist | **IMPLEMENTED**; native engine behavior retained |
 | Line | Native line tool + server allowlist | **IMPLEMENTED** |
 | Arrow/connectors | Native arrow/binding support retained | **IMPLEMENTED** |
 | Frame | Native frame tool, one page | **IMPLEMENTED** |
@@ -42,25 +42,26 @@ Legend:
 | Persistent backend state | SQLite sync storage + Worker restart + zero-client reopen | **PASS** locally |
 | Refresh persistence | Multi-client reload checks | **PASS** |
 | Close/reopen persistence | All clients closed, new context sees state | **PASS** |
-| Automatic reconnect | Forced network interruption, visible status, automatic convergence, resumed editing | **PASS** |
+| Automatic reconnect | Forced Canvas transport interruption, visible status, convergence, resumed editing | **PASS** |
 | Connection-state UI | Live/offline/reconnecting behavior asserted | **PASS** |
-| Hibernation-compatible architecture | Hibernation WebSocket APIs, attachments, auto-response, no app heartbeat | **PASS** by code/runtime compatibility |
+| Hibernation-compatible architecture | Hibernation WebSocket APIs, bounded attachments, auto-response, no app heartbeat | **PASS** by code/runtime compatibility |
 | Actual Cloudflare idle hibernation/wake | Requires production platform eviction | **OWNER ACTION** |
 | Mobile responsive layout | Nine requested viewport sizes and touch simulation | **PASS** automated |
 | Physical tablet/stylus/palm behavior | Requires real hardware | **OWNER ACTION** |
 | Desktop Chrome/Firefox/Safari-engine coverage | Chromium/Firefox/WebKit E2E | **PASS** |
-| Light/dark/system | Preference/state integration and UI implementation | **PASS** for config behavior; visual hardware differences remain manual |
+| Light/dark/system | Preference/state integration and UI implementation | **PASS** for config behavior; physical display differences remain manual |
 | PWA | Manifest/icons/service worker + production manifest smoke | **PASS** |
 | Backup/recovery | Real SQLite backups/checksums/rollback + owner restore browser/Worker scenario | **PASS** locally |
-| Export | Portable JSON export path | **PASS** implementation/build; production download drill recommended |
+| Export | Portable JSON export path | **PASS** implementation/build; deployed download drill recommended |
 | Input/rate/size limits | Unit policy tests + malformed/oversize WebSocket browser tests | **PASS** |
-| Tests | Unit + Worker + three-browser + production + performance suites | **PASS** evidence obtained; exact-head CI is authoritative |
-| CI | Read-only quality workflow and gated Pages deployment | **PASS** configuration; exact merge SHA must be green |
+| Tests | 33 unit + 5 Worker + 59 E2E + production-preview gate; 4 deliberate project-specific skips | **PASS** on recorded exact head |
+| CI | Read-only quality workflow and gated Pages deployment | **PASS** configuration and recorded exact-head run |
+| Dependency security | Final recorded npm audit | **PASS — 0 vulnerabilities** |
 | Documentation | README/architecture/research/testing/deployment/security/license/audit | **PASS** |
 | No required paid infrastructure | No paid database/realtime/asset service | **PASS**, subject to Cloudflare/tldraw eligibility/usage |
 | No app analytics/tracking | None implemented | **PASS** |
-| No console-breaking production errors | Production-preview browser assertions | **PASS** during hardening |
-| Production frontend build | Vite build + bundle audit | **PASS** during hardening |
+| No console-breaking production errors | Production-preview browser assertions | **PASS** |
+| Production frontend build | Vite build + bundle audit | **PASS** |
 
 ## Requested scenarios A–N
 
@@ -69,11 +70,11 @@ Legend:
 | A — Fresh browser | Immediate editor, no login, generated local identity | **PASS** |
 | B — Draw + refresh | Real pointer stroke then persistence/reload coverage | **PASS** |
 | C — Text + refresh | Text creation, cross-client observation, reload | **PASS** |
-| D — Shapes/transforms + refresh | Rectangle/ellipse create, move/resize and persistence; other native tools retained | **PASS** representative; all-tool manual sweep recommended |
+| D — Shapes/transforms + refresh | Rectangle/ellipse create, move/resize and persistence; remaining native tools retained | **PASS** representative; all-tool physical/manual sweep optional |
 | E — Two users | Independent contexts, realtime shapes/text/presence | **PASS** |
 | F — Simultaneous edits | Concurrent creates/moves; local undo isolation | **PASS** |
 | G — Zero clients | Close all contexts; new context sees state; Worker restart persistence | **PASS** |
-| H — Network interruption | Forced offline/socket close, visible paused state, automatic reconnect/convergence | **PASS** |
+| H — Network interruption | Forced Canvas WebSocket interruption, visible paused state, automatic reconnect/convergence | **PASS** |
 | I — Image paste | Image clipboard rejected; no crash/persistence | **PASS** |
 | J — File drag/drop | Image/PDF files rejected | **PASS** |
 | K — Mobile | Nine viewport sizes + Chromium touch/pinch automation | **PASS automated**; real device/stylus remains manual |
@@ -91,7 +92,7 @@ Measured at 10,000 simple shapes:
 - p95 frame: ~26 ms;
 - JS heap: ~825 MiB.
 
-Therefore the hard 10,000-shape ceiling is accepted as a safety/stress boundary, **not** as the recommended working size. Memory is a known weakness at that extreme.
+Therefore the hard 10,000-shape ceiling is accepted as a safety/stress boundary, **not** as the recommended working size. Memory is a known engine/workload limitation at that extreme rather than a release blocker for the intended 1–10-person, modest-scene use case.
 
 ## Intentional omissions verified
 
@@ -106,13 +107,13 @@ The release does not add:
 - R2/D1/Postgres/Supabase/Firebase/Redis;
 - third-party analytics or advertising.
 
-## Final owner-only acceptance
+## Final owner/platform acceptance
 
-Before calling the live deployment fully certified, complete:
+Before calling the **live deployment** fully certified:
 
 1. deploy Worker and set `ADMIN_TOKEN`;
 2. configure the actual Worker URL and valid tldraw production key in GitHub;
-3. merge only with an exact-head green quality check;
+3. ensure the final branch/merge SHA has a green quality run;
 4. enable Pages deployment;
 5. repeat the two-client/close-reopen/reconnect/image-rejection smoke on the live URL;
 6. observe a real Cloudflare hibernation/wake cycle;
