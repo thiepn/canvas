@@ -7,10 +7,10 @@ import { Icon } from '../components/Icon.tsx'
 import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity } from '../presence/identity.ts'
 import { loadTheme, writePreference, type ThemePreference } from '../storage/preferences.ts'
 import type { LiveConfig } from '../config/public-config.ts'
+import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = 'Connecting' | 'Synchronizing' | 'Live' | 'Reconnecting' | 'Offline' | 'Error'
-type VersionStamp = { version: number; versionNonce: number; isDeleted: boolean }
 type PresencePerson = { deviceId: string; displayName: string; color: string }
 type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown }
 type CursorPayload = {
@@ -38,11 +38,6 @@ const UI_OPTIONS = {
 
 function stampOf(element: SceneElement): VersionStamp {
   return { version: element.version, versionNonce: element.versionNonce, isDeleted: element.isDeleted }
-}
-
-function isNewer(next: VersionStamp, previous: VersionStamp | undefined): boolean {
-  if (!previous) return true
-  return next.version > previous.version || (next.version === previous.version && next.versionNonce > previous.versionNonce)
 }
 
 function normalizeRow(value: unknown): SyncRow | null {
@@ -203,12 +198,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const element = elementFromRow(row)
       if (!element) continue
       const nextStamp = { version: row.version, versionNonce: row.version_nonce, isDeleted: row.is_deleted }
-      if (!replace && !isNewer(nextStamp, shadowRef.current.get(row.id))) continue
+      if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue
       const pending = pendingRef.current.get(row.id)
-      if (!replace && pending && isNewer(stampOf(pending), nextStamp)) {
+      if (!replace && pending && shouldKeepPending(stampOf(pending), nextStamp)) {
         shadowRef.current.set(row.id, nextStamp)
         continue
       }
+      if (pending) pendingRef.current.delete(row.id)
       shadowRef.current.set(row.id, nextStamp)
       currentElements.set(row.id, element)
       changed = true
@@ -242,11 +238,18 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (error) {
       for (const element of elements) {
         const queued = pendingRef.current.get(element.id)
-        if (!queued || isNewer(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
+        if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
       }
       if (!navigator.onLine) setStatus('Offline')
       notify(`Canvas could not save: ${error.message}`)
-      if (navigator.onLine && !flushTimer.current) {
+      if (navigator.onLine) {
+        try {
+          await loadAuthoritative()
+        } catch {
+          // Keep the local queue intact. The normal retry path below will try again.
+        }
+      }
+      if (navigator.onLine && pendingRef.current.size && !flushTimer.current) {
         flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushPending() }, 1200)
       }
       return
@@ -257,7 +260,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       return
     }
     applyRows(data ?? [])
-  }, [applyRows, config.tableName, notify, supabase])
+  }, [applyRows, config.tableName, loadAuthoritative, notify, supabase])
 
   const scheduleFlush = useCallback(() => {
     if (flushTimer.current) return
@@ -361,9 +364,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     for (const element of allowed) {
       const nextStamp = stampOf(element)
-      if (!isNewer(nextStamp, shadowRef.current.get(element.id))) continue
+      if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
       const queued = pendingRef.current.get(element.id)
-      if (!queued || isNewer(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
+      if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
     }
     if (pendingRef.current.size) scheduleFlush()
   }, [notify, scheduleFlush])
