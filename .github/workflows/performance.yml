@@ -1,13 +1,18 @@
 name: Canvas performance evidence
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 permissions:
   contents: read
-env:
-  WRANGLER_SEND_METRICS: 'false'
+defaults:
+  run:
+    shell: bash
 jobs:
   performance:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -15,10 +20,25 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Verify version-matched Chromium runtime
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const { chromium } = require('@playwright/test');
+          assert.equal(require('@playwright/test/package.json').version, '1.63.0');
+          fs.accessSync(chromium.executablePath(), fs.constants.X_OK);
+          NODE
       - run: npm run test:performance
+        env:
+          HOME: /root
+      - run: npm run performance:report
       - if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: canvas-performance
-          path: artifacts/
+          path: |
+            artifacts/performance.json
+            artifacts/performance-baseline.md
+            artifacts/performance-run.json
+            test-results/
