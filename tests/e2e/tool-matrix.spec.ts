@@ -67,9 +67,11 @@ test('all required vector tools create persistent records and eraser removes a t
 
   const eraserTarget = await dragTool('Rectangle', [930, 500], [1040, 575])
   await toolbar.getByRole('button', { name: 'Eraser', exact: true }).click()
-  await page.mouse.move(985, 537)
+  // tldraw's eraser intentionally treats hollow geo interiors as empty space. Sweep from
+  // outside through the rectangle outline so this exercises the real eraser gesture.
+  await page.mouse.move(880, 537)
   await page.mouse.down()
-  await page.mouse.move(1005, 537, { steps: 4 })
+  await page.mouse.move(980, 537, { steps: 10 })
   await page.mouse.up()
 
   await expect.poll(() => page.evaluate(id => {
