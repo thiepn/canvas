@@ -18,7 +18,7 @@ function App() {
     const config = createPublicConfig(import.meta.env.VITE_CANVAS_API_URL, import.meta.env.VITE_TLDRAW_LICENSE_KEY, location.href)
     return <Suspense fallback={<Loading />}><LegacyCanvasEditor config={config} /></Suspense>
   }
-  const config = createLiveConfig(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
+  const config = createLiveConfig(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, import.meta.env.VITE_CANVAS_TABLE)
   return <Suspense fallback={<Loading />}><SupabaseCanvasEditor config={config} /></Suspense>
 }
 
