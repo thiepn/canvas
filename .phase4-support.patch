@@ -1,0 +1,150 @@
+diff --git a/README.md b/README.md
+index 98582f4..f1e0000 100644
+--- a/README.md
++++ b/README.md
+@@ -27,7 +27,7 @@
+ - **React + TypeScript + Vite** for the static application;
+ - **Excalidraw 0.18.1** for the canvas/editor interaction model;
+ - **Supabase Postgres** as the authoritative persistent store;
+-- **Supabase Realtime** for Postgres changes, presence and cursor broadcasts;
++- **Supabase Realtime** for Postgres changes, presence, cursors and ephemeral in-progress element previews;
+ - **GitHub Pages** for static hosting.
+ 
+ There is no application server in the normal production path and no login system. The older tldraw/Cloudflare Worker implementation remains only as an isolated regression harness while its historical tests are retained; normal production builds do not select it.
+@@ -66,7 +66,7 @@
+ 
+ The browser loads the authoritative table before becoming editable and subscribes to Supabase Realtime. Excalidraw still renders every local intermediate frame immediately, but those frames stay in memory for conflict protection rather than being written on a generic timer. Phase 3 persists the final element state(s) from each completed logical `CanvasMutation`; unusually long continuous pointer/text operations receive bounded safety checkpoints. Durable writes are serialized and reconciled with authoritative rows after completion. Postgres still rejects stale update tuples, so delayed requests cannot overwrite a newer element version.
+ 
+-Presence and cursor state are ephemeral Realtime channel state and are not persisted as user accounts.
++Presence, cursors and active-operation previews are ephemeral Realtime channel state. Pointer/text previews are throttled Broadcast messages that let peers render in-progress geometry before the Phase 3 durability boundary; they never enter Postgres, expire automatically, and are replaced by authoritative rows when durability catches up.
+ 
+ If the connection is not `Live`, editing is disabled rather than pretending an unsafe offline edit has been saved.
+ 
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index c752b41..f1e0001 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -12,7 +12,8 @@
+             └─ Supabase Realtime
+                  ├─ postgres_changes
+                  ├─ presence
+-                 └─ cursor broadcast
++                 ├─ cursor broadcast
++                 └─ active-operation preview broadcast
+ ```
+ 
+ There is no application backend in the normal data path, no room service and no account service. Supabase is the authoritative persistence/realtime service. The previous tldraw + Cloudflare Worker code is retained only for historical regression tests and is compile-time excluded from normal production selection.
+@@ -67,13 +68,15 @@
+ 2. create the Supabase client and Realtime channel;
+ 3. load authoritative rows from Postgres;
+ 4. hydrate Excalidraw with allowed elements only;
+-5. subscribe to Postgres Changes, Presence and cursor Broadcast;
++5. subscribe to Postgres Changes, Presence, cursor Broadcast and active-operation preview Broadcast;
+ 6. only mark the editor `Live` after subscription and authoritative reconciliation complete.
+ 
+ Local editor changes have two separate paths. Every accepted Excalidraw element version is kept immediately in a local unsynchronized map so authoritative echoes cannot overwrite newer local work. Separately, the Phase 2 operation tracker groups those intermediate versions into pointer, text or discrete `CanvasMutation` objects and retains only each affected element's final version. Only a committed mutation's final changes enter the durable-ready queue.
+ 
+ The durable writer is serialized: one Supabase upsert batch runs at a time, and a newer committed mutation remains queued while an older request is in flight. Completed writes are reconciled with an authoritative read to account for database conflict rejection and concurrent updates. Failed or rejected requests requeue the exact attempted versions before bounded retry.
+ 
++Phase 4 adds a separate ephemeral preview lane for continuous pointer/text operations. At most one coalesced operation snapshot is sent roughly every 45 ms over Supabase Broadcast, plus the final operation state at commit. Preview messages have a bounded protocol envelope, random tab-session sequence numbers and a 512 KiB payload ceiling. They never advance the authoritative watermark or enter either local durability queue. A remote preview is rendered only when it advances the current authoritative version and the local client has no pending edit for that element. Authoritative rows immediately retire equal/older previews; abandoned previews expire after 1.4 seconds and restore the last authoritative element.
++
+ Continuous pointer/text operations that remain active for at least 1.5 seconds expose a non-committing snapshot to the durability layer. That snapshot may be persisted as a safety checkpoint while the same logical operation continues collecting newer versions. Pointer-up/text-end still produces the final mutation and final durable state. `pagehide`/offline capture performs the same safety role for an interrupted active editor without starting a new unloading-page request.
+ 
+ Remote Postgres changes are merged into the Excalidraw scene. Tombstones remove elements from the visible scene. Echoes from the same device are harmless because ordering is idempotent. A server echo may prune an equal/losing local or durable-ready version, but never a newer one.
+@@ -84,7 +87,7 @@
+ 
+ ## Presence and cursors
+ 
+-Presence is Supabase Realtime channel state, not Postgres data. It contains the anonymous display name/color/device session metadata required by collaborator UI. Cursor movement is ephemeral Broadcast traffic and is throttled/coalesced rather than persisted.
++Presence is Supabase Realtime channel state, not Postgres data. It contains the anonymous display name/color/device session metadata required by collaborator UI. Cursor movement and active-operation previews are ephemeral Broadcast traffic and are throttled/coalesced rather than persisted. Preview payloads are independently validated because they bypass Postgres row constraints.
+ 
+ Closing a client removes its presence according to Realtime channel lifecycle. No collaborator history table exists.
+ 
+diff --git a/TESTING.md b/TESTING.md
+index 7ed0fe3..f1e0002 100644
+--- a/TESTING.md
++++ b/TESTING.md
+@@ -58,6 +58,17 @@
+ 
+ Tool selection must interact with Excalidraw's visible accessible labels; the underlying radio inputs are visually overlaid by their icons and should not be clicked directly in Playwright.
+ 
++### Phase 4 preview-lane coverage
++
++The live suite additionally proves the fast and durable lanes remain separate:
++
++- a held rectangle drag becomes visible on a second real client through Supabase Broadcast while `canvas_ci_elements` is still empty and the originating client has made zero durable writes;
++- releasing that same gesture still produces exactly one normal Phase 3 database write and no long-operation checkpoint;
++- a synthetically abandoned but structurally valid remote preview renders temporarily, never changes the database row, and expires back to the authoritative element;
++- unit tests reject malformed/oversized/discrete preview envelopes, replayed sequence numbers and previews that would overwrite active local work.
++
++CI and the manual performance workflow both mutate `canvas_ci_elements`; their jobs therefore share one non-cancelling GitHub Actions concurrency group so their cleanup/setup cannot corrupt each other's live fixtures.
++
+ ## Compiled production smoke
+ 
+ `npm run test:production` performs a separate build into `.preview-dist` with:
+diff --git a/tests/performance/phase1.spec.ts b/tests/performance/phase1.spec.ts
+index b240f40..f1e0003 100644
+--- a/tests/performance/phase1.spec.ts
++++ b/tests/performance/phase1.spec.ts
+@@ -148,6 +148,7 @@
+     const readyAt = Date.now()
+ 
+     const beforeA = await diagnostics(pageA)
++    const beforeB = await diagnostics(pageB)
+     const beforePixels = await pageB.locator('canvas.excalidraw__canvas.interactive').evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL())
+     const operationStarted = Date.now()
+     await pageA.getByTitle(/^Rectangle\b/i).click()
+@@ -156,6 +157,7 @@
+     const remoteRenderMs = Date.now() - operationStarted
+     await pageA.waitForTimeout(800)
+     const afterWriteA = await diagnostics(pageA)
++    const afterWriteB = await diagnostics(pageB)
+ 
+     await contextA.setOffline(true)
+     await expect(pageA.getByText('Offline', { exact: true })).toBeVisible()
+@@ -172,7 +174,7 @@
+     }))
+ 
+     const report = {
+-      schemaVersion: 3,
++      schemaVersion: 4,
+       measuredAt: new Date().toISOString(),
+       commit: process.env.GITHUB_SHA ?? null,
+       engine: 'excalidraw-supabase',
+@@ -186,6 +188,11 @@
+         initialHydrationP95Ms: afterWriteA.samples.initialHydrationMs?.p95 ?? beforeA.samples.initialHydrationMs?.p95 ?? null,
+         supabaseWriteP95Ms: afterWriteA.samples.supabaseWriteMs?.p95 ?? null,
+         realtimeReceiveToFrameP95Ms: afterWriteA.samples.realtimeReceiveToFrameMs?.p95 ?? null,
++        previewReceiveToFrameP95Ms: afterWriteB.samples.previewReceiveToFrameMs?.p95 ?? null,
++        previewBroadcastsSentForGesture: (afterWriteA.counters.previewBroadcastsSent ?? 0) - (beforeA.counters.previewBroadcastsSent ?? 0),
++        previewElementsSentForGesture: (afterWriteA.counters.previewElementsSent ?? 0) - (beforeA.counters.previewElementsSent ?? 0),
++        previewBroadcastsReceivedForGesture: (afterWriteB.counters.previewBroadcastsReceived ?? 0) - (beforeB.counters.previewBroadcastsReceived ?? 0),
++        previewElementsReceivedForGesture: (afterWriteB.counters.previewElementsReceived ?? 0) - (beforeB.counters.previewElementsReceived ?? 0),
+         writesPerGestureP95: afterWriteA.samples.writesPerGesture?.p95 ?? null,
+         dbWriteBatches: (afterWriteA.counters.dbWriteBatches ?? 0) - (beforeA.counters.dbWriteBatches ?? 0),
+         dbRowsWritten: (afterWriteA.counters.dbRowsWritten ?? 0) - (beforeA.counters.dbRowsWritten ?? 0),
+diff --git a/scripts/render-performance-report.mjs b/scripts/render-performance-report.mjs
+index 87dcb5c..f1e0004 100644
+--- a/scripts/render-performance-report.mjs
++++ b/scripts/render-performance-report.mjs
+@@ -29,6 +29,9 @@
+   `| Local rectangle gesture → rendered on peer | ${integer(report.collaboration.remoteCreateToRenderMs)} ms |`,
+   `| Supabase durable write p95 | ${ms(report.collaboration.supabaseWriteP95Ms)} ms |`,
+   `| Realtime receive → next rendered frame p95 | ${ms(report.collaboration.realtimeReceiveToFrameP95Ms)} ms |`,
++  `| Preview receive → next rendered frame p95 | ${ms(report.collaboration.previewReceiveToFrameP95Ms)} ms |`,
++  `| Preview broadcasts sent / received for gesture | ${integer(report.collaboration.previewBroadcastsSentForGesture)} / ${integer(report.collaboration.previewBroadcastsReceivedForGesture)} |`,
++  `| Preview elements sent / received for gesture | ${integer(report.collaboration.previewElementsSentForGesture)} / ${integer(report.collaboration.previewElementsReceivedForGesture)} |`,
+   `| Initial hydration p95 | ${ms(report.collaboration.initialHydrationP95Ms)} ms |`,
+   `| Offline → Live observed | ${integer(report.collaboration.reconnectObservedMs)} ms |`,
+   `| Internal reconnect p95 | ${ms(report.collaboration.diagnosticsReconnectP95Ms)} ms |`,
+@@ -49,8 +52,9 @@
+   '- Current visible element count and pending durable-write depth.',
+   '- Supabase write latency, hydration-query latency, and write batch/row counts.',
+   '- Initial synchronization and reconnect duration.',
+-  '- Realtime event receipt to the next animation frame.',
++  '- Realtime authoritative-event and ephemeral-preview receipt to the next animation frame.',
+   '- Durable writes generated by a pointer gesture, including mutation-boundary flush and long-operation checkpoint counts.',
++  '- Ephemeral preview Broadcast volume for the same collaboration gesture.',
+   '- Logical Canvas mutations and final changed-object count per human operation.',
+   '- JavaScript heap where the browser exposes it.',
+   '- 100 / 1,000 / 5,000 / 10,000-element fixture behavior without writing fixture objects to Supabase.',
