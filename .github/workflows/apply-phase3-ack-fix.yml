@@ -1,0 +1,34 @@
+name: Apply Phase 3 acknowledgement fix
+on:
+  push:
+    branches: [phase3/durable-mutations]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Apply exact acknowledgement fix
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('app/canvas/SupabaseCanvasEditor.tsx')
+          text = path.read_text()
+          old = """      if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue\n\n      const survivingPending = pendingRef.current.get(row.id)\n"""
+          new = """      if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue\n\n      // A row that exactly acknowledges the immutable Excalidraw version already\n      // rendered locally only needs to advance the authoritative watermark.\n      // Reapplying that same element through updateScene can make Excalidraw emit\n      // a follow-up version and turn a server ACK into a second local mutation.\n      if (!replace) {\n        const currentLocal = localElements.find(candidate => candidate.id === row.id)\n        if (currentLocal) {\n          const currentStamp = stampOf(currentLocal)\n          if (currentStamp.version === nextStamp.version\n            && currentStamp.versionNonce === nextStamp.versionNonce\n            && currentStamp.isDeleted === nextStamp.isDeleted) {\n            shadowRef.current.set(row.id, nextStamp)\n            continue\n          }\n        }\n      }\n\n      const survivingPending = pendingRef.current.get(row.id)\n"""
+          if old not in text:
+              raise SystemExit('Expected applyRows acknowledgement insertion point was not found.')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          rm .github/workflows/apply-phase3-ack-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: avoid replaying exact authoritative acknowledgements'
+          git push origin HEAD:phase3/durable-mutations
