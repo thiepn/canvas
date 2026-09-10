@@ -1,8 +1,6 @@
 name: Canvas performance evidence
 on:
   workflow_dispatch:
-  push:
-    branches: [phase3/durable-mutations]
 permissions:
   contents: read
 defaults:
