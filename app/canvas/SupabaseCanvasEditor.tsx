@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, reconcileElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
-import type { Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
+import type { AppState, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
 import { Icon } from '../components/Icon.tsx'
 import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity } from '../presence/identity.ts'
 import { loadTheme, writePreference, type ThemePreference } from '../storage/preferences.ts'
 import type { LiveConfig } from '../config/public-config.ts'
+import { recordMutationDiagnostics } from '../diagnostics/operations.ts'
+import { CanvasOperationTracker } from './operation-model.ts'
 import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
@@ -158,11 +160,17 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const shadowRef = useRef(new Map<string, VersionStamp>())
+  const observedSceneRef = useRef(new Map<string, VersionStamp>())
   const pendingRef = useRef(new Map<string, SceneElement>())
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const applyingRemote = useRef(false)
   const collaboratorsRef = useRef(new Map<SocketId, Collaborator>())
   const cursorAt = useRef(0)
+  const editingTextRef = useRef<string | null>(null)
+  const operationTracker = useMemo(() => new CanvasOperationTracker<SceneElement>({
+    deviceId: () => identityRef.current.deviceId,
+    onCommit: recordMutationDiagnostics,
+  }), [])
 
   const supabase = useMemo(() => createClient(config.supabaseUrl, config.supabaseKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -197,6 +205,24 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   useEffect(() => { identityRef.current = identity }, [identity])
   useEffect(() => { apiRef.current = api }, [api])
+  useEffect(() => () => operationTracker.dispose(), [operationTracker])
+  useEffect(() => {
+    const pointerDown = (event: PointerEvent) => {
+      if (statusRef.current !== 'Live' || editingTextRef.current) return
+      const target = event.target
+      if (!(target instanceof HTMLCanvasElement) || !target.matches('canvas.excalidraw__canvas.interactive')) return
+      operationTracker.beginPointer()
+    }
+    const pointerEnd = () => operationTracker.endPointer()
+    document.addEventListener('pointerdown', pointerDown, true)
+    document.addEventListener('pointerup', pointerEnd, true)
+    document.addEventListener('pointercancel', pointerEnd, true)
+    return () => {
+      document.removeEventListener('pointerdown', pointerDown, true)
+      document.removeEventListener('pointerup', pointerEnd, true)
+      document.removeEventListener('pointercancel', pointerEnd, true)
+    }
+  }, [operationTracker])
   useEffect(() => {
     pageActiveRef.current = true
     const hide = () => {
@@ -253,7 +279,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const rows = values.map(normalizeRow).filter((row): row is SyncRow => row !== null)
     const localElements = replace ? [] : editor.getSceneElementsIncludingDeleted()
     const remoteElements: SceneElement[] = []
-    if (replace) shadowRef.current.clear()
+    if (replace) {
+      shadowRef.current.clear()
+      observedSceneRef.current.clear()
+    }
     let changed = replace
 
     for (const row of rows) {
@@ -261,6 +290,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (!element) continue
       const nextStamp = { version: row.version, versionNonce: row.version_nonce, isDeleted: row.is_deleted }
       const pending = pendingRef.current.get(row.id)
+
+      // Keep the operation observer aligned with authoritative remote state, but
+      // never move it backwards over a newer local element still awaiting ACK.
+      const observed = observedSceneRef.current.get(row.id)
+      if (replace || isNewerVersion(nextStamp, observed)) observedSceneRef.current.set(row.id, nextStamp)
 
       // Equal or losing pending work has been accepted/superseded and must not
       // survive merely because this authoritative row was already observed.
@@ -482,8 +516,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, onlineAt: new Date().toISOString() }).catch(() => {})
   }, [identity, status])
 
-  const onChange = useCallback((elements: readonly SceneElement[]) => {
+  const onChange = useCallback((elements: readonly SceneElement[], appState: AppState) => {
     if (applyingRemote.current || statusRef.current !== 'Live') return
+    const previousEditingTextId = editingTextRef.current
+    const nextEditingTextId = appState.editingTextElement?.id ?? null
+    if (nextEditingTextId && nextEditingTextId !== previousEditingTextId) {
+      if (previousEditingTextId) operationTracker.endText()
+      operationTracker.beginText()
+    }
     const allowed = elements.filter(isAllowedElement)
     if (allowed.length !== elements.length) {
       notify('Images, embeds, and file-backed objects are disabled on this canvas.')
@@ -493,12 +533,23 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     for (const element of allowed) {
       const nextStamp = stampOf(element)
+      const observed = observedSceneRef.current.get(element.id)
+      if (isNewerVersion(nextStamp, observed)) {
+        operationTracker.record(element, observed !== undefined)
+        observedSceneRef.current.set(element.id, nextStamp)
+      }
+
+      // Phase 2 deliberately leaves the existing durable persistence cadence
+      // untouched. Phase 3 will route final CanvasMutation changes into this
+      // queue once operation boundaries have been proven independently.
       if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
       const queued = pendingRef.current.get(element.id)
       if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
     }
+    if (previousEditingTextId && !nextEditingTextId) operationTracker.endText()
+    editingTextRef.current = nextEditingTextId
     if (pendingRef.current.size) scheduleFlush()
-  }, [notify, scheduleFlush])
+  }, [notify, operationTracker, scheduleFlush])
 
   const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return

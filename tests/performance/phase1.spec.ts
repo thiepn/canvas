@@ -172,7 +172,7 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
     }))
 
     const report = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       measuredAt: new Date().toISOString(),
       commit: process.env.GITHUB_SHA ?? null,
       engine: 'excalidraw-supabase',
@@ -189,6 +189,11 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
         writesPerGestureP95: afterWriteA.samples.writesPerGesture?.p95 ?? null,
         dbWriteBatches: afterWriteA.counters.dbWriteBatches ?? 0,
         dbRowsWritten: afterWriteA.counters.dbRowsWritten ?? 0,
+        logicalMutationsForGesture: (afterWriteA.counters.logicalMutations ?? 0) - (beforeA.counters.logicalMutations ?? 0),
+        logicalMutationChangesForGesture: (afterWriteA.counters.logicalMutationChanges ?? 0) - (beforeA.counters.logicalMutationChanges ?? 0),
+        changesPerMutationP95: afterWriteA.samples.changesPerMutation?.p95 ?? null,
+        lastMutationKind: afterWriteA.gauges.lastMutationKind ?? null,
+        lastMutationSource: afterWriteA.gauges.lastMutationSource ?? null,
         diagnosticsReconnectP95Ms: afterReconnectA.samples.reconnectMs?.p95 ?? null,
         pendingWritesAfterReconnect: afterReconnectA.gauges.pendingWrites ?? null,
       },

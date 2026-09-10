@@ -35,6 +35,9 @@ export function DiagnosticsOverlay() {
     <span>Initial sync <b>{ms(snapshot, 'initialHydrationMs')}</b></span>
     <span>Reconnect p95 <b>{ms(snapshot, 'reconnectMs')}</b></span>
     <span>Writes / gesture <b>{number(snapshot.samples.writesPerGesture?.p95, 1)}</b></span>
+    <span>Logical ops <b>{snapshot.counters.logicalMutations ?? 0}</b></span>
+    <span>Changes / op <b>{number(snapshot.samples.changesPerMutation?.p95, 1)}</b></span>
+    {snapshot.gauges.lastMutationKind && <span>Last op <b>{snapshot.gauges.lastMutationKind}</b></span>}
     {typeof snapshot.gauges.jsHeapBytes === 'number' && <span>JS heap <b>{(snapshot.gauges.jsHeapBytes / 1048576).toFixed(1)} MB</b></span>}
     <small>Local diagnostics only · ?debug=1</small>
   </aside>
