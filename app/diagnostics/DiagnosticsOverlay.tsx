@@ -38,6 +38,9 @@ export function DiagnosticsOverlay() {
     <span>Remote previews <b>{number(snapshot.gauges.activeRemotePreviews)}</b></span>
     <span>Initial sync <b>{ms(snapshot, 'initialHydrationMs')}</b></span>
     <span>Reconnect p95 <b>{ms(snapshot, 'reconnectMs')}</b></span>
+    <span>Anti-entropy p95 <b>{ms(snapshot, 'antiEntropyMs')}</b></span>
+    <span>Reconcile cursor <b>{number(snapshot.gauges.reconciliationCursor)}</b></span>
+    <span>Reconcile runs / failures <b>{snapshot.counters.antiEntropyRuns ?? 0} / {snapshot.counters.antiEntropyFailures ?? 0}</b></span>
     <span>Writes / gesture <b>{number(snapshot.samples.writesPerGesture?.p95, 1)}</b></span>
     <span>Logical ops <b>{snapshot.counters.logicalMutations ?? 0}</b></span>
     <span>Boundary flushes <b>{snapshot.counters.durabilityBoundaryFlushes ?? 0}</b></span>

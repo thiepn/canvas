@@ -10,6 +10,7 @@ import type { LiveConfig } from '../config/public-config.ts'
 import { recordMutationDiagnostics } from '../diagnostics/operations.ts'
 import { canvasDiagnostics } from '../diagnostics/metrics.ts'
 import { CanvasOperationTracker } from './operation-model.ts'
+import { readRevisionPages } from './revision-sync.ts'
 import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 import {
   CANVAS_PREVIEW_TTL_MS,
@@ -25,7 +26,7 @@ import {
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = 'Connecting' | 'Synchronizing' | 'Live' | 'Reconnecting' | 'Offline' | 'Error'
 type PresencePerson = { deviceId: string; displayName: string; color: string }
-type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown }
+type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown; revision: number }
 type CursorPayload = {
   deviceId: string
   displayName: string
@@ -50,6 +51,8 @@ const LONG_OPERATION_CHECKPOINT_MS = 1500
 const PREVIEW_BROADCAST_INTERVAL_MS = 45
 const PREVIEW_ECHO_GRACE_MS = 1000
 const PREVIEW_ECHO_STAMPS_PER_ELEMENT = 16
+const ANTI_ENTROPY_PAGE_SIZE = 500
+const ANTI_ENTROPY_INTERVAL_MS = 15_000
 const UI_OPTIONS = {
   canvasActions: {
     changeViewBackgroundColor: false,
@@ -78,8 +81,9 @@ function normalizeRow(value: unknown): SyncRow | null {
   const id = typeof row.id === 'string' ? row.id : ''
   const version = Number(row.version)
   const versionNonce = Number(row.version_nonce)
-  if (!id || !Number.isInteger(version) || !Number.isInteger(versionNonce) || typeof row.is_deleted !== 'boolean') return null
-  return { id, version, version_nonce: versionNonce, is_deleted: row.is_deleted, element: row.element }
+  const revision = Number(row.revision)
+  if (!id || !Number.isInteger(version) || !Number.isInteger(versionNonce) || !Number.isSafeInteger(revision) || revision <= 0 || typeof row.is_deleted !== 'boolean') return null
+  return { id, version, version_nonce: versionNonce, is_deleted: row.is_deleted, element: row.element, revision }
 }
 
 function elementFromRow(row: SyncRow): SceneElement | null {
@@ -216,6 +220,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const pageActiveRef = useRef(true)
   const channelCleanupRef = useRef<Promise<unknown>>(Promise.resolve())
   const retryDelayRef = useRef(1200)
+  const reconciliationCursorRef = useRef(0)
+  const reconciliationInFlightRef = useRef(false)
+  const dropRealtimeForDiagnosticsRef = useRef(canvasDiagnostics.enabled && new URLSearchParams(window.location.search).get('dropRealtime') === '1')
   const [people, setPeople] = useState<PresencePerson[]>([])
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -637,12 +644,53 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     queueMicrotask(() => { applyingRemote.current = false })
   }, [])
 
-  const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true) => {
+  const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true, mode: 'initial' | 'reconcile' = 'initial') => {
     if (!pageActiveRef.current) return
-    const { data, error } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true }).abortSignal(AbortSignal.timeout(15_000))
-    if (error) throw error
-    if (isCurrent()) applyRows(data ?? [], pendingRef.current.size === 0)
+    const startedAt = performance.now()
+    const startAfter = mode === 'reconcile' ? reconciliationCursorRef.current : 0
+    let firstPage = true
+    const result = await readRevisionPages<SyncRow>({
+      startAfter,
+      pageSize: ANTI_ENTROPY_PAGE_SIZE,
+      isCurrent,
+      fetchPage: async (afterRevision, limit) => {
+        const { data, error } = await supabase.from(config.tableName)
+          .select('id,version,version_nonce,is_deleted,element,revision')
+          .gt('revision', afterRevision)
+          .order('revision', { ascending: true })
+          .limit(limit)
+          .abortSignal(AbortSignal.timeout(15_000))
+        if (error) throw error
+        return (data ?? []).map(normalizeRow).filter((row): row is SyncRow => row !== null)
+      },
+      onPage: rows => {
+        if (!isCurrent()) return
+        applyRows(rows, mode === 'initial' && firstPage && pendingRef.current.size === 0)
+        firstPage = false
+      },
+    })
+    if (!result.completed || !isCurrent()) return
+    reconciliationCursorRef.current = result.cursor
+    canvasDiagnostics.gauge('reconciliationCursor', result.cursor)
+    if (mode === 'reconcile') {
+      canvasDiagnostics.increment('antiEntropyRowsRead', result.rows)
+      canvasDiagnostics.sample('antiEntropyMs', performance.now() - startedAt)
+    }
   }, [applyRows, config.tableName, supabase])
+
+  const reconcileAuthoritative = useCallback(async () => {
+    if (reconciliationInFlightRef.current || !pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || continuousOperationRef.current) return
+    reconciliationInFlightRef.current = true
+    canvasDiagnostics.increment('antiEntropyRuns')
+    try {
+      await loadAuthoritative(() => pageActiveRef.current && statusRef.current === 'Live' && navigator.onLine, 'reconcile')
+      canvasDiagnostics.increment('antiEntropySuccesses')
+    } catch {
+      canvasDiagnostics.increment('antiEntropyFailures')
+    } finally {
+      reconciliationInFlightRef.current = false
+    }
+  }, [loadAuthoritative])
 
   const flushDurablePending = useCallback(async () => {
     if (writeInFlightRef.current || !pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || durablePendingRef.current.size === 0) return
@@ -683,7 +731,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         return
       }
       if (!pageActiveRef.current) return
-      const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').in('id', ids)
+      const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element,revision').in('id', ids)
       if (!pageActiveRef.current) return
       if (readError) {
         notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
@@ -846,7 +894,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const isCurrent = () => !disposed && pageActiveRef.current && navigator.onLine && channelRef.current === currentChannel
       currentChannel
         .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {
-          if (isCurrent() && payload.new && Object.keys(payload.new).length) applyRows([payload.new])
+          if (!isCurrent() || !payload.new || !Object.keys(payload.new).length) return
+          if (dropRealtimeForDiagnosticsRef.current) {
+            canvasDiagnostics.increment('realtimeChangesDroppedForDiagnostics')
+            return
+          }
+          applyRows([payload.new])
         })
         .on('presence', { event: 'sync' }, () => { if (isCurrent()) syncPresence(currentChannel) })
         .on('broadcast', { event: 'preview' }, message => {
@@ -916,6 +969,21 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       }
     }
   }, [api, applyRemotePreview, applyRows, clearRemotePreviews, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence, transition])
+
+  useEffect(() => {
+    if (status !== 'Live') return
+    const requestReconciliation = () => {
+      if (document.visibilityState === 'visible') void reconcileAuthoritative()
+    }
+    const timer = window.setInterval(requestReconciliation, ANTI_ENTROPY_INTERVAL_MS)
+    window.addEventListener('focus', requestReconciliation)
+    document.addEventListener('visibilitychange', requestReconciliation)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', requestReconciliation)
+      document.removeEventListener('visibilitychange', requestReconciliation)
+    }
+  }, [reconcileAuthoritative, status])
 
   useEffect(() => {
     const channel = channelRef.current
