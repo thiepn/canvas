@@ -112,6 +112,25 @@ test('starting a pointer gesture closes any prior discrete operation', () => {
   assert.equal(mutations[1].kind, 'create')
 })
 
+test('a slow text-edit session remains one logical mutation until editing ends', () => {
+  const { tracker, mutations, advance } = harness()
+  tracker.beginText()
+  tracker.record(element('text-a', 2, { label: 'H' }), true)
+  advance(1000)
+  tracker.record(element('text-a', 3, { label: 'He' }), true)
+  advance(1000)
+  tracker.record(element('text-a', 4, { label: 'Hello' }), true)
+  tracker.endText()
+
+  assert.equal(mutations.length, 1)
+  assert.equal(mutations[0].source, 'text')
+  assert.equal(mutations[0].kind, 'update')
+  assert.equal(mutations[0].changes.length, 1)
+  const change = mutations[0].changes[0]
+  assert.equal(change.type, 'upsert')
+  if (change.type === 'upsert') assert.equal(change.element.label, 'Hello')
+})
+
 test('pointer activity without element changes emits no mutation', () => {
   const { tracker, mutations } = harness()
   tracker.beginPointer()
