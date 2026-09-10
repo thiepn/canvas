@@ -88,8 +88,10 @@ export class CanvasOperationTracker<T extends CanvasOperationElement> {
   private readonly createMutationId: () => string
   private readonly pointerSettleMs: number
   private readonly discreteQuietMs: number
+  private readonly options: CanvasOperationTrackerOptions<T>
 
-  constructor(private readonly options: CanvasOperationTrackerOptions<T>) {
+  constructor(options: CanvasOperationTrackerOptions<T>) {
+    this.options = options
     this.now = options.now ?? defaultNow
     this.createMutationId = options.createMutationId ?? defaultMutationId
     this.pointerSettleMs = options.pointerSettleMs ?? 50
