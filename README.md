@@ -27,7 +27,7 @@ The public application uses:
 - **React + TypeScript + Vite** for the static application;
 - **Excalidraw 0.18.1** for the canvas/editor interaction model;
 - **Supabase Postgres** as the authoritative persistent store;
-- **Supabase Realtime** for Postgres changes, presence and cursor broadcasts;
+- **Supabase Realtime** for Postgres changes, presence, cursors and ephemeral in-progress element previews;
 - **GitHub Pages** for static hosting.
 
 There is no application server in the normal production path and no login system. The older tldraw/Cloudflare Worker implementation remains only as an isolated regression harness while its historical tests are retained; normal production builds do not select it.
@@ -66,7 +66,7 @@ Postgres constraints allow only the product's vector types and cap each serializ
 
 The browser loads the authoritative table before becoming editable and subscribes to Supabase Realtime. Excalidraw still renders every local intermediate frame immediately, but those frames stay in memory for conflict protection rather than being written on a generic timer. Phase 3 persists the final element state(s) from each completed logical `CanvasMutation`; unusually long continuous pointer/text operations receive bounded safety checkpoints. Durable writes are serialized and reconciled with authoritative rows after completion. Postgres still rejects stale update tuples, so delayed requests cannot overwrite a newer element version.
 
-Presence and cursor state are ephemeral Realtime channel state and are not persisted as user accounts.
+Presence, cursors and active-operation previews are ephemeral Realtime channel state. Pointer/text previews are throttled Broadcast messages that let peers render in-progress geometry before the Phase 3 durability boundary; they never enter Postgres, expire automatically, and are replaced by authoritative rows when durability catches up.
 
 If the connection is not `Live`, editing is disabled rather than pretending an unsafe offline edit has been saved.
 

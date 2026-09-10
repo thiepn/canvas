@@ -148,6 +148,7 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
     const readyAt = Date.now()
 
     const beforeA = await diagnostics(pageA)
+    const beforeB = await diagnostics(pageB)
     const beforePixels = await pageB.locator('canvas.excalidraw__canvas.interactive').evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL())
     const operationStarted = Date.now()
     await pageA.getByTitle(/^Rectangle\b/i).click()
@@ -156,6 +157,7 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
     const remoteRenderMs = Date.now() - operationStarted
     await pageA.waitForTimeout(800)
     const afterWriteA = await diagnostics(pageA)
+    const afterWriteB = await diagnostics(pageB)
 
     await contextA.setOffline(true)
     await expect(pageA.getByText('Offline', { exact: true })).toBeVisible()
@@ -172,7 +174,7 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
     }))
 
     const report = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       measuredAt: new Date().toISOString(),
       commit: process.env.GITHUB_SHA ?? null,
       engine: 'excalidraw-supabase',
@@ -186,6 +188,11 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
         initialHydrationP95Ms: afterWriteA.samples.initialHydrationMs?.p95 ?? beforeA.samples.initialHydrationMs?.p95 ?? null,
         supabaseWriteP95Ms: afterWriteA.samples.supabaseWriteMs?.p95 ?? null,
         realtimeReceiveToFrameP95Ms: afterWriteA.samples.realtimeReceiveToFrameMs?.p95 ?? null,
+        previewReceiveToFrameP95Ms: afterWriteB.samples.previewReceiveToFrameMs?.p95 ?? null,
+        previewBroadcastsSentForGesture: (afterWriteA.counters.previewBroadcastsSent ?? 0) - (beforeA.counters.previewBroadcastsSent ?? 0),
+        previewElementsSentForGesture: (afterWriteA.counters.previewElementsSent ?? 0) - (beforeA.counters.previewElementsSent ?? 0),
+        previewBroadcastsReceivedForGesture: (afterWriteB.counters.previewBroadcastsReceived ?? 0) - (beforeB.counters.previewBroadcastsReceived ?? 0),
+        previewElementsReceivedForGesture: (afterWriteB.counters.previewElementsReceived ?? 0) - (beforeB.counters.previewElementsReceived ?? 0),
         writesPerGestureP95: afterWriteA.samples.writesPerGesture?.p95 ?? null,
         dbWriteBatches: (afterWriteA.counters.dbWriteBatches ?? 0) - (beforeA.counters.dbWriteBatches ?? 0),
         dbRowsWritten: (afterWriteA.counters.dbRowsWritten ?? 0) - (beforeA.counters.dbRowsWritten ?? 0),
