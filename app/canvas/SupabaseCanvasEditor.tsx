@@ -176,7 +176,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   }), [config.supabaseKey, config.supabaseUrl])
 
-  const resolvedTheme = theme === 'system' ? systemDark ? 'dark' : theme : theme
+  const resolvedTheme = theme === 'system' ? systemDark ? 'dark' : 'light' : theme
 
   const notify = useCallback((message: string) => {
     setNotice(message)
@@ -208,7 +208,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => () => operationTracker.dispose(), [operationTracker])
   useEffect(() => {
     const pointerDown = (event: PointerEvent) => {
-      if (statusRef.current !== 'Live') return
+      if (statusRef.current !== 'Live' || editingTextRef.current) return
       const target = event.target
       if (!(target instanceof HTMLCanvasElement) || !target.matches('canvas.excalidraw__canvas.interactive')) return
       operationTracker.beginPointer()
