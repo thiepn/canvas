@@ -13,6 +13,12 @@ async function cleanWorld() {
   if (error) throw error
 }
 
+async function persistedElements(): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await supabase.from(TABLE).select('element')
+  if (error) throw error
+  return (data ?? []).map(row => row.element as Record<string, unknown>)
+}
+
 async function resetDiagnostics(page: Page) {
   await expect.poll(() => page.evaluate(() => Boolean(window.__CANVAS_DIAGNOSTICS__))).toBe(true)
   await page.evaluate(() => window.__CANVAS_DIAGNOSTICS__!.reset())
@@ -32,9 +38,10 @@ test('one pointer gesture becomes one logical mutation and one final durable wri
 
   await page.getByTitle(/^Rectangle\b/i).click()
   await expect(page.getByRole('radio', { name: /^Rectangle\b/i })).toBeChecked()
-  // This is deliberately long enough that the old 120 ms timer wrote the same
-  // rectangle several times, but shorter than the Phase 3 long-op checkpoint.
-  await dragOnCanvas(page, [300, 250], [530, 390], 20)
+  // Eight frame-paced moves still span well beyond the old 120 ms save timer,
+  // while remaining below the intentional 1.5 s long-operation checkpoint on
+  // slower browser engines. The separate long-operation test covers checkpoints.
+  await dragOnCanvas(page, [300, 250], [530, 390], 8)
 
   await expect.poll(async () => (await operationSnapshot(page)).counters.logicalMutations ?? 0).toBe(1)
   await expect.poll(async () => (await operationSnapshot(page)).counters.dbWriteBatches ?? 0).toBe(1)
@@ -49,10 +56,11 @@ test('one pointer gesture becomes one logical mutation and one final durable wri
   expect(snapshot.counters.durabilityBoundaryFlushes).toBe(1)
   expect(snapshot.counters.durabilityCheckpoints ?? 0).toBe(0)
 
-  const { data: rows, error } = await supabase.from(TABLE).select('element')
-  if (error) throw error
-  expect(rows).toHaveLength(1)
-  const persisted = rows?.[0]?.element as Record<string, unknown>
+  // Network diagnostics count a write when fetch starts. Wait separately for
+  // authoritative storage so this assertion proves completed durability rather
+  // than merely observing that a request was launched.
+  await expect.poll(async () => (await persistedElements()).length).toBe(1)
+  const [persisted] = await persistedElements()
   expect(Number(persisted.width)).toBeGreaterThan(200)
   expect(Number(persisted.height)).toBeGreaterThan(120)
 })
@@ -86,10 +94,8 @@ test('a slow text-edit session remains one logical mutation and saves once at it
   expect(snapshot.counters.durabilityBoundaryFlushes).toBe(1)
   expect(snapshot.counters.durabilityCheckpoints ?? 0).toBe(0)
 
-  const { data: rows, error } = await supabase.from(TABLE).select('element')
-  if (error) throw error
-  expect(rows).toHaveLength(1)
-  const persisted = rows?.[0]?.element as Record<string, unknown>
+  await expect.poll(async () => (await persistedElements()).length).toBe(1)
+  const [persisted] = await persistedElements()
   expect(persisted.text).toBe('Slow text session')
 })
 
@@ -113,9 +119,7 @@ test('an unusually long pointer operation receives bounded safety checkpoints', 
   // eventually replace it with the completed geometry rather than leaving the
   // peer/database at an intermediate drag frame.
   await expect.poll(async () => {
-    const { data, error } = await supabase.from(TABLE).select('element')
-    if (error) throw error
-    const persisted = data?.[0]?.element as Record<string, unknown> | undefined
+    const [persisted] = await persistedElements()
     return Number(persisted?.width ?? 0)
   }).toBeGreaterThan(300)
 })
