@@ -731,7 +731,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         return
       }
       if (!pageActiveRef.current) return
-      const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').in('id', ids)
+      const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element,revision').in('id', ids)
       if (!pageActiveRef.current) return
       if (readError) {
         notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
