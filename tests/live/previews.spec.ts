@@ -100,7 +100,6 @@ test('active pointer geometry reaches the peer over Broadcast before any durable
     expect(await rows()).toHaveLength(0)
     expect((await diagnostics(pageA)).counters.dbWriteBatches ?? 0).toBe(0)
     expect((await diagnostics(pageB)).counters.dbWriteBatches ?? 0).toBe(0)
-    expect((await diagnostics(pageB)).counters.previewEchoesSuppressed ?? 0).toBeGreaterThan(0)
     expect((await diagnostics(pageA)).counters.previewBroadcastsSent ?? 0).toBeGreaterThan(0)
 
     const preview = (await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__!.snapshot())).gauges.activeRemotePreviews

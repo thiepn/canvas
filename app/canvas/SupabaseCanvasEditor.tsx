@@ -48,6 +48,8 @@ const OPERATION_FLUSH_DELAY_MS = 0
 const RECONNECT_FLUSH_DELAY_MS = 120
 const LONG_OPERATION_CHECKPOINT_MS = 1500
 const PREVIEW_BROADCAST_INTERVAL_MS = 45
+const PREVIEW_ECHO_GRACE_MS = 1000
+const PREVIEW_ECHO_STAMPS_PER_ELEMENT = 16
 const UI_OPTIONS = {
   canvasActions: {
     changeViewBackgroundColor: false,
@@ -64,6 +66,10 @@ const UI_OPTIONS = {
 
 function stampOf(element: SceneElement): VersionStamp {
   return { version: element.version, versionNonce: element.versionNonce, isDeleted: element.isDeleted }
+}
+
+function previewStampKey(stamp: VersionStamp): string {
+  return `${stamp.version}:${stamp.versionNonce}:${stamp.isDeleted ? 1 : 0}`
 }
 
 function normalizeRow(value: unknown): SyncRow | null {
@@ -221,6 +227,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const previewSequenceRef = useRef(0)
   const previewSequenceGateRef = useRef(new PreviewSequenceGate())
   const remotePreviewRef = useRef(new Map<string, RemotePreview>())
+  // updateScene can surface a remote preview through a later onChange callback.
+  // Retain a small time-bounded set of exact immutable versions so those echoes
+  // can never cross into the local operation/durability pipeline.
+  const previewEchoStampsRef = useRef(new Map<string, Map<string, number>>())
   const previewSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const previewSendQueuedRef = useRef<QueuedPreview | null>(null)
   const previewLastSentAtRef = useRef(0)
@@ -285,7 +295,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const replacements = new Map<string, SceneElement | null>()
     for (const record of records) {
       const visible = current.find(element => element.id === record.element.id)
-      if (!visible || !sameVersionStamp(stampOf(visible), stampOf(record.element)) || pendingRef.current.has(record.element.id)) continue
+      if (!visible || pendingRef.current.has(record.element.id)) continue
+      const visibleWasPreview = (previewEchoStampsRef.current.get(record.element.id)?.get(previewStampKey(stampOf(visible))) ?? 0) > Date.now()
+      if (!visibleWasPreview) continue
       replacements.set(record.element.id, authoritativeElementsRef.current.get(record.element.id) ?? null)
     }
     if (!replacements.size) return
@@ -369,6 +381,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const existing = remotePreviewRef.current.get(element.id)
       if (existing && !isNewerVersion(nextStamp, stampOf(existing.element))
         && !(sameVersionStamp(nextStamp, stampOf(existing.element)) && payload.sessionId === existing.sessionId && payload.sequence > existing.sequence)) continue
+      const echoStamps = previewEchoStampsRef.current.get(element.id) ?? new Map<string, number>()
+      echoStamps.set(previewStampKey(nextStamp), receivedAt + CANVAS_PREVIEW_TTL_MS + PREVIEW_ECHO_GRACE_MS)
+      while (echoStamps.size > PREVIEW_ECHO_STAMPS_PER_ELEMENT) {
+        const oldest = echoStamps.keys().next().value
+        if (oldest === undefined) break
+        echoStamps.delete(oldest)
+      }
+      previewEchoStampsRef.current.set(element.id, echoStamps)
       remotePreviewRef.current.set(element.id, {
         deviceId: payload.deviceId, sessionId: payload.sessionId, sequence: payload.sequence, receivedAt, expiresAt: receivedAt + CANVAS_PREVIEW_TTL_MS, element,
       })
@@ -398,8 +418,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     // Preserve that final gesture before pagehide/offline locks callbacks.
     // This only queues memory state; it never starts an unloading-page request.
     for (const element of editor.getSceneElementsIncludingDeleted()) {
-      const remotePreview = remotePreviewRef.current.get(element.id)
-      if (remotePreview && sameVersionStamp(stampOf(element), stampOf(remotePreview.element))) continue
+      const recentPreviewEcho = (previewEchoStampsRef.current.get(element.id)?.get(previewStampKey(stampOf(element))) ?? 0) > Date.now()
+      if (recentPreviewEcho) continue
       if (!isAllowedElement(element) || !isNewerVersion(stampOf(element), shadowRef.current.get(element.id))) continue
       const nextStamp = stampOf(element)
       const observed = observedSceneRef.current.get(element.id)
@@ -424,6 +444,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => {
     const timer = window.setInterval(() => {
       const now = Date.now()
+      for (const [id, stamps] of previewEchoStampsRef.current) {
+        for (const [key, expiresAt] of stamps) if (expiresAt <= now) stamps.delete(key)
+        if (!stamps.size) previewEchoStampsRef.current.delete(id)
+      }
       const expired: RemotePreview[] = []
       for (const [id, record] of remotePreviewRef.current) {
         if (record.expiresAt > now) continue
@@ -446,10 +470,6 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (statusRef.current !== 'Live' || editingTextRef.current) return
       const target = event.target
       if (!(target instanceof HTMLCanvasElement) || !target.matches('canvas.excalidraw__canvas.interactive')) return
-      // A genuine local gesture starts from durable/local state, never from a
-      // peer's uncommitted preview. Fresh peer previews may resume afterwards
-      // for objects that this local operation is not protecting.
-      if (remotePreviewRef.current.size) clearRemotePreviews()
       continuousOperationRef.current = 'pointer'
       operationTracker.beginPointer()
       armCheckpointRef.current()
@@ -468,7 +488,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       document.removeEventListener('pointerup', pointerEnd, true)
       document.removeEventListener('pointercancel', pointerEnd, true)
     }
-  }, [clearRemotePreviews, operationTracker])
+  }, [operationTracker])
   useEffect(() => {
     pageActiveRef.current = true
     const hide = () => {
@@ -539,6 +559,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       authoritativeElementsRef.current.clear()
       observedSceneRef.current.clear()
       remotePreviewRef.current.clear()
+      previewEchoStampsRef.current.clear()
       previewSequenceGateRef.current.clear()
       canvasDiagnostics.gauge('activeRemotePreviews', 0)
     }
@@ -921,11 +942,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     for (const element of allowed) {
       const nextStamp = stampOf(element)
-      const activeRemotePreview = remotePreviewRef.current.get(element.id)
-      // Excalidraw may emit onChange after updateScene's synchronous guard has
-      // cleared. An exact preview version is still remote, ephemeral state: it
-      // must never become a local operation, pending write, or durable mutation.
-      if (activeRemotePreview && sameVersionStamp(nextStamp, stampOf(activeRemotePreview.element))) {
+      const previewEchoExpiresAt = previewEchoStampsRef.current.get(element.id)?.get(previewStampKey(nextStamp)) ?? 0
+      // A preview can emit onChange after updateScene's synchronous guard clears,
+      // and an older preview callback can arrive after a newer preview packet.
+      // Exact recently rendered preview versions are therefore quarantined.
+      if (previewEchoExpiresAt > Date.now()) {
         canvasDiagnostics.increment('previewEchoesSuppressed')
         continue
       }
