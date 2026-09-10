@@ -29,7 +29,9 @@ The sequence for an ordinary pointer/text/discrete operation is:
 4. pointer-up/text-end/discrete quiet completion commits one `CanvasMutation`;
 5. its final `changes` are copied into the durable-ready queue;
 6. a serialized Supabase upsert writes those final versions;
-7. the client reads the authoritative versions back and reconciles them into the scene.
+7. the client reads the authoritative versions back; an exact acknowledgement advances the authoritative watermark without replaying the same element through Excalidraw, while genuinely newer remote state is reconciled into the scene.
+
+That exact-acknowledgement rule is required for the durability boundary itself. Reapplying an already-rendered local version can make Excalidraw emit a follow-up immutable version, which would otherwise turn one successful write into a delayed second discrete mutation/write.
 
 Multiple changed elements from one operation remain one mutation and can be written in one Supabase batch. Deletes remain versioned Excalidraw tombstones; no production physical DELETE path is introduced.
 
@@ -77,16 +79,41 @@ These counters make the distinction between *one human operation*, *one normal d
 `tests/live/operations.spec.ts` verifies against `canvas_ci_elements` that:
 
 - a normal frame-paced rectangle drag becomes **1 logical mutation / 1 durable batch / 1 row** and the persisted row contains final geometry;
-- a slow text-edit session becomes **1 logical mutation / 1 durable batch** and stores the complete final text;
+- after the authoritative acknowledgement/readback path has had time to settle, that rectangle is still **1 mutation / 1 batch / 1 row** rather than producing a delayed self-echo write;
+- a slow text-edit session becomes **1 logical mutation / 1 durable batch** and stores the complete final text, with the same delayed self-acknowledgement guard;
 - an unusually long pointer operation receives bounded checkpoint writes and still ends with the final geometry persisted.
 
 The existing reconnect, teardown, deletion, cross-browser and compiled-production suites remain release gates.
 
 ## Performance evidence
 
-The Phase 1/2 Chromium performance workflow is reused rather than replaced. Its report schema now calculates durable batches/rows as a delta for the measured gesture and records mutation-boundary flush/checkpoint counts as well as logical-operation metrics.
+The Phase 1/2 Chromium performance workflow is reused rather than replaced. Its report schema calculates durable batches/rows as a delta for the measured gesture and records mutation-boundary flush/checkpoint counts as well as logical-operation metrics.
 
-Final Phase 3 measurements must be pinned here from an exact branch commit and GitHub Actions artifact before merge. No timing or write-reduction result is claimed from local reasoning alone.
+Authoritative Phase 3 measurement:
+
+- source commit: `1f2079905dc3f83c1acfa9d7a300bbc892d54244`;
+- workflow run: `34477626892`;
+- artifact: `canvas-performance` / `10152229508`;
+- measured at: `2026-09-10T12:37:46.633Z`;
+- engine/browser: `excalidraw-supabase` / Chromium.
+
+Equivalent normal-rectangle results:
+
+| Metric | Phase 1 baseline | Phase 2 semantic boundary | Phase 3 durability boundary |
+| --- | ---: | ---: | ---: |
+| Durable write batches | 5 | 5 | **1** |
+| Rows sent in durable writes | 5 | 5 | **1** |
+| Logical mutations | not modeled | 1 | **1** |
+| Final logical changes | not modeled | 1 | **1** |
+| Mutation-boundary flushes | not modeled | not durability-driving | **1** |
+| Long-operation checkpoints | not modeled | not durability-driving | **0** |
+| Pointer writes-per-gesture p95 | 5 | 5 | **1** |
+
+Phase 3 therefore reduces durable write batches and rows for the measured ordinary rectangle by **80% (5 → 1)** while preserving one logical operation and one final object change.
+
+Timing from the same Phase 3 run was 648 ms local rectangle → peer render, 211.5 ms Supabase write p95, 4.3 ms Realtime receipt → next frame p95, and 315 ms offline → visible Live. The comparable Phase 1 and Phase 2 peer-visible measurements were 746 ms and 779 ms. Those absolute timings are retained as context only: CI/host/network variance is large enough that Phase 3 does **not** claim a latency optimization from this single run. The deterministic result being claimed is the write-volume reduction.
+
+The measured run also ended reconnect with `pendingWrites = 0`. No benchmark-only code path writes fixture elements to Supabase; the collaboration section uses the real production Excalidraw/Supabase engine against the isolated CI table.
 
 ## Non-goals
 
@@ -100,4 +127,4 @@ Phase 3 does not change:
 - offline collaborative editing policy;
 - recovery-history schema or restore functions.
 
-The phase is complete only when the exact final PR head passes the full quality suite and measured evidence demonstrates the intended normal-operation write reduction without breaking the existing collaboration/reconnect guarantees.
+The phase is complete only when the exact final PR head passes the full quality suite and the merged `main` build passes its quality, Pages deployment and published-site verification gates.
