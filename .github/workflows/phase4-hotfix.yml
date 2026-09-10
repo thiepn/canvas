@@ -1,0 +1,74 @@
+name: Phase 4 preview-origin hotfix
+on:
+  push:
+    branches: [phase4/broadcast-previews]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: phase4/broadcast-previews
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Keep remote previews outside the local mutation pipeline
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('app/canvas/SupabaseCanvasEditor.tsx')
+          text = path.read_text()
+
+          old = """    for (const element of allowed) {\n      const nextStamp = stampOf(element)\n      const observed = observedSceneRef.current.get(element.id)\n"""
+          new = """    for (const element of allowed) {\n      const nextStamp = stampOf(element)\n      const activeRemotePreview = remotePreviewRef.current.get(element.id)\n      // Excalidraw may emit onChange after updateScene's synchronous guard has\n      // cleared. An exact preview version is still remote, ephemeral state: it\n      // must never become a local operation, pending write, or durable mutation.\n      if (activeRemotePreview && sameVersionStamp(nextStamp, stampOf(activeRemotePreview.element))) {\n        canvasDiagnostics.increment('previewEchoesSuppressed')\n        continue\n      }\n      const observed = observedSceneRef.current.get(element.id)\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'onChange anchor count={text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          old = """      if (!(target instanceof HTMLCanvasElement) || !target.matches('canvas.excalidraw__canvas.interactive')) return\n      continuousOperationRef.current = 'pointer'\n"""
+          new = """      if (!(target instanceof HTMLCanvasElement) || !target.matches('canvas.excalidraw__canvas.interactive')) return\n      // A genuine local gesture starts from durable/local state, never from a\n      // peer's uncommitted preview. Fresh peer previews may resume afterwards\n      // for objects that this local operation is not protecting.\n      if (remotePreviewRef.current.size) clearRemotePreviews()\n      continuousOperationRef.current = 'pointer'\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'pointer anchor count={text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          old = """  }, [operationTracker])\n  useEffect(() => {\n    pageActiveRef.current = true\n"""
+          new = """  }, [clearRemotePreviews, operationTracker])\n  useEffect(() => {\n    pageActiveRef.current = true\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'effect dependency anchor count={text.count(old)}')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          test_path = Path('tests/live/previews.spec.ts')
+          tests = test_path.read_text()
+          old = """    expect((await diagnostics(pageA)).counters.dbWriteBatches ?? 0).toBe(0)\n    expect((await diagnostics(pageA)).counters.previewBroadcastsSent ?? 0).toBeGreaterThan(0)\n"""
+          new = """    expect((await diagnostics(pageA)).counters.dbWriteBatches ?? 0).toBe(0)\n    expect((await diagnostics(pageB)).counters.dbWriteBatches ?? 0).toBe(0)\n    expect((await diagnostics(pageB)).counters.previewEchoesSuppressed ?? 0).toBeGreaterThan(0)\n    expect((await diagnostics(pageA)).counters.previewBroadcastsSent ?? 0).toBeGreaterThan(0)\n"""
+          if tests.count(old) != 1:
+              raise SystemExit(f'preview regression anchor count={tests.count(old)}')
+          test_path.write_text(tests.replace(old, new, 1))
+
+          doc_path = Path('docs/phase4-broadcast-previews.md')
+          docs = doc_path.read_text()
+          anchor = """- previews never enter the durable-ready queue or recovery history.\n"""
+          replacement = anchor + "- Excalidraw callbacks that exactly echo a rendered preview are explicitly suppressed from the local mutation pipeline, even if they arrive after the synchronous `updateScene` guard;\n- a genuine local pointer interaction first restores active previews so local edits never begin from another peer's uncommitted geometry.\n"
+          if docs.count(anchor) != 1:
+              raise SystemExit(f'doc anchor count={docs.count(anchor)}')
+          doc_path.write_text(docs.replace(anchor, replacement, 1))
+          PY
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Commit patched candidate
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/canvas/SupabaseCanvasEditor.tsx tests/live/previews.spec.ts docs/phase4-broadcast-previews.md
+          git diff --cached --check
+          git commit -m "Phase 4: keep previews out of local mutations"
+          git push origin HEAD:phase4/broadcast-previews
