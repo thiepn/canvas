@@ -33,6 +33,9 @@ export function DiagnosticsOverlay() {
     <span>Queued finals <b>{number(snapshot.gauges.durableQueueElements)}</b></span>
     <span>Write p95 <b>{ms(snapshot, 'supabaseWriteMs')}</b></span>
     <span>Realtime→frame p95 <b>{ms(snapshot, 'realtimeReceiveToFrameMs')}</b></span>
+    <span>Preview→frame p95 <b>{ms(snapshot, 'previewReceiveToFrameMs')}</b></span>
+    <span>Preview sent / recv <b>{snapshot.counters.previewBroadcastsSent ?? 0} / {snapshot.counters.previewBroadcastsReceived ?? 0}</b></span>
+    <span>Remote previews <b>{number(snapshot.gauges.activeRemotePreviews)}</b></span>
     <span>Initial sync <b>{ms(snapshot, 'initialHydrationMs')}</b></span>
     <span>Reconnect p95 <b>{ms(snapshot, 'reconnectMs')}</b></span>
     <span>Writes / gesture <b>{number(snapshot.samples.writesPerGesture?.p95, 1)}</b></span>

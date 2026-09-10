@@ -58,6 +58,17 @@ Phase 3 adds operation-aware durability assertions on the same production editor
 
 Tool selection must interact with Excalidraw's visible accessible labels; the underlying radio inputs are visually overlaid by their icons and should not be clicked directly in Playwright.
 
+### Phase 4 preview-lane coverage
+
+The live suite additionally proves the fast and durable lanes remain separate:
+
+- a held rectangle drag becomes visible on a second real client through Supabase Broadcast while `canvas_ci_elements` is still empty and the originating client has made zero durable writes;
+- releasing that same gesture still produces exactly one normal Phase 3 database write and no long-operation checkpoint;
+- a synthetically abandoned but structurally valid remote preview renders temporarily, never changes the database row, and expires back to the authoritative element;
+- unit tests reject malformed/oversized/discrete preview envelopes, replayed sequence numbers and previews that would overwrite active local work.
+
+CI and the manual performance workflow both mutate `canvas_ci_elements`; their jobs therefore share one non-cancelling GitHub Actions concurrency group so their cleanup/setup cannot corrupt each other's live fixtures.
+
 ## Compiled production smoke
 
 `npm run test:production` performs a separate build into `.preview-dist` with:

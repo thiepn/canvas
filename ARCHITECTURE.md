@@ -12,7 +12,8 @@ GitHub Pages
             └─ Supabase Realtime
                  ├─ postgres_changes
                  ├─ presence
-                 └─ cursor broadcast
+                 ├─ cursor broadcast
+                 └─ active-operation preview broadcast
 ```
 
 There is no application backend in the normal data path, no room service and no account service. Supabase is the authoritative persistence/realtime service. The previous tldraw + Cloudflare Worker code is retained only for historical regression tests and is compile-time excluded from normal production selection.
@@ -67,12 +68,14 @@ Startup sequence:
 2. create the Supabase client and Realtime channel;
 3. load authoritative rows from Postgres;
 4. hydrate Excalidraw with allowed elements only;
-5. subscribe to Postgres Changes, Presence and cursor Broadcast;
+5. subscribe to Postgres Changes, Presence, cursor Broadcast and active-operation preview Broadcast;
 6. only mark the editor `Live` after subscription and authoritative reconciliation complete.
 
 Local editor changes have two separate paths. Every accepted Excalidraw element version is kept immediately in a local unsynchronized map so authoritative echoes cannot overwrite newer local work. Separately, the Phase 2 operation tracker groups those intermediate versions into pointer, text or discrete `CanvasMutation` objects and retains only each affected element's final version. Only a committed mutation's final changes enter the durable-ready queue.
 
 The durable writer is serialized: one Supabase upsert batch runs at a time, and a newer committed mutation remains queued while an older request is in flight. Completed writes are reconciled with an authoritative read to account for database conflict rejection and concurrent updates. Failed or rejected requests requeue the exact attempted versions before bounded retry.
+
+Phase 4 adds a separate ephemeral preview lane for continuous pointer/text operations. At most one coalesced operation snapshot is sent roughly every 45 ms over Supabase Broadcast, plus the final operation state at commit. Preview messages have a bounded protocol envelope, random tab-session sequence numbers and a 512 KiB payload ceiling. They never advance the authoritative watermark or enter either local durability queue. A remote preview is rendered only when it advances the current authoritative version and the local client has no pending edit for that element. Authoritative rows immediately retire equal/older previews; abandoned previews expire after 1.4 seconds and restore the last authoritative element.
 
 Continuous pointer/text operations that remain active for at least 1.5 seconds expose a non-committing snapshot to the durability layer. That snapshot may be persisted as a safety checkpoint while the same logical operation continues collecting newer versions. Pointer-up/text-end still produces the final mutation and final durable state. `pagehide`/offline capture performs the same safety role for an interrupted active editor without starting a new unloading-page request.
 
@@ -84,7 +87,7 @@ The UI surfaces Connecting, Synchronizing, Live, Reconnecting, Offline and Error
 
 ## Presence and cursors
 
-Presence is Supabase Realtime channel state, not Postgres data. It contains the anonymous display name/color/device session metadata required by collaborator UI. Cursor movement is ephemeral Broadcast traffic and is throttled/coalesced rather than persisted.
+Presence is Supabase Realtime channel state, not Postgres data. It contains the anonymous display name/color/device session metadata required by collaborator UI. Cursor movement and active-operation previews are ephemeral Broadcast traffic and are throttled/coalesced rather than persisted. Preview payloads are independently validated because they bypass Postgres row constraints.
 
 Closing a client removes its presence according to Realtime channel lifecycle. No collaborator history table exists.
 

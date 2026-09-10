@@ -8,6 +8,10 @@ defaults:
     shell: bash
 jobs:
   performance:
+    # Shares canvas_ci_elements with the quality workflow; never run both writers concurrently.
+    concurrency:
+      group: canvas-shared-supabase-ci
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
