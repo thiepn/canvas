@@ -30,12 +30,15 @@ export function DiagnosticsOverlay() {
     <span>Long frames <b>{snapshot.counters.longFramesOver50ms ?? 0}</b></span>
     <span>Elements <b>{number(snapshot.gauges.sceneElements)}</b></span>
     <span>In-flight saves <b>{number(snapshot.gauges.pendingWrites)}</b></span>
+    <span>Queued finals <b>{number(snapshot.gauges.durableQueueElements)}</b></span>
     <span>Write p95 <b>{ms(snapshot, 'supabaseWriteMs')}</b></span>
     <span>Realtime→frame p95 <b>{ms(snapshot, 'realtimeReceiveToFrameMs')}</b></span>
     <span>Initial sync <b>{ms(snapshot, 'initialHydrationMs')}</b></span>
     <span>Reconnect p95 <b>{ms(snapshot, 'reconnectMs')}</b></span>
     <span>Writes / gesture <b>{number(snapshot.samples.writesPerGesture?.p95, 1)}</b></span>
     <span>Logical ops <b>{snapshot.counters.logicalMutations ?? 0}</b></span>
+    <span>Boundary flushes <b>{snapshot.counters.durabilityBoundaryFlushes ?? 0}</b></span>
+    <span>Long-op checkpoints <b>{snapshot.counters.durabilityCheckpoints ?? 0}</b></span>
     <span>Changes / op <b>{number(snapshot.samples.changesPerMutation?.p95, 1)}</b></span>
     {snapshot.gauges.lastMutationKind && <span>Last op <b>{snapshot.gauges.lastMutationKind}</b></span>}
     {typeof snapshot.gauges.jsHeapBytes === 'number' && <span>JS heap <b>{(snapshot.gauges.jsHeapBytes / 1048576).toFixed(1)} MB</b></span>}

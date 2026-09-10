@@ -50,6 +50,12 @@ The core two-browser scenario must establish:
 6. Supabase contains the resulting deletion tombstone;
 7. neither page emits an uncaught exception.
 
+Phase 3 adds operation-aware durability assertions on the same production editor path:
+
+- an ordinary frame-paced rectangle drag is **1 logical mutation / 1 durable batch / 1 row**, and the one persisted row contains the final geometry rather than an intermediate drag frame;
+- a slow text-edit session with pauses remains **1 logical mutation / 1 durable batch** and persists the final complete text;
+- a deliberately long pointer gesture receives at least one bounded safety checkpoint, then the final mutation supersedes that checkpoint with the completed geometry.
+
 Tool selection must interact with Excalidraw's visible accessible labels; the underlying radio inputs are visually overlaid by their icons and should not be clicked directly in Playwright.
 
 ## Compiled production smoke

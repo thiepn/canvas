@@ -88,3 +88,8 @@ Phase 3 should preserve this exact semantic model and change only how durable wr
 5. rerun the same Phase 1 benchmark and require a typical rectangle drag to move from multiple durable batches toward one final durable commit without increasing lost-operation risk.
 
 Phase 2 is successful when logical operation identity is reliable enough that Phase 3 no longer needs to guess persistence boundaries from a generic debounce timer.
+
+## Phase 3 handoff status
+
+Phase 3 consumes this boundary without changing the Phase 2 grouping semantics: intermediate editor versions remain local, committed `CanvasMutation.changes` become the normal durable-write input, and only explicit long-operation/lifecycle checkpoints can persist before an operation ends. See [phase3-durable-mutations.md](./phase3-durable-mutations.md).
+

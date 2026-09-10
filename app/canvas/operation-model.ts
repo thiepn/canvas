@@ -38,6 +38,14 @@ export type CanvasMutation<T extends CanvasOperationElement = CanvasOperationEle
   changes: CanvasElementChange<T>[]
 }
 
+export type CanvasOperationSnapshot<T extends CanvasOperationElement = CanvasOperationElement> = {
+  source: CanvasOperationSource
+  startedAt: number
+  capturedAt: number
+  durationMs: number
+  changes: CanvasElementChange<T>[]
+}
+
 type TrackedChange<T extends CanvasOperationElement> = {
   element: T
   existedBefore: boolean
@@ -77,9 +85,9 @@ function mutationKind<T extends CanvasOperationElement>(changes: TrackedChange<T
  * Phase 2 semantic operation boundary.
  *
  * This class deliberately does not persist anything. It observes local element
- * changes and groups them into one logical mutation. The current Supabase save
- * path remains untouched until Phase 3, so operation semantics can be tested
- * independently before they become a durability boundary.
+ * changes and groups them into one logical mutation. Phase 3 consumes committed
+ * mutations as durability boundaries while `snapshotActive()` exposes a
+ * non-committing view for bounded long-operation safety checkpoints.
  */
 export class CanvasOperationTracker<T extends CanvasOperationElement> {
   private operation: ActiveOperation<T> | null = null
@@ -142,6 +150,19 @@ export class CanvasOperationTracker<T extends CanvasOperationElement> {
     this.commit()
   }
 
+  snapshotActive(): CanvasOperationSnapshot<T> | null {
+    const operation = this.operation
+    if (!operation || operation.changes.size === 0) return null
+    const capturedAt = this.now()
+    return {
+      source: operation.source,
+      startedAt: operation.startedAt,
+      capturedAt,
+      durationMs: Math.max(0, capturedAt - operation.startedAt),
+      changes: this.toChanges([...operation.changes.values()]),
+    }
+  }
+
   flush(): CanvasMutation<T> | null {
     this.clearTimer()
     return this.commit()
@@ -166,14 +187,8 @@ export class CanvasOperationTracker<T extends CanvasOperationElement> {
     this.timer = null
   }
 
-  private commit(): CanvasMutation<T> | null {
-    const operation = this.operation
-    this.operation = null
-    if (!operation || operation.changes.size === 0) return null
-
-    const committedAt = this.now()
-    const tracked = [...operation.changes.values()]
-    const changes: CanvasElementChange<T>[] = tracked.map(({ element, existedBefore }) => element.isDeleted
+  private toChanges(tracked: TrackedChange<T>[]): CanvasElementChange<T>[] {
+    return tracked.map(({ element, existedBefore }) => element.isDeleted
       ? {
           type: 'delete',
           elementId: element.id,
@@ -183,6 +198,16 @@ export class CanvasOperationTracker<T extends CanvasOperationElement> {
           existedBefore,
         }
       : { type: 'upsert', element, existedBefore })
+  }
+
+  private commit(): CanvasMutation<T> | null {
+    const operation = this.operation
+    this.operation = null
+    if (!operation || operation.changes.size === 0) return null
+
+    const committedAt = this.now()
+    const tracked = [...operation.changes.values()]
+    const changes = this.toChanges(tracked)
 
     const mutation: CanvasMutation<T> = {
       mutationId: this.createMutationId(),
