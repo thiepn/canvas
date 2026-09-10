@@ -1,8 +1,6 @@
 name: Canvas performance evidence
 on:
   workflow_dispatch:
-  push:
-    branches: [phase2/operation-model]
 permissions:
   contents: read
 defaults:
