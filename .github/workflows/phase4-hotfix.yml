@@ -51,14 +51,6 @@ jobs:
           if tests.count(old) != 1:
               raise SystemExit(f'preview regression anchor count={tests.count(old)}')
           test_path.write_text(tests.replace(old, new, 1))
-
-          doc_path = Path('docs/phase4-broadcast-previews.md')
-          docs = doc_path.read_text()
-          anchor = """- previews never enter the durable-ready queue or recovery history.\n"""
-          replacement = anchor + "- Excalidraw callbacks that exactly echo a rendered preview are explicitly suppressed from the local mutation pipeline, even if they arrive after the synchronous `updateScene` guard;\n- a genuine local pointer interaction first restores active previews so local edits never begin from another peer's uncommitted geometry.\n"
-          if docs.count(anchor) != 1:
-              raise SystemExit(f'doc anchor count={docs.count(anchor)}')
-          doc_path.write_text(docs.replace(anchor, replacement, 1))
           PY
       - run: npm ci
       - run: npm run lint
@@ -68,7 +60,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/canvas/SupabaseCanvasEditor.tsx tests/live/previews.spec.ts docs/phase4-broadcast-previews.md
+          git add app/canvas/SupabaseCanvasEditor.tsx tests/live/previews.spec.ts
           git diff --cached --check
           git commit -m "Phase 4: keep previews out of local mutations"
           git push origin HEAD:phase4/broadcast-previews
