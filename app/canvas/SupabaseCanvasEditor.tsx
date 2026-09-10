@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, reconcileElements } from '@excalidraw/excalidraw'
+import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, reconcileElements, restoreElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import type { AppState, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
@@ -11,6 +11,16 @@ import { recordMutationDiagnostics } from '../diagnostics/operations.ts'
 import { canvasDiagnostics } from '../diagnostics/metrics.ts'
 import { CanvasOperationTracker } from './operation-model.ts'
 import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
+import {
+  CANVAS_PREVIEW_TTL_MS,
+  PreviewSequenceGate,
+  createCanvasPreviewPayload,
+  parseCanvasPreviewPayload,
+  sameVersionStamp,
+  shouldRenderPreview,
+  type CanvasPreviewElement,
+  type CanvasPreviewSource,
+} from './preview-lane.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = 'Connecting' | 'Synchronizing' | 'Live' | 'Reconnecting' | 'Offline' | 'Error'
@@ -23,11 +33,21 @@ type CursorPayload = {
   button: 'up' | 'down'
   selectedElementIds: Record<string, boolean>
 }
+type RemotePreview = {
+  deviceId: string
+  sessionId: string
+  sequence: number
+  receivedAt: number
+  expiresAt: number
+  element: SceneElement
+}
+type QueuedPreview = { source: CanvasPreviewSource; elements: SceneElement[] }
 
 const ALLOWED_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame'])
 const OPERATION_FLUSH_DELAY_MS = 0
 const RECONNECT_FLUSH_DELAY_MS = 120
 const LONG_OPERATION_CHECKPOINT_MS = 1500
+const PREVIEW_BROADCAST_INTERVAL_MS = 45
 const UI_OPTIONS = {
   canvasActions: {
     changeViewBackgroundColor: false,
@@ -66,6 +86,37 @@ function elementFromRow(row: SyncRow): SceneElement | null {
 
 function isAllowedElement(element: SceneElement): boolean {
   return ALLOWED_TYPES.has(element.type)
+}
+
+function finiteCoordinate(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 10_000_000
+}
+
+function hasSafePoints(value: unknown): boolean {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.length <= 10_000
+    && value.every(point => Array.isArray(point) && point.length >= 2 && finiteCoordinate(point[0]) && finiteCoordinate(point[1]))
+}
+
+/** Broadcast bypasses Postgres validation, so normalize untrusted preview objects before Excalidraw sees them. */
+function elementFromPreview(value: CanvasPreviewElement): SceneElement | null {
+  const raw = value as Record<string, unknown>
+  if (typeof raw.type !== 'string' || !ALLOWED_TYPES.has(raw.type)) return null
+  if (![raw.x, raw.y, raw.width, raw.height, raw.angle].every(finiteCoordinate)) return null
+  if ((raw.type === 'line' || raw.type === 'arrow' || raw.type === 'freedraw') && !hasSafePoints(raw.points)) return null
+  if (raw.type === 'text' && (typeof raw.text !== 'string' || raw.text.length > 200_000)) return null
+  if (raw.link !== null && raw.link !== undefined) {
+    if (typeof raw.link !== 'string' || raw.link.length > 4096 || /^\s*javascript:/i.test(raw.link)) return null
+  }
+  try {
+    const restored = restoreElements([value as unknown as SceneElement], null, { repairBindings: false, refreshDimensions: false })
+    const element = restored[0] as SceneElement | undefined
+    if (!element || element.id !== value.id || element.version !== value.version || element.versionNonce !== value.versionNonce || element.isDeleted !== value.isDeleted || !isAllowedElement(element)) return null
+    return element
+  } catch {
+    return null
+  }
 }
 
 function safeColor(value: string): string {
@@ -164,7 +215,16 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const shadowRef = useRef(new Map<string, VersionStamp>())
+  const authoritativeElementsRef = useRef(new Map<string, SceneElement>())
   const observedSceneRef = useRef(new Map<string, VersionStamp>())
+  const previewSessionIdRef = useRef(globalThis.crypto?.randomUUID?.() ?? `preview-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const previewSequenceRef = useRef(0)
+  const previewSequenceGateRef = useRef(new PreviewSequenceGate())
+  const remotePreviewRef = useRef(new Map<string, RemotePreview>())
+  const previewSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const previewSendQueuedRef = useRef<QueuedPreview | null>(null)
+  const previewLastSentAtRef = useRef(0)
+  const commitPreviewRef = useRef<(source: CanvasPreviewSource, elements: SceneElement[]) => void>(() => {})
   // pendingRef tracks the newest local unsynchronized state for conflict protection.
   // durablePendingRef contains only mutation-final states (or explicit long-op
   // checkpoints) that are allowed to cross the network durability boundary.
@@ -185,6 +245,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     deviceId: () => identityRef.current.deviceId,
     onCommit: mutation => {
       recordMutationDiagnostics(mutation)
+      if (mutation.source === 'pointer' || mutation.source === 'text') {
+        commitPreviewRef.current(mutation.source, mutation.changes.map(change => change.type === 'delete' ? change.tombstone : change.element))
+      }
       for (const change of mutation.changes) {
         const element = change.type === 'delete' ? change.tombstone : change.element
         const nextStamp = stampOf(element)
@@ -215,6 +278,119 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     setStatus(next)
   }, [])
 
+  const restoreRemotePreviews = useCallback((records: RemotePreview[]) => {
+    const editor = apiRef.current
+    if (!editor || records.length === 0) return
+    const current = editor.getSceneElementsIncludingDeleted()
+    const replacements = new Map<string, SceneElement | null>()
+    for (const record of records) {
+      const visible = current.find(element => element.id === record.element.id)
+      if (!visible || !sameVersionStamp(stampOf(visible), stampOf(record.element)) || pendingRef.current.has(record.element.id)) continue
+      replacements.set(record.element.id, authoritativeElementsRef.current.get(record.element.id) ?? null)
+    }
+    if (!replacements.size) return
+    const next: SceneElement[] = []
+    for (const element of current) {
+      if (!replacements.has(element.id)) { next.push(element); continue }
+      const replacement = replacements.get(element.id)
+      if (replacement) next.push(replacement)
+    }
+    applyingRemote.current = true
+    editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER })
+    queueMicrotask(() => { applyingRemote.current = false })
+  }, [])
+
+  const clearRemotePreviews = useCallback(() => {
+    const records = [...remotePreviewRef.current.values()]
+    remotePreviewRef.current.clear()
+    previewSequenceGateRef.current.clear()
+    canvasDiagnostics.gauge('activeRemotePreviews', 0)
+    restoreRemotePreviews(records)
+  }, [restoreRemotePreviews])
+
+  const sendPreviewNow = useCallback((source: CanvasPreviewSource, elements: SceneElement[]) => {
+    if (!pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || elements.length === 0) return
+    const channel = channelRef.current
+    if (!channel) return
+    const payload = createCanvasPreviewPayload({
+      deviceId: identityRef.current.deviceId,
+      sessionId: previewSessionIdRef.current,
+      sequence: ++previewSequenceRef.current,
+      source,
+      elements: elements.filter(isAllowedElement),
+    })
+    if (!payload) { canvasDiagnostics.increment('previewBroadcastsSkipped'); return }
+    previewLastSentAtRef.current = performance.now()
+    canvasDiagnostics.increment('previewBroadcastsSent')
+    canvasDiagnostics.increment('previewElementsSent', payload.elements.length)
+    void channel.send({ type: 'broadcast', event: 'preview', payload }).then(result => {
+      if (result !== 'ok') canvasDiagnostics.increment('previewBroadcastFailures')
+    }).catch(() => { canvasDiagnostics.increment('previewBroadcastFailures') })
+  }, [])
+
+  const queuePreview = useCallback((source: CanvasPreviewSource, elements: SceneElement[], immediate = false) => {
+    if (previewSendTimerRef.current && immediate) { clearTimeout(previewSendTimerRef.current); previewSendTimerRef.current = null }
+    if (immediate) { previewSendQueuedRef.current = null; sendPreviewNow(source, elements); return }
+    previewSendQueuedRef.current = { source, elements }
+    const elapsed = performance.now() - previewLastSentAtRef.current
+    if (elapsed >= PREVIEW_BROADCAST_INTERVAL_MS) {
+      const queued = previewSendQueuedRef.current
+      previewSendQueuedRef.current = null
+      if (queued) sendPreviewNow(queued.source, queued.elements)
+      return
+    }
+    if (previewSendTimerRef.current) return
+    previewSendTimerRef.current = setTimeout(() => {
+      previewSendTimerRef.current = null
+      const queued = previewSendQueuedRef.current
+      previewSendQueuedRef.current = null
+      if (queued) sendPreviewNow(queued.source, queued.elements)
+    }, Math.max(0, PREVIEW_BROADCAST_INTERVAL_MS - elapsed))
+  }, [sendPreviewNow])
+
+  const applyRemotePreview = useCallback((value: unknown) => {
+    if (statusRef.current !== 'Live' || !pageActiveRef.current) return
+    const payload = parseCanvasPreviewPayload(value)
+    if (!payload) { canvasDiagnostics.increment('previewBroadcastsRejected'); return }
+    if (payload.deviceId === identityRef.current.deviceId) return
+    if (!previewSequenceGateRef.current.accept(payload.deviceId, payload.sessionId, payload.sequence)) {
+      canvasDiagnostics.increment('previewBroadcastsStale')
+      return
+    }
+
+    const accepted: SceneElement[] = []
+    const receivedPerfAt = performance.now()
+    const receivedAt = Date.now()
+    for (const candidate of payload.elements) {
+      const element = elementFromPreview(candidate)
+      if (!element) { canvasDiagnostics.increment('previewElementsRejected'); continue }
+      const nextStamp = stampOf(element)
+      if (!shouldRenderPreview(nextStamp, shadowRef.current.get(element.id), pendingRef.current.has(element.id))) continue
+      const existing = remotePreviewRef.current.get(element.id)
+      if (existing && !isNewerVersion(nextStamp, stampOf(existing.element))
+        && !(sameVersionStamp(nextStamp, stampOf(existing.element)) && payload.sessionId === existing.sessionId && payload.sequence > existing.sequence)) continue
+      remotePreviewRef.current.set(element.id, {
+        deviceId: payload.deviceId, sessionId: payload.sessionId, sequence: payload.sequence, receivedAt, expiresAt: receivedAt + CANVAS_PREVIEW_TTL_MS, element,
+      })
+      accepted.push(element)
+    }
+    if (!accepted.length) return
+    const editor = apiRef.current
+    if (!editor) return
+    const reconciled = reconcileElements(
+      editor.getSceneElementsIncludingDeleted() as Parameters<typeof reconcileElements>[0],
+      accepted as unknown as Parameters<typeof reconcileElements>[1],
+      editor.getAppState(),
+    )
+    applyingRemote.current = true
+    editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
+    queueMicrotask(() => { applyingRemote.current = false })
+    canvasDiagnostics.increment('previewBroadcastsReceived')
+    canvasDiagnostics.increment('previewElementsReceived', accepted.length)
+    canvasDiagnostics.gauge('activeRemotePreviews', remotePreviewRef.current.size)
+    requestAnimationFrame(() => canvasDiagnostics.sample('previewReceiveToFrameMs', performance.now() - receivedPerfAt))
+  }, [])
+
   const captureCurrentScene = useCallback(() => {
     const editor = apiRef.current
     if (!editor || statusRef.current !== 'Live') return
@@ -222,6 +398,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     // Preserve that final gesture before pagehide/offline locks callbacks.
     // This only queues memory state; it never starts an unloading-page request.
     for (const element of editor.getSceneElementsIncludingDeleted()) {
+      const remotePreview = remotePreviewRef.current.get(element.id)
+      if (remotePreview && sameVersionStamp(stampOf(element), stampOf(remotePreview.element))) continue
       if (!isAllowedElement(element) || !isNewerVersion(stampOf(element), shadowRef.current.get(element.id))) continue
       const nextStamp = stampOf(element)
       const observed = observedSceneRef.current.get(element.id)
@@ -243,6 +421,26 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => { identityRef.current = identity }, [identity])
   useEffect(() => { apiRef.current = api }, [api])
   useEffect(() => () => operationTracker.dispose(), [operationTracker])
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now()
+      const expired: RemotePreview[] = []
+      for (const [id, record] of remotePreviewRef.current) {
+        if (record.expiresAt > now) continue
+        remotePreviewRef.current.delete(id)
+        expired.push(record)
+      }
+      if (!expired.length) return
+      canvasDiagnostics.increment('previewExpirations', expired.length)
+      canvasDiagnostics.gauge('activeRemotePreviews', remotePreviewRef.current.size)
+      restoreRemotePreviews(expired)
+    }, 200)
+    return () => clearInterval(timer)
+  }, [restoreRemotePreviews])
+  useEffect(() => {
+    commitPreviewRef.current = (source, elements) => queuePreview(source, elements, true)
+    return () => { commitPreviewRef.current = () => {} }
+  }, [queuePreview])
   useEffect(() => {
     const pointerDown = (event: PointerEvent) => {
       if (statusRef.current !== 'Live' || editingTextRef.current) return
@@ -270,6 +468,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => {
     pageActiveRef.current = true
     const hide = () => {
+      clearRemotePreviews()
       captureCurrentScene()
       // Navigation may reject an outstanding save. Its recovery callback must
       // not start another fetch in the document that is being torn down.
@@ -277,6 +476,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       transition(navigator.onLine ? 'Reconnecting' : 'Offline')
       if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
       if (checkpointTimer.current) { clearTimeout(checkpointTimer.current); checkpointTimer.current = null }
+      if (previewSendTimerRef.current) { clearTimeout(previewSendTimerRef.current); previewSendTimerRef.current = null }
+      previewSendQueuedRef.current = null
       setConnectionAttempt(value => value + 1)
     }
     const show = () => {
@@ -294,8 +495,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
       if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
       if (checkpointTimer.current) { clearTimeout(checkpointTimer.current); checkpointTimer.current = null }
+      if (previewSendTimerRef.current) { clearTimeout(previewSendTimerRef.current); previewSendTimerRef.current = null }
+      previewSendQueuedRef.current = null
+      clearRemotePreviews()
     }
-  }, [captureCurrentScene, transition])
+  }, [captureCurrentScene, clearRemotePreviews, transition])
   useEffect(() => { document.documentElement.dataset.theme = resolvedTheme }, [resolvedTheme])
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)')
@@ -305,6 +509,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [])
   useEffect(() => {
     const offline = () => {
+      clearRemotePreviews()
       captureCurrentScene()
       transition('Offline')
       setConnectionAttempt(value => value + 1)
@@ -317,7 +522,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     window.addEventListener('offline', offline)
     window.addEventListener('online', online)
     return () => { window.removeEventListener('offline', offline); window.removeEventListener('online', online) }
-  }, [captureCurrentScene, transition])
+  }, [captureCurrentScene, clearRemotePreviews, transition])
 
   const applyRows = useCallback((values: unknown[], replace = false) => {
     const editor = apiRef.current
@@ -327,7 +532,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const remoteElements: SceneElement[] = []
     if (replace) {
       shadowRef.current.clear()
+      authoritativeElementsRef.current.clear()
       observedSceneRef.current.clear()
+      remotePreviewRef.current.clear()
+      previewSequenceGateRef.current.clear()
+      canvasDiagnostics.gauge('activeRemotePreviews', 0)
     }
     let changed = replace
 
@@ -335,6 +544,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const element = elementFromRow(row)
       if (!element) continue
       const nextStamp = { version: row.version, versionNonce: row.version_nonce, isDeleted: row.is_deleted }
+      const previousAuthority = authoritativeElementsRef.current.get(row.id)
+      if (replace || !previousAuthority || isNewerVersion(nextStamp, stampOf(previousAuthority))) authoritativeElementsRef.current.set(row.id, element)
+      const activePreview = remotePreviewRef.current.get(row.id)
+      if (activePreview && !isNewerVersion(stampOf(activePreview.element), nextStamp)) {
+        remotePreviewRef.current.delete(row.id)
+        canvasDiagnostics.gauge('activeRemotePreviews', remotePreviewRef.current.size)
+      }
       const pending = pendingRef.current.get(row.id)
       const durablePending = durablePendingRef.current.get(row.id)
 
@@ -350,6 +566,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
 
       if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue
+
+      const survivingPreview = remotePreviewRef.current.get(row.id)
+      if (!replace && survivingPreview && isNewerVersion(stampOf(survivingPreview.element), nextStamp)) {
+        shadowRef.current.set(row.id, nextStamp)
+        continue
+      }
 
       // A row that exactly acknowledges the immutable Excalidraw version already
       // rendered locally only needs to advance the authoritative watermark.
@@ -602,6 +824,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           if (isCurrent() && payload.new && Object.keys(payload.new).length) applyRows([payload.new])
         })
         .on('presence', { event: 'sync' }, () => { if (isCurrent()) syncPresence(currentChannel) })
+        .on('broadcast', { event: 'preview' }, message => {
+          if (isCurrent()) applyRemotePreview(message.payload)
+        })
         .on('broadcast', { event: 'cursor' }, message => {
           if (!isCurrent()) return
           const payload = message.payload as Partial<CursorPayload>
@@ -660,11 +885,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       ++syncGeneration
       if (retryTimer) clearTimeout(retryTimer)
       if (channel) {
+        clearRemotePreviews()
         if (channelRef.current === channel) channelRef.current = null
         channelCleanupRef.current = supabase.removeChannel(channel).catch(() => {})
       }
     }
-  }, [api, applyRows, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence, transition])
+  }, [api, applyRemotePreview, applyRows, clearRemotePreviews, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence, transition])
 
   useEffect(() => {
     const channel = channelRef.current
@@ -705,13 +931,17 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const queued = pendingRef.current.get(element.id)
       if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
     }
+    const activeSnapshot = operationTracker.snapshotActive()
+    if (activeSnapshot && (activeSnapshot.source === 'pointer' || activeSnapshot.source === 'text')) {
+      queuePreview(activeSnapshot.source, activeSnapshot.changes.map(change => change.type === 'delete' ? change.tombstone : change.element))
+    }
     if (previousEditingTextId && !nextEditingTextId) {
       continuousOperationRef.current = null
       clearCheckpointRef.current()
       operationTracker.endText()
     }
     editingTextRef.current = nextEditingTextId
-  }, [notify, operationTracker])
+  }, [notify, operationTracker, queuePreview])
 
   const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return
