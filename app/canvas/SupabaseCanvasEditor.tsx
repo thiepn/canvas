@@ -351,6 +351,23 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
       if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue
 
+      // A row that exactly acknowledges the immutable Excalidraw version already
+      // rendered locally only needs to advance the authoritative watermark.
+      // Reapplying that same element through updateScene can make Excalidraw emit
+      // a follow-up version and turn a server ACK into a second local mutation.
+      if (!replace) {
+        const currentLocal = localElements.find(candidate => candidate.id === row.id)
+        if (currentLocal) {
+          const currentStamp = stampOf(currentLocal)
+          if (currentStamp.version === nextStamp.version
+            && currentStamp.versionNonce === nextStamp.versionNonce
+            && currentStamp.isDeleted === nextStamp.isDeleted) {
+            shadowRef.current.set(row.id, nextStamp)
+            continue
+          }
+        }
+      }
+
       const survivingPending = pendingRef.current.get(row.id)
       if (!replace && survivingPending && shouldKeepPending(stampOf(survivingPending), nextStamp)) {
         shadowRef.current.set(row.id, nextStamp)
