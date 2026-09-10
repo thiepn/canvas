@@ -1,0 +1,115 @@
+diff --git a/app/canvas/SupabaseCanvasEditor.tsx b/app/canvas/SupabaseCanvasEditor.tsx
+index c566714..edd04a2 100644
+--- a/app/canvas/SupabaseCanvasEditor.tsx
++++ b/app/canvas/SupabaseCanvasEditor.tsx
+@@ -1,5 +1,5 @@
+ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+-import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, reconcileElements } from '@excalidraw/excalidraw'
++import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, reconcileElements, restoreElements } from '@excalidraw/excalidraw'
+ import '@excalidraw/excalidraw/index.css'
+ import type { AppState, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
+ import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
+@@ -11,6 +11,16 @@ import { recordMutationDiagnostics } from '../diagnostics/operations.ts'
+ import { canvasDiagnostics } from '../diagnostics/metrics.ts'
+ import { CanvasOperationTracker } from './operation-model.ts'
+ import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
++import {
++  CANVAS_PREVIEW_TTL_MS,
++  PreviewSequenceGate,
++  createCanvasPreviewPayload,
++  parseCanvasPreviewPayload,
++  sameVersionStamp,
++  shouldRenderPreview,
++  type CanvasPreviewElement,
++  type CanvasPreviewSource,
++} from './preview-lane.ts'
+ 
+ type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
+ type ConnectionState = 'Connecting' | 'Synchronizing' | 'Live' | 'Reconnecting' | 'Offline' | 'Error'
+@@ -23,11 +33,21 @@ type CursorPayload = {
+   button: 'up' | 'down'
+   selectedElementIds: Record<string, boolean>
+ }
++type RemotePreview = {
++  deviceId: string
++  sessionId: string
++  sequence: number
++  receivedAt: number
++  expiresAt: number
++  element: SceneElement
++}
++type QueuedPreview = { source: CanvasPreviewSource; elements: SceneElement[] }
+ 
+ const ALLOWED_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame'])
+ const OPERATION_FLUSH_DELAY_MS = 0
+ const RECONNECT_FLUSH_DELAY_MS = 120
+ const LONG_OPERATION_CHECKPOINT_MS = 1500
++const PREVIEW_BROADCAST_INTERVAL_MS = 45
+ const UI_OPTIONS = {
+   canvasActions: {
+     changeViewBackgroundColor: false,
+@@ -68,6 +88,37 @@ function isAllowedElement(element: SceneElement): boolean {
+   return ALLOWED_TYPES.has(element.type)
+ }
+ 
++function finiteCoordinate(value: unknown): boolean {
++  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 10_000_000
++}
++
++function hasSafePoints(value: unknown): boolean {
++  return Array.isArray(value)
++    && value.length > 0
++    && value.length <= 10_000
++    && value.every(point => Array.isArray(point) && point.length >= 2 && finiteCoordinate(point[0]) && finiteCoordinate(point[1]))
++}
++
++/** Broadcast bypasses Postgres validation, so normalize untrusted preview objects before Excalidraw sees them. */
++function elementFromPreview(value: CanvasPreviewElement): SceneElement | null {
++  const raw = value as Record<string, unknown>
++  if (typeof raw.type !== 'string' || !ALLOWED_TYPES.has(raw.type)) return null
++  if (![raw.x, raw.y, raw.width, raw.height, raw.angle].every(finiteCoordinate)) return null
++  if ((raw.type === 'line' || raw.type === 'arrow' || raw.type === 'freedraw') && !hasSafePoints(raw.points)) return null
++  if (raw.type === 'text' && (typeof raw.text !== 'string' || raw.text.length > 200_000)) return null
++  if (raw.link !== null && raw.link !== undefined) {
++    if (typeof raw.link !== 'string' || raw.link.length > 4096 || /^\s*javascript:/i.test(raw.link)) return null
++  }
++  try {
++    const restored = restoreElements([value as unknown as SceneElement], null, { repairBindings: false, refreshDimensions: false })
++    const element = restored[0] as SceneElement | undefined
++    if (!element || element.id !== value.id || element.version !== value.version || element.versionNonce !== value.versionNonce || element.isDeleted !== value.isDeleted || !isAllowedElement(element)) return null
++    return element
++  } catch {
++    return null
++  }
++}
++
+ function safeColor(value: string): string {
+   return /^#[0-9a-f]{6}$/i.test(value) ? value : '#666666'
+ }
+@@ -164,7 +215,16 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
+   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+   const channelRef = useRef<RealtimeChannel | null>(null)
+   const shadowRef = useRef(new Map<string, VersionStamp>())
++  const authoritativeElementsRef = useRef(new Map<string, SceneElement>())
+   const observedSceneRef = useRef(new Map<string, VersionStamp>())
++  const previewSessionIdRef = useRef(globalThis.crypto?.randomUUID?.() ?? `preview-${Date.now()}-${Math.random().toString(36).slice(2)}`)
++  const previewSequenceRef = useRef(0)
++  const previewSequenceGateRef = useRef(new PreviewSequenceGate())
++  const remotePreviewRef = useRef(new Map<string, RemotePreview>())
++  const previewSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
++  const previewSendQueuedRef = useRef<QueuedPreview | null>(null)
++  const previewLastSentAtRef = useRef(0)
++  const commitPreviewRef = useRef<(source: CanvasPreviewSource, elements: SceneElement[]) => void>(() => {})
+   // pendingRef tracks the newest local unsynchronized state for conflict protection.
+   // durablePendingRef contains only mutation-final states (or explicit long-op
+   // checkpoints) that are allowed to cross the network durability boundary.
+@@ -185,6 +245,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
+     deviceId: () => identityRef.current.deviceId,
+     onCommit: mutation => {
+       recordMutationDiagnostics(mutation)
++      if (mutation.source === 'pointer' || mutation.source === 'text') {
++        commitPreviewRef.current(mutation.source, mutation.changes.map(change => change.type === 'delete' ? change.tombstone : change.element))
++      }
+       for (const change of mutation.changes) {
+         const element = change.type === 'delete' ? change.tombstone : change.element
+         const nextStamp = stampOf(element)
