@@ -1,0 +1,124 @@
+diff --git a/app/canvas/SupabaseCanvasEditor.tsx b/app/canvas/SupabaseCanvasEditor.tsx
+index c566714..edd04a2 100644
+--- a/app/canvas/SupabaseCanvasEditor.tsx
++++ b/app/canvas/SupabaseCanvasEditor.tsx
+@@ -215,6 +278,119 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
+     setStatus(next)
+   }, [])
+ 
++  const restoreRemotePreviews = useCallback((records: RemotePreview[]) => {
++    const editor = apiRef.current
++    if (!editor || records.length === 0) return
++    const current = editor.getSceneElementsIncludingDeleted()
++    const replacements = new Map<string, SceneElement | null>()
++    for (const record of records) {
++      const visible = current.find(element => element.id === record.element.id)
++      if (!visible || !sameVersionStamp(stampOf(visible), stampOf(record.element)) || pendingRef.current.has(record.element.id)) continue
++      replacements.set(record.element.id, authoritativeElementsRef.current.get(record.element.id) ?? null)
++    }
++    if (!replacements.size) return
++    const next: SceneElement[] = []
++    for (const element of current) {
++      if (!replacements.has(element.id)) { next.push(element); continue }
++      const replacement = replacements.get(element.id)
++      if (replacement) next.push(replacement)
++    }
++    applyingRemote.current = true
++    editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER })
++    queueMicrotask(() => { applyingRemote.current = false })
++  }, [])
++
++  const clearRemotePreviews = useCallback(() => {
++    const records = [...remotePreviewRef.current.values()]
++    remotePreviewRef.current.clear()
++    previewSequenceGateRef.current.clear()
++    canvasDiagnostics.gauge('activeRemotePreviews', 0)
++    restoreRemotePreviews(records)
++  }, [restoreRemotePreviews])
++
++  const sendPreviewNow = useCallback((source: CanvasPreviewSource, elements: SceneElement[]) => {
++    if (!pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || elements.length === 0) return
++    const channel = channelRef.current
++    if (!channel) return
++    const payload = createCanvasPreviewPayload({
++      deviceId: identityRef.current.deviceId,
++      sessionId: previewSessionIdRef.current,
++      sequence: ++previewSequenceRef.current,
++      source,
++      elements: elements.filter(isAllowedElement),
++    })
++    if (!payload) { canvasDiagnostics.increment('previewBroadcastsSkipped'); return }
++    previewLastSentAtRef.current = performance.now()
++    canvasDiagnostics.increment('previewBroadcastsSent')
++    canvasDiagnostics.increment('previewElementsSent', payload.elements.length)
++    void channel.send({ type: 'broadcast', event: 'preview', payload }).then(result => {
++      if (result !== 'ok') canvasDiagnostics.increment('previewBroadcastFailures')
++    }).catch(() => { canvasDiagnostics.increment('previewBroadcastFailures') })
++  }, [])
++
++  const queuePreview = useCallback((source: CanvasPreviewSource, elements: SceneElement[], immediate = false) => {
++    if (previewSendTimerRef.current && immediate) { clearTimeout(previewSendTimerRef.current); previewSendTimerRef.current = null }
++    if (immediate) { previewSendQueuedRef.current = null; sendPreviewNow(source, elements); return }
++    previewSendQueuedRef.current = { source, elements }
++    const elapsed = performance.now() - previewLastSentAtRef.current
++    if (elapsed >= PREVIEW_BROADCAST_INTERVAL_MS) {
++      const queued = previewSendQueuedRef.current
++      previewSendQueuedRef.current = null
++      if (queued) sendPreviewNow(queued.source, queued.elements)
++      return
++    }
++    if (previewSendTimerRef.current) return
++    previewSendTimerRef.current = setTimeout(() => {
++      previewSendTimerRef.current = null
++      const queued = previewSendQueuedRef.current
++      previewSendQueuedRef.current = null
++      if (queued) sendPreviewNow(queued.source, queued.elements)
++    }, Math.max(0, PREVIEW_BROADCAST_INTERVAL_MS - elapsed))
++  }, [sendPreviewNow])
++
++  const applyRemotePreview = useCallback((value: unknown) => {
++    if (statusRef.current !== 'Live' || !pageActiveRef.current) return
++    const payload = parseCanvasPreviewPayload(value)
++    if (!payload) { canvasDiagnostics.increment('previewBroadcastsRejected'); return }
++    if (payload.deviceId === identityRef.current.deviceId) return
++    if (!previewSequenceGateRef.current.accept(payload.deviceId, payload.sessionId, payload.sequence)) {
++      canvasDiagnostics.increment('previewBroadcastsStale')
++      return
++    }
++
++    const accepted: SceneElement[] = []
++    const receivedPerfAt = performance.now()
++    const receivedAt = Date.now()
++    for (const candidate of payload.elements) {
++      const element = elementFromPreview(candidate)
++      if (!element) { canvasDiagnostics.increment('previewElementsRejected'); continue }
++      const nextStamp = stampOf(element)
++      if (!shouldRenderPreview(nextStamp, shadowRef.current.get(element.id), pendingRef.current.has(element.id))) continue
++      const existing = remotePreviewRef.current.get(element.id)
++      if (existing && !isNewerVersion(nextStamp, stampOf(existing.element))
++        && !(sameVersionStamp(nextStamp, stampOf(existing.element)) && payload.sessionId === existing.sessionId && payload.sequence > existing.sequence)) continue
++      remotePreviewRef.current.set(element.id, {
++        deviceId: payload.deviceId, sessionId: payload.sessionId, sequence: payload.sequence, receivedAt, expiresAt: receivedAt + CANVAS_PREVIEW_TTL_MS, element,
++      })
++      accepted.push(element)
++    }
++    if (!accepted.length) return
++    const editor = apiRef.current
++    if (!editor) return
++    const reconciled = reconcileElements(
++      editor.getSceneElementsIncludingDeleted() as Parameters<typeof reconcileElements>[0],
++      accepted as unknown as Parameters<typeof reconcileElements>[1],
++      editor.getAppState(),
++    )
++    applyingRemote.current = true
++    editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
++    queueMicrotask(() => { applyingRemote.current = false })
++    canvasDiagnostics.increment('previewBroadcastsReceived')
++    canvasDiagnostics.increment('previewElementsReceived', accepted.length)
++    canvasDiagnostics.gauge('activeRemotePreviews', remotePreviewRef.current.size)
++    requestAnimationFrame(() => canvasDiagnostics.sample('previewReceiveToFrameMs', performance.now() - receivedPerfAt))
++  }, [])
++
+   const captureCurrentScene = useCallback(() => {
+     const editor = apiRef.current
+     if (!editor || statusRef.current !== 'Live') return
