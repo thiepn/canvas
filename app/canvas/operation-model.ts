@@ -1,4 +1,4 @@
-export type CanvasOperationSource = 'pointer' | 'discrete'
+export type CanvasOperationSource = 'pointer' | 'text' | 'discrete'
 export type CanvasMutationKind = 'create' | 'update' | 'delete' | 'mixed'
 
 export type CanvasOperationElement = {
@@ -99,9 +99,18 @@ export class CanvasOperationTracker<T extends CanvasOperationElement> {
   }
 
   beginPointer(): void {
+    this.beginContinuous('pointer')
+  }
+
+  beginText(): void {
+    if (this.operation?.source === 'text') return
+    this.beginContinuous('text')
+  }
+
+  private beginContinuous(source: 'pointer' | 'text'): void {
     this.clearTimer()
     if (this.operation) this.commit()
-    this.operation = { source: 'pointer', startedAt: this.now(), changes: new Map() }
+    this.operation = { source, startedAt: this.now(), changes: new Map() }
   }
 
   record(element: T, existedBefore: boolean): void {
@@ -125,6 +134,12 @@ export class CanvasOperationTracker<T extends CanvasOperationElement> {
     // A short settle window includes that final immutable element version in
     // the same human gesture rather than creating a second mutation.
     this.scheduleCommit(this.pointerSettleMs)
+  }
+
+  endText(): void {
+    if (this.operation?.source !== 'text') return
+    this.clearTimer()
+    this.commit()
   }
 
   flush(): CanvasMutation<T> | null {
