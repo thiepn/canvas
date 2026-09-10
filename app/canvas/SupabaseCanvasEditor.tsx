@@ -446,6 +446,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (statusRef.current !== 'Live' || editingTextRef.current) return
       const target = event.target
       if (!(target instanceof HTMLCanvasElement) || !target.matches('canvas.excalidraw__canvas.interactive')) return
+      // A genuine local gesture starts from durable/local state, never from a
+      // peer's uncommitted preview. Fresh peer previews may resume afterwards
+      // for objects that this local operation is not protecting.
+      if (remotePreviewRef.current.size) clearRemotePreviews()
       continuousOperationRef.current = 'pointer'
       operationTracker.beginPointer()
       armCheckpointRef.current()
@@ -464,7 +468,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       document.removeEventListener('pointerup', pointerEnd, true)
       document.removeEventListener('pointercancel', pointerEnd, true)
     }
-  }, [operationTracker])
+  }, [clearRemotePreviews, operationTracker])
   useEffect(() => {
     pageActiveRef.current = true
     const hide = () => {
@@ -917,6 +921,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     for (const element of allowed) {
       const nextStamp = stampOf(element)
+      const activeRemotePreview = remotePreviewRef.current.get(element.id)
+      // Excalidraw may emit onChange after updateScene's synchronous guard has
+      // cleared. An exact preview version is still remote, ephemeral state: it
+      // must never become a local operation, pending write, or durable mutation.
+      if (activeRemotePreview && sameVersionStamp(nextStamp, stampOf(activeRemotePreview.element))) {
+        canvasDiagnostics.increment('previewEchoesSuppressed')
+        continue
+      }
       const observed = observedSceneRef.current.get(element.id)
       if (isNewerVersion(nextStamp, observed)) {
         operationTracker.record(element, observed !== undefined)
