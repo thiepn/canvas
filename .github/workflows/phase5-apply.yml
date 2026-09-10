@@ -17,56 +17,33 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Integrate revision cursor reconciliation
+      - name: Complete revision-aware authoritative reads
         run: |
           python3 <<'PY'
           from pathlib import Path
           path = Path('app/canvas/SupabaseCanvasEditor.tsx')
           text = path.read_text()
-
-          def replace(old, new, label):
-              global text
-              if text.count(old) != 1:
-                  raise SystemExit(f'{label} anchor count={text.count(old)}')
-              text = text.replace(old, new, 1)
-
-          replace("import { CanvasOperationTracker } from './operation-model.ts'\n", "import { CanvasOperationTracker } from './operation-model.ts'\nimport { readRevisionPages } from './revision-sync.ts'\n", 'import')
-          replace("type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown }", "type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown; revision: number }", 'sync row')
-          replace("const PREVIEW_ECHO_STAMPS_PER_ELEMENT = 16\n", "const PREVIEW_ECHO_STAMPS_PER_ELEMENT = 16\nconst ANTI_ENTROPY_PAGE_SIZE = 500\nconst ANTI_ENTROPY_INTERVAL_MS = 15_000\n", 'constants')
-          replace("  const versionNonce = Number(row.version_nonce)\n  if (!id || !Number.isInteger(version) || !Number.isInteger(versionNonce) || typeof row.is_deleted !== 'boolean') return null\n  return { id, version, version_nonce: versionNonce, is_deleted: row.is_deleted, element: row.element }", "  const versionNonce = Number(row.version_nonce)\n  const revision = Number(row.revision)\n  if (!id || !Number.isInteger(version) || !Number.isInteger(versionNonce) || !Number.isSafeInteger(revision) || revision <= 0 || typeof row.is_deleted !== 'boolean') return null\n  return { id, version, version_nonce: versionNonce, is_deleted: row.is_deleted, element: row.element, revision }", 'normalize')
-          replace("  const retryDelayRef = useRef(1200)\n", "  const retryDelayRef = useRef(1200)\n  const reconciliationCursorRef = useRef(0)\n  const reconciliationInFlightRef = useRef(false)\n  const dropRealtimeForDiagnosticsRef = useRef(canvasDiagnostics.enabled && new URLSearchParams(window.location.search).get('dropRealtime') === '1')\n", 'refs')
-
-          old = """  const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true) => {\n    if (!pageActiveRef.current) return\n    const { data, error } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').order('updated_at', { ascending: true }).abortSignal(AbortSignal.timeout(15_000))\n    if (error) throw error\n    if (isCurrent()) applyRows(data ?? [], pendingRef.current.size === 0)\n  }, [applyRows, config.tableName, supabase])\n"""
-          new = """  const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true, mode: 'initial' | 'reconcile' = 'initial') => {\n    if (!pageActiveRef.current) return\n    const startedAt = performance.now()\n    const startAfter = mode === 'reconcile' ? reconciliationCursorRef.current : 0\n    let firstPage = true\n    const result = await readRevisionPages<SyncRow>({\n      startAfter,\n      pageSize: ANTI_ENTROPY_PAGE_SIZE,\n      isCurrent,\n      fetchPage: async (afterRevision, limit) => {\n        const { data, error } = await supabase.from(config.tableName)\n          .select('id,version,version_nonce,is_deleted,element,revision')\n          .gt('revision', afterRevision)\n          .order('revision', { ascending: true })\n          .limit(limit)\n          .abortSignal(AbortSignal.timeout(15_000))\n        if (error) throw error\n        return (data ?? []).map(normalizeRow).filter((row): row is SyncRow => row !== null)\n      },\n      onPage: rows => {\n        if (!isCurrent()) return\n        applyRows(rows, mode === 'initial' && firstPage && pendingRef.current.size === 0)\n        firstPage = false\n      },\n    })\n    if (!result.completed || !isCurrent()) return\n    reconciliationCursorRef.current = result.cursor\n    canvasDiagnostics.gauge('reconciliationCursor', result.cursor)\n    if (mode === 'reconcile') {\n      canvasDiagnostics.increment('antiEntropyRowsRead', result.rows)\n      canvasDiagnostics.sample('antiEntropyMs', performance.now() - startedAt)\n    }\n  }, [applyRows, config.tableName, supabase])\n\n  const reconcileAuthoritative = useCallback(async () => {\n    if (reconciliationInFlightRef.current || !pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || continuousOperationRef.current) return\n    reconciliationInFlightRef.current = true\n    canvasDiagnostics.increment('antiEntropyRuns')\n    try {\n      await loadAuthoritative(() => pageActiveRef.current && statusRef.current === 'Live' && navigator.onLine, 'reconcile')\n      canvasDiagnostics.increment('antiEntropySuccesses')\n    } catch {\n      canvasDiagnostics.increment('antiEntropyFailures')\n    } finally {\n      reconciliationInFlightRef.current = false\n    }\n  }, [loadAuthoritative])\n"""
-          replace(old, new, 'load authoritative')
-
-          old = """        .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {\n          if (isCurrent() && payload.new && Object.keys(payload.new).length) applyRows([payload.new])\n        })\n"""
-          new = """        .on('postgres_changes', { event: '*', schema: 'public', table: config.tableName }, payload => {\n          if (!isCurrent() || !payload.new || !Object.keys(payload.new).length) return\n          if (dropRealtimeForDiagnosticsRef.current) {\n            canvasDiagnostics.increment('realtimeChangesDroppedForDiagnostics')\n            return\n          }\n          applyRows([payload.new])\n        })\n"""
-          replace(old, new, 'realtime callback')
-
-          anchor = """  useEffect(() => {\n    const channel = channelRef.current\n    if (!pageActiveRef.current || !channel || (status !== 'Live' && status !== 'Synchronizing')) return\n"""
-          effect = """  useEffect(() => {\n    if (status !== 'Live') return\n    const requestReconciliation = () => {\n      if (document.visibilityState === 'visible') void reconcileAuthoritative()\n    }\n    const timer = window.setInterval(requestReconciliation, ANTI_ENTROPY_INTERVAL_MS)\n    window.addEventListener('focus', requestReconciliation)\n    document.addEventListener('visibilitychange', requestReconciliation)\n    return () => {\n      clearInterval(timer)\n      window.removeEventListener('focus', requestReconciliation)\n      document.removeEventListener('visibilitychange', requestReconciliation)\n    }\n  }, [reconcileAuthoritative, status])\n\n""" + anchor
-          replace(anchor, effect, 'anti entropy effect')
+          old = ".select('id,version,version_nonce,is_deleted,element').in('id', ids)"
+          new = ".select('id,version,version_nonce,is_deleted,element,revision').in('id', ids)"
+          if text.count(old) != 1:
+              raise SystemExit(f'ACK readback anchor count={text.count(old)}')
+          text = text.replace(old, new, 1)
           path.write_text(text)
-
-          overlay = Path('app/diagnostics/DiagnosticsOverlay.tsx')
-          out = overlay.read_text()
-          old = """    <span>Reconnect p95 <b>{ms(snapshot, 'reconnectMs')}</b></span>\n    <span>Writes / gesture <b>{number(snapshot.samples.writesPerGesture?.p95, 1)}</b></span>\n"""
-          new = """    <span>Reconnect p95 <b>{ms(snapshot, 'reconnectMs')}</b></span>\n    <span>Anti-entropy p95 <b>{ms(snapshot, 'antiEntropyMs')}</b></span>\n    <span>Reconcile cursor <b>{number(snapshot.gauges.reconciliationCursor)}</b></span>\n    <span>Reconcile runs / failures <b>{snapshot.counters.antiEntropyRuns ?? 0} / {snapshot.counters.antiEntropyFailures ?? 0}</b></span>\n    <span>Writes / gesture <b>{number(snapshot.samples.writesPerGesture?.p95, 1)}</b></span>\n"""
-          if out.count(old) != 1:
-              raise SystemExit(f'overlay anchor count={out.count(old)}')
-          overlay.write_text(out.replace(old, new, 1))
           PY
+          if grep -n "select('id,version,version_nonce,is_deleted,element')" app/canvas/SupabaseCanvasEditor.tsx; then
+            echo 'Found an authoritative read that still omits revision.' >&2
+            exit 1
+          fi
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: Commit integrated candidate
+      - name: Commit completed candidate
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/canvas/SupabaseCanvasEditor.tsx app/diagnostics/DiagnosticsOverlay.tsx
+          git add app/canvas/SupabaseCanvasEditor.tsx
           git diff --cached --check
-          git commit -m "Phase 5: integrate revision anti-entropy"
+          git commit -m "Phase 5: make ACK readback revision-aware"
           git push origin HEAD:phase5/anti-entropy-reliability
