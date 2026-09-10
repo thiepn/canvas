@@ -63,6 +63,16 @@ test('one pointer gesture becomes one logical mutation and one final durable wri
   const [persisted] = await persistedElements()
   expect(Number(persisted.width)).toBeGreaterThan(200)
   expect(Number(persisted.height)).toBeGreaterThan(120)
+
+  // Leave enough time for the write confirmation/readback path to settle. An
+  // exact server acknowledgement must not replay through Excalidraw and create
+  // a delayed second logical mutation/write.
+  await page.waitForTimeout(900)
+  const settled = await operationSnapshot(page)
+  expect(settled.counters.logicalMutations).toBe(1)
+  expect(settled.counters.dbWriteBatches).toBe(1)
+  expect(settled.counters.dbRowsWritten).toBe(1)
+  expect(settled.counters.durabilityBoundaryFlushes).toBe(1)
 })
 
 test('a slow text-edit session remains one logical mutation and saves once at its boundary', async ({ page }) => {
@@ -97,6 +107,13 @@ test('a slow text-edit session remains one logical mutation and saves once at it
   await expect.poll(async () => (await persistedElements()).length).toBe(1)
   const [persisted] = await persistedElements()
   expect(persisted.text).toBe('Slow text session')
+
+  await page.waitForTimeout(900)
+  const settled = await operationSnapshot(page)
+  expect(settled.counters.logicalMutations).toBe(1)
+  expect(settled.counters.dbWriteBatches).toBe(1)
+  expect(settled.counters.dbRowsWritten).toBe(1)
+  expect(settled.counters.durabilityBoundaryFlushes).toBe(1)
 })
 
 test('an unusually long pointer operation receives bounded safety checkpoints', async ({ page }) => {
