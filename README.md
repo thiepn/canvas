@@ -64,7 +64,7 @@ Postgres constraints allow only the product's vector types and cap each serializ
 
 ## Realtime behavior
 
-The browser loads the authoritative table before becoming editable and subscribes to Supabase Realtime. Local changes are batched briefly and upserted element-by-element rather than saving an entire document. After writes, authoritative rows are reconciled back into the editor. Postgres rejects stale update tuples, so a delayed client cannot overwrite a newer element version.
+The browser loads the authoritative table before becoming editable and subscribes to Supabase Realtime. Excalidraw still renders every local intermediate frame immediately, but those frames stay in memory for conflict protection rather than being written on a generic timer. Phase 3 persists the final element state(s) from each completed logical `CanvasMutation`; unusually long continuous pointer/text operations receive bounded safety checkpoints. Durable writes are serialized and reconciled with authoritative rows after completion. Postgres still rejects stale update tuples, so delayed requests cannot overwrite a newer element version.
 
 Presence and cursor state are ephemeral Realtime channel state and are not persisted as user accounts.
 

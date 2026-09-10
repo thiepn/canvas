@@ -70,9 +70,13 @@ Startup sequence:
 5. subscribe to Postgres Changes, Presence and cursor Broadcast;
 6. only mark the editor `Live` after subscription and authoritative reconciliation complete.
 
-Local editor changes are filtered, normalized and batched for roughly 120 ms. Only changed element records are upserted. After a write batch, the client reconciles with an authoritative read to account for database conflict rejection and concurrent updates.
+Local editor changes have two separate paths. Every accepted Excalidraw element version is kept immediately in a local unsynchronized map so authoritative echoes cannot overwrite newer local work. Separately, the Phase 2 operation tracker groups those intermediate versions into pointer, text or discrete `CanvasMutation` objects and retains only each affected element's final version. Only a committed mutation's final changes enter the durable-ready queue.
 
-Remote Postgres changes are merged into the Excalidraw scene. Tombstones remove elements from the visible scene. Echoes from the same device are harmless because ordering is idempotent.
+The durable writer is serialized: one Supabase upsert batch runs at a time, and a newer committed mutation remains queued while an older request is in flight. Completed writes are reconciled with an authoritative read to account for database conflict rejection and concurrent updates. Failed or rejected requests requeue the exact attempted versions before bounded retry.
+
+Continuous pointer/text operations that remain active for at least 1.5 seconds expose a non-committing snapshot to the durability layer. That snapshot may be persisted as a safety checkpoint while the same logical operation continues collecting newer versions. Pointer-up/text-end still produces the final mutation and final durable state. `pagehide`/offline capture performs the same safety role for an interrupted active editor without starting a new unloading-page request.
+
+Remote Postgres changes are merged into the Excalidraw scene. Tombstones remove elements from the visible scene. Echoes from the same device are harmless because ordering is idempotent. A server echo may prune an equal/losing local or durable-ready version, but never a newer one.
 
 ## Connection safety
 

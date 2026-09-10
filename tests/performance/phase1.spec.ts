@@ -172,7 +172,7 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
     }))
 
     const report = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       measuredAt: new Date().toISOString(),
       commit: process.env.GITHUB_SHA ?? null,
       engine: 'excalidraw-supabase',
@@ -187,8 +187,10 @@ test('Phase 1 baseline measures production-engine scale and multiplayer latency'
         supabaseWriteP95Ms: afterWriteA.samples.supabaseWriteMs?.p95 ?? null,
         realtimeReceiveToFrameP95Ms: afterWriteA.samples.realtimeReceiveToFrameMs?.p95 ?? null,
         writesPerGestureP95: afterWriteA.samples.writesPerGesture?.p95 ?? null,
-        dbWriteBatches: afterWriteA.counters.dbWriteBatches ?? 0,
-        dbRowsWritten: afterWriteA.counters.dbRowsWritten ?? 0,
+        dbWriteBatches: (afterWriteA.counters.dbWriteBatches ?? 0) - (beforeA.counters.dbWriteBatches ?? 0),
+        dbRowsWritten: (afterWriteA.counters.dbRowsWritten ?? 0) - (beforeA.counters.dbRowsWritten ?? 0),
+        durabilityBoundaryFlushesForGesture: (afterWriteA.counters.durabilityBoundaryFlushes ?? 0) - (beforeA.counters.durabilityBoundaryFlushes ?? 0),
+        durabilityCheckpointsForGesture: (afterWriteA.counters.durabilityCheckpoints ?? 0) - (beforeA.counters.durabilityCheckpoints ?? 0),
         logicalMutationsForGesture: (afterWriteA.counters.logicalMutations ?? 0) - (beforeA.counters.logicalMutations ?? 0),
         logicalMutationChangesForGesture: (afterWriteA.counters.logicalMutationChanges ?? 0) - (beforeA.counters.logicalMutationChanges ?? 0),
         changesPerMutationP95: afterWriteA.samples.changesPerMutation?.p95 ?? null,

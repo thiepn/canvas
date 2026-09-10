@@ -138,3 +138,28 @@ test('pointer activity without element changes emits no mutation', () => {
   assert.equal(tracker.flush(), null)
   assert.deepEqual(mutations, [])
 })
+
+test('active snapshots expose final checkpoint state without committing the operation', () => {
+  const { tracker, mutations, advance } = harness()
+  tracker.beginPointer()
+  tracker.record(element('shape-a', 2, { x: 10 }), true)
+  advance(500)
+  tracker.record(element('shape-a', 3, { x: 20 }), true)
+
+  const snapshot = tracker.snapshotActive()
+  assert.equal(mutations.length, 0)
+  assert.equal(snapshot?.source, 'pointer')
+  assert.equal(snapshot?.durationMs, 500)
+  assert.equal(snapshot?.changes.length, 1)
+  const checkpointChange = snapshot?.changes[0]
+  assert.equal(checkpointChange?.type, 'upsert')
+  if (checkpointChange?.type === 'upsert') assert.equal(checkpointChange.element.version, 3)
+
+  tracker.record(element('shape-a', 4, { x: 30 }), true)
+  tracker.endPointer()
+  tracker.flush()
+  assert.equal(mutations.length, 1)
+  const finalChange = mutations[0].changes[0]
+  assert.equal(finalChange.type, 'upsert')
+  if (finalChange.type === 'upsert') assert.equal(finalChange.element.version, 4)
+})

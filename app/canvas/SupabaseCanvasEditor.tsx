@@ -8,6 +8,7 @@ import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity } 
 import { loadTheme, writePreference, type ThemePreference } from '../storage/preferences.ts'
 import type { LiveConfig } from '../config/public-config.ts'
 import { recordMutationDiagnostics } from '../diagnostics/operations.ts'
+import { canvasDiagnostics } from '../diagnostics/metrics.ts'
 import { CanvasOperationTracker } from './operation-model.ts'
 import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 
@@ -24,6 +25,9 @@ type CursorPayload = {
 }
 
 const ALLOWED_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame'])
+const OPERATION_FLUSH_DELAY_MS = 0
+const RECONNECT_FLUSH_DELAY_MS = 120
+const LONG_OPERATION_CHECKPOINT_MS = 1500
 const UI_OPTIONS = {
   canvasActions: {
     changeViewBackgroundColor: false,
@@ -161,15 +165,36 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const channelRef = useRef<RealtimeChannel | null>(null)
   const shadowRef = useRef(new Map<string, VersionStamp>())
   const observedSceneRef = useRef(new Map<string, VersionStamp>())
+  // pendingRef tracks the newest local unsynchronized state for conflict protection.
+  // durablePendingRef contains only mutation-final states (or explicit long-op
+  // checkpoints) that are allowed to cross the network durability boundary.
   const pendingRef = useRef(new Map<string, SceneElement>())
+  const durablePendingRef = useRef(new Map<string, SceneElement>())
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const checkpointTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const writeInFlightRef = useRef(false)
+  const continuousOperationRef = useRef<'pointer' | 'text' | null>(null)
+  const durabilityCommitRef = useRef<() => void>(() => {})
+  const armCheckpointRef = useRef<() => void>(() => {})
+  const clearCheckpointRef = useRef<() => void>(() => {})
   const applyingRemote = useRef(false)
   const collaboratorsRef = useRef(new Map<SocketId, Collaborator>())
   const cursorAt = useRef(0)
   const editingTextRef = useRef<string | null>(null)
   const operationTracker = useMemo(() => new CanvasOperationTracker<SceneElement>({
     deviceId: () => identityRef.current.deviceId,
-    onCommit: recordMutationDiagnostics,
+    onCommit: mutation => {
+      recordMutationDiagnostics(mutation)
+      for (const change of mutation.changes) {
+        const element = change.type === 'delete' ? change.tombstone : change.element
+        const nextStamp = stampOf(element)
+        if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
+        const queued = durablePendingRef.current.get(element.id)
+        if (!queued || isNewerVersion(nextStamp, stampOf(queued))) durablePendingRef.current.set(element.id, element)
+      }
+      canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+      durabilityCommitRef.current()
+    },
   }), [])
 
   const supabase = useMemo(() => createClient(config.supabaseUrl, config.supabaseKey, {
@@ -198,10 +223,22 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     // This only queues memory state; it never starts an unloading-page request.
     for (const element of editor.getSceneElementsIncludingDeleted()) {
       if (!isAllowedElement(element) || !isNewerVersion(stampOf(element), shadowRef.current.get(element.id))) continue
+      const nextStamp = stampOf(element)
+      const observed = observedSceneRef.current.get(element.id)
+      if (isNewerVersion(nextStamp, observed)) {
+        operationTracker.record(element, observed !== undefined)
+        observedSceneRef.current.set(element.id, nextStamp)
+      }
       const queued = pendingRef.current.get(element.id)
-      if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
+      if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
+      const durable = durablePendingRef.current.get(element.id)
+      if (!durable || isNewerVersion(nextStamp, stampOf(durable))) durablePendingRef.current.set(element.id, element)
     }
-  }, [])
+    canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+    continuousOperationRef.current = null
+    clearCheckpointRef.current()
+    operationTracker.flush()
+  }, [operationTracker])
 
   useEffect(() => { identityRef.current = identity }, [identity])
   useEffect(() => { apiRef.current = api }, [api])
@@ -211,9 +248,16 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (statusRef.current !== 'Live' || editingTextRef.current) return
       const target = event.target
       if (!(target instanceof HTMLCanvasElement) || !target.matches('canvas.excalidraw__canvas.interactive')) return
+      continuousOperationRef.current = 'pointer'
       operationTracker.beginPointer()
+      armCheckpointRef.current()
     }
-    const pointerEnd = () => operationTracker.endPointer()
+    const pointerEnd = () => {
+      if (continuousOperationRef.current !== 'pointer') return
+      continuousOperationRef.current = null
+      clearCheckpointRef.current()
+      operationTracker.endPointer()
+    }
     document.addEventListener('pointerdown', pointerDown, true)
     document.addEventListener('pointerup', pointerEnd, true)
     document.addEventListener('pointercancel', pointerEnd, true)
@@ -232,6 +276,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       pageActiveRef.current = false
       transition(navigator.onLine ? 'Reconnecting' : 'Offline')
       if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
+      if (checkpointTimer.current) { clearTimeout(checkpointTimer.current); checkpointTimer.current = null }
       setConnectionAttempt(value => value + 1)
     }
     const show = () => {
@@ -248,6 +293,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       window.removeEventListener('pageshow', show)
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
       if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
+      if (checkpointTimer.current) { clearTimeout(checkpointTimer.current); checkpointTimer.current = null }
     }
   }, [captureCurrentScene, transition])
   useEffect(() => { document.documentElement.dataset.theme = resolvedTheme }, [resolvedTheme])
@@ -290,6 +336,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (!element) continue
       const nextStamp = { version: row.version, versionNonce: row.version_nonce, isDeleted: row.is_deleted }
       const pending = pendingRef.current.get(row.id)
+      const durablePending = durablePendingRef.current.get(row.id)
 
       // Keep the operation observer aligned with authoritative remote state, but
       // never move it backwards over a newer local element still awaiting ACK.
@@ -299,8 +346,27 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       // Equal or losing pending work has been accepted/superseded and must not
       // survive merely because this authoritative row was already observed.
       if (pending && !shouldKeepPending(stampOf(pending), nextStamp)) pendingRef.current.delete(row.id)
+      if (durablePending && !shouldKeepPending(stampOf(durablePending), nextStamp)) durablePendingRef.current.delete(row.id)
+      canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
 
       if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue
+
+      // A row that exactly acknowledges the immutable Excalidraw version already
+      // rendered locally only needs to advance the authoritative watermark.
+      // Reapplying that same element through updateScene can make Excalidraw emit
+      // a follow-up version and turn a server ACK into a second local mutation.
+      if (!replace) {
+        const currentLocal = localElements.find(candidate => candidate.id === row.id)
+        if (currentLocal) {
+          const currentStamp = stampOf(currentLocal)
+          if (currentStamp.version === nextStamp.version
+            && currentStamp.versionNonce === nextStamp.versionNonce
+            && currentStamp.isDeleted === nextStamp.isDeleted) {
+            shadowRef.current.set(row.id, nextStamp)
+            continue
+          }
+        }
+      }
 
       const survivingPending = pendingRef.current.get(row.id)
       if (!replace && survivingPending && shouldKeepPending(stampOf(survivingPending), nextStamp)) {
@@ -331,60 +397,150 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (isCurrent()) applyRows(data ?? [], pendingRef.current.size === 0)
   }, [applyRows, config.tableName, supabase])
 
-  const flushPending = useCallback(async () => {
-    if (!pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || pendingRef.current.size === 0) return
-    const elements = Array.from(pendingRef.current.values())
-    pendingRef.current.clear()
-    const rows = elements.map(element => ({
-      id: element.id,
-      version: element.version,
-      version_nonce: element.versionNonce,
-      is_deleted: element.isDeleted,
-      element,
-      updated_by: identityRef.current.deviceId,
-    }))
-    const ids = rows.map(row => row.id)
-    const { error } = await supabase.from(config.tableName).upsert(rows, { onConflict: 'id' })
-    if (error) {
-      for (const element of elements) {
-        const queued = pendingRef.current.get(element.id)
-        if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) pendingRef.current.set(element.id, element)
+  const flushDurablePending = useCallback(async () => {
+    if (writeInFlightRef.current || !pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || durablePendingRef.current.size === 0) return
+    writeInFlightRef.current = true
+    const elements = Array.from(durablePendingRef.current.values())
+    durablePendingRef.current.clear()
+    canvasDiagnostics.gauge('durableQueueElements', 0)
+    try {
+      const rows = elements.map(element => ({
+        id: element.id,
+        version: element.version,
+        version_nonce: element.versionNonce,
+        is_deleted: element.isDeleted,
+        element,
+        updated_by: identityRef.current.deviceId,
+      }))
+      const ids = rows.map(row => row.id)
+      const { error } = await supabase.from(config.tableName).upsert(rows, { onConflict: 'id' })
+      if (error) {
+        for (const element of elements) {
+          const queued = durablePendingRef.current.get(element.id)
+          if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
+        }
+        canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+        if (!pageActiveRef.current) return
+        if (!navigator.onLine) transition('Offline')
+        notify(`Canvas could not save: ${error.message}`)
+        if (navigator.onLine) {
+          try {
+            await loadAuthoritative()
+          } catch {
+            // Keep the durable queue intact. The bounded retry below will try again.
+          }
+        }
+        if (pageActiveRef.current && navigator.onLine && durablePendingRef.current.size && !flushTimer.current) {
+          flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushDurablePending() }, 1200)
+        }
+        return
       }
       if (!pageActiveRef.current) return
-      if (!navigator.onLine) transition('Offline')
-      notify(`Canvas could not save: ${error.message}`)
-      if (navigator.onLine) {
-        try {
-          await loadAuthoritative()
-        } catch {
-          // Keep the local queue intact. The normal retry path below will try again.
+      const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').in('id', ids)
+      if (!pageActiveRef.current) return
+      if (readError) {
+        notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
+        return
+      }
+      applyRows(data ?? [])
+    } catch (error) {
+      // Supabase normally reports write failures through the returned `error`
+      // object, but a transport/runtime failure can reject the request instead.
+      // Requeue the exact attempted versions so a thrown failure cannot drop a
+      // completed mutation between the durability boundary and retry.
+      for (const element of elements) {
+        const queued = durablePendingRef.current.get(element.id)
+        if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
+      }
+      canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+      if (pageActiveRef.current) {
+        if (!navigator.onLine) transition('Offline')
+        const message = error && typeof error === 'object' && 'message' in error
+          ? String((error as { message: unknown }).message)
+          : String(error)
+        notify(`Canvas could not save: ${message}`)
+        if (navigator.onLine) {
+          try {
+            await loadAuthoritative()
+          } catch {
+            // Keep the durable queue intact. The retry scheduled below owns recovery.
+          }
+        }
+        if (navigator.onLine && durablePendingRef.current.size && !flushTimer.current) {
+          flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushDurablePending() }, 1200)
         }
       }
-      if (pageActiveRef.current && navigator.onLine && pendingRef.current.size && !flushTimer.current) {
-        flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushPending() }, 1200)
+    } finally {
+      writeInFlightRef.current = false
+      if (pageActiveRef.current && statusRef.current === 'Live' && navigator.onLine && durablePendingRef.current.size && !flushTimer.current) {
+        flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushDurablePending() }, OPERATION_FLUSH_DELAY_MS)
       }
-      return
     }
-    if (!pageActiveRef.current) return
-    const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element').in('id', ids)
-    if (!pageActiveRef.current) return
-    if (readError) {
-      notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
-      return
-    }
-    applyRows(data ?? [])
   }, [applyRows, config.tableName, loadAuthoritative, notify, supabase, transition])
 
-  const scheduleFlush = useCallback(() => {
+  const scheduleFlush = useCallback((delayMs = RECONNECT_FLUSH_DELAY_MS) => {
     if (!pageActiveRef.current || flushTimer.current) return
     flushTimer.current = setTimeout(() => {
       flushTimer.current = null
-      void flushPending()
-    }, 120)
-  }, [flushPending])
+      void flushDurablePending()
+    }, delayMs)
+  }, [flushDurablePending])
+
+  const clearLongOperationCheckpoint = useCallback(() => {
+    if (!checkpointTimer.current) return
+    clearTimeout(checkpointTimer.current)
+    checkpointTimer.current = null
+  }, [])
+
+  const armLongOperationCheckpoint = useCallback(() => {
+    clearLongOperationCheckpoint()
+    const checkpoint = () => {
+      checkpointTimer.current = null
+      if (!pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || !continuousOperationRef.current) return
+      const snapshot = operationTracker.snapshotActive()
+      if (snapshot) {
+        let checkpointQueued = false
+        for (const change of snapshot.changes) {
+          const element = change.type === 'delete' ? change.tombstone : change.element
+          const nextStamp = stampOf(element)
+          if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
+          const queued = durablePendingRef.current.get(element.id)
+          if (!queued || isNewerVersion(nextStamp, stampOf(queued))) {
+            durablePendingRef.current.set(element.id, element)
+            checkpointQueued = true
+          }
+        }
+        if (checkpointQueued) {
+          canvasDiagnostics.increment('durabilityCheckpoints')
+          canvasDiagnostics.gauge('lastDurabilityCheckpointSource', snapshot.source)
+          canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+          void flushDurablePending()
+        }
+      }
+      if (continuousOperationRef.current) checkpointTimer.current = setTimeout(checkpoint, LONG_OPERATION_CHECKPOINT_MS)
+    }
+    checkpointTimer.current = setTimeout(checkpoint, LONG_OPERATION_CHECKPOINT_MS)
+  }, [clearLongOperationCheckpoint, flushDurablePending, operationTracker])
 
   useEffect(() => {
-    if (status === 'Live' && pendingRef.current.size) scheduleFlush()
+    durabilityCommitRef.current = () => {
+      clearLongOperationCheckpoint()
+      if (!durablePendingRef.current.size) return
+      canvasDiagnostics.increment('durabilityBoundaryFlushes')
+      scheduleFlush(OPERATION_FLUSH_DELAY_MS)
+    }
+    armCheckpointRef.current = armLongOperationCheckpoint
+    clearCheckpointRef.current = clearLongOperationCheckpoint
+    return () => {
+      durabilityCommitRef.current = () => {}
+      armCheckpointRef.current = () => {}
+      clearCheckpointRef.current = () => {}
+      clearLongOperationCheckpoint()
+    }
+  }, [armLongOperationCheckpoint, clearLongOperationCheckpoint, scheduleFlush])
+
+  useEffect(() => {
+    if (status === 'Live' && durablePendingRef.current.size && !continuousOperationRef.current) scheduleFlush()
   }, [scheduleFlush, status])
 
   const syncPresence = useCallback((channel: RealtimeChannel) => {
@@ -478,7 +634,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
                 if (!stillCurrent()) return
                 retryDelayRef.current = 1200
                 transition('Live')
-                if (pendingRef.current.size) scheduleFlush()
+                if (durablePendingRef.current.size) scheduleFlush()
               })
               .catch(error => {
                 if (!stillCurrent()) return
@@ -522,7 +678,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const nextEditingTextId = appState.editingTextElement?.id ?? null
     if (nextEditingTextId && nextEditingTextId !== previousEditingTextId) {
       if (previousEditingTextId) operationTracker.endText()
+      continuousOperationRef.current = 'text'
       operationTracker.beginText()
+      armCheckpointRef.current()
     }
     const allowed = elements.filter(isAllowedElement)
     if (allowed.length !== elements.length) {
@@ -539,17 +697,21 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         observedSceneRef.current.set(element.id, nextStamp)
       }
 
-      // Phase 2 deliberately leaves the existing durable persistence cadence
-      // untouched. Phase 3 will route final CanvasMutation changes into this
-      // queue once operation boundaries have been proven independently.
+      // Keep intermediate local states in memory so remote echoes cannot
+      // clobber an active gesture. Phase 3 changes the durability boundary, not
+      // this conflict-protection watermark: network persistence starts only
+      // when the logical CanvasMutation commits (or at a long-op checkpoint).
       if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
       const queued = pendingRef.current.get(element.id)
       if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
     }
-    if (previousEditingTextId && !nextEditingTextId) operationTracker.endText()
+    if (previousEditingTextId && !nextEditingTextId) {
+      continuousOperationRef.current = null
+      clearCheckpointRef.current()
+      operationTracker.endText()
+    }
     editingTextRef.current = nextEditingTextId
-    if (pendingRef.current.size) scheduleFlush()
-  }, [notify, operationTracker, scheduleFlush])
+  }, [notify, operationTracker])
 
   const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return
