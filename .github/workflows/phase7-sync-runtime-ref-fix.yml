@@ -1,4 +1,4 @@
-name: Phase 7 sync runtime ref fix
+name: Phase 7 Saved invariant fix
 on:
   push:
     branches: [phase7/sync-health-ux]
@@ -17,17 +17,26 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Make runtime ref synchronous
+      - name: Tighten Saved invariants
         run: |
           python3 <<'PY'
           from pathlib import Path
           path = Path('app/canvas/SupabaseCanvasEditor.tsx')
           text = path.read_text()
-          old = """  const patchSyncRuntime = useCallback((patch: Partial<SyncRuntimeState>) => {\n    setSyncRuntime(current => {\n      const next = { ...current, ...patch }\n      syncRuntimeRef.current = next\n      if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return current\n      return next\n    })\n  }, [])\n"""
-          new = """  const patchSyncRuntime = useCallback((patch: Partial<SyncRuntimeState>) => {\n    const current = syncRuntimeRef.current\n    const next = { ...current, ...patch }\n    syncRuntimeRef.current = next\n    if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return\n    setSyncRuntime(next)\n  }, [])\n"""
-          if text.count(old) != 1:
-              raise SystemExit(f'anchor count={text.count(old)}')
-          path.write_text(text.replace(old, new, 1))
+          replacements = [
+            ("""      canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)\n      patchSyncRuntime({ queuedChanges: durablePendingRef.current.size })\n      durabilityCommitRef.current()\n""",
+             """      canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)\n      patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, localEditing: false })\n      durabilityCommitRef.current()\n"""),
+            ("""    patchSyncRuntime({ queuedChanges: durablePendingRef.current.size })\n    if (!changed) return\n""",
+             """    const durableQueueSize = durablePendingRef.current.size\n    patchSyncRuntime({\n      queuedChanges: durableQueueSize,\n      ...(durableQueueSize === 0 && !writeInFlightRef.current && syncRuntimeRef.current.saveIssue === 'retrying' ? { saveIssue: 'none' as const } : {}),\n    })\n    if (!changed) return\n"""),
+            ("""      const queued = pendingRef.current.get(element.id)\n      if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)\n    }\n    const activeSnapshot = operationTracker.snapshotActive()\n""",
+             """      const queued = pendingRef.current.get(element.id)\n      if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)\n      patchSyncRuntime({ localEditing: true })\n    }\n    const activeSnapshot = operationTracker.snapshotActive()\n"""),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'anchor count={count}: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
           PY
       - run: npm ci
       - run: npm run lint
@@ -40,5 +49,5 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add app/canvas/SupabaseCanvasEditor.tsx
           git diff --cached --check
-          git commit -m "Phase 7: keep sync runtime ref synchronous"
+          git commit -m "Phase 7: enforce exact Saved state"
           git push origin HEAD:phase7/sync-health-ux
