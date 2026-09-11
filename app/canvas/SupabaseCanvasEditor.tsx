@@ -415,7 +415,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     )
     applyingRemote.current = true
     editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
-    sceneVersionIndexRef.current.mark(accepted, isAllowedElement)
+    // Ephemeral previews are intentionally not authoritative scene-index state.
+    // Their delayed onChange callbacks are quarantined below, so the index can
+    // remain anchored to the last local/authoritative immutable version.
     queueMicrotask(() => { applyingRemote.current = false })
     canvasDiagnostics.increment('previewBroadcastsReceived')
     canvasDiagnostics.increment('previewElementsReceived', accepted.length)
@@ -624,6 +626,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
             && currentStamp.versionNonce === nextStamp.versionNonce
             && currentStamp.isDeleted === nextStamp.isDeleted) {
             shadowRef.current.set(row.id, nextStamp)
+            sceneVersionIndexRef.current.mark([currentLocal], isAllowedElement)
             continue
           }
         }
@@ -1017,11 +1020,20 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       armCheckpointRef.current()
     }
     const observationStarted = performance.now()
-    const observation = sceneVersionIndexRef.current.observe(elements, isAllowedElement)
+    const observationNow = Date.now()
+    const observation = sceneVersionIndexRef.current.observe(
+      elements,
+      isAllowedElement,
+      element => (previewEchoStampsRef.current.get(element.id)?.get(previewStampKey(stampOf(element))) ?? 0) > observationNow,
+    )
     canvasDiagnostics.increment('sceneObservationCallbacks')
     canvasDiagnostics.increment('sceneElementsScanned', observation.scanned)
     canvasDiagnostics.increment('sceneElementsStampSkipped', observation.skipped)
     canvasDiagnostics.increment('sceneElementsChanged', observation.changed.length)
+    if (observation.ignored) {
+      canvasDiagnostics.increment('previewEchoesSuppressed', observation.ignored)
+      canvasDiagnostics.increment('sceneElementsIgnored', observation.ignored)
+    }
     canvasDiagnostics.sample('sceneObservationMs', performance.now() - observationStarted)
     if (observation.hasDisallowed) {
       const allowed = elements.filter(isAllowedElement)
