@@ -97,26 +97,39 @@ function installRealtimeMetrics(): () => void {
   return () => { window.WebSocket = NativeWebSocket }
 }
 
+function displayConnectionState(raw: string): string {
+  return raw ? `${raw.slice(0, 1).toUpperCase()}${raw.slice(1)}` : ''
+}
+
 function installConnectionMetrics(): () => void {
-  const startedAt = performance.now()
-  let last = ''
+  let lastConnection = ''
+  let lastSyncHealth = ''
   let everLive = false
   let reconnectStartedAt: number | null = null
   const read = () => {
-    const state = document.querySelector('.connection')?.textContent?.trim() ?? ''
-    if (!state || state === last) return
-    const previous = last
-    last = state
-    canvasDiagnostics.gauge('connectionState', state)
-    if (state === 'Live') {
-      if (!everLive) canvasDiagnostics.sample('initialHydrationMs', performance.now() - startedAt)
-      else if (reconnectStartedAt !== null) canvasDiagnostics.sample('reconnectMs', performance.now() - reconnectStartedAt)
+    const indicator = document.querySelector<HTMLElement>('[data-connection-state]')
+    const connection = displayConnectionState(indicator?.dataset.connectionState ?? '')
+    const syncHealth = indicator?.dataset.syncHealth ?? ''
+
+    if (syncHealth && syncHealth !== lastSyncHealth) {
+      lastSyncHealth = syncHealth
+      canvasDiagnostics.gauge('syncHealth', syncHealth)
+    }
+
+    if (!connection || connection === lastConnection) return
+    const previous = lastConnection
+    lastConnection = connection
+    canvasDiagnostics.gauge('connectionState', connection)
+    if (connection === 'Live') {
+      if (everLive && reconnectStartedAt !== null) canvasDiagnostics.sample('reconnectMs', performance.now() - reconnectStartedAt)
       everLive = true
       reconnectStartedAt = null
-    } else if (everLive && previous === 'Live' && reconnectStartedAt === null) reconnectStartedAt = performance.now()
+    } else if (everLive && previous === 'Live' && reconnectStartedAt === null) {
+      reconnectStartedAt = performance.now()
+    }
   }
   const observer = new MutationObserver(read)
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true })
+  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-connection-state', 'data-sync-health'] })
   read()
   return () => observer.disconnect()
 }
