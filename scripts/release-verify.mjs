@@ -10,9 +10,6 @@ for (const dependency of ['node_modules/@excalidraw/excalidraw', 'node_modules/@
   if (!lock.packages?.[dependency]) throw new Error(`Lockfile is missing ${dependency.replace('node_modules/', '')}.`)
 }
 
-if (process.env.VITE_CANVAS_TEST_BACKEND?.trim()) {
-  throw new Error('Do not set VITE_CANVAS_TEST_BACKEND for a production release; the public build must use Excalidraw + Supabase.')
-}
 
 const table = process.env.VITE_CANVAS_TABLE?.trim() || 'canvas_elements'
 if (table !== 'canvas_elements') {

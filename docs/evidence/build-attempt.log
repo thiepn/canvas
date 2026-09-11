@@ -1,5 +1,0 @@
-
-> canvas@1.0.0-rc.1 build
-> vite build && node scripts/audit-build.mjs
-
-sh: 1: vite: not found

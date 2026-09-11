@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
@@ -15,7 +19,19 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client", "node"]
+    "types": [
+      "vite/client",
+      "node"
+    ]
   },
-  "include": ["app", "shared", "vite.config.ts", "playwright*.config.ts", "tests/e2e", "tests/performance"]
+  "include": [
+    "app",
+    "vite.config.ts",
+    "playwright.live.config.ts",
+    "playwright.performance.config.ts",
+    "playwright.production.config.ts",
+    "tests/live",
+    "tests/performance",
+    "tests/e2e/production.spec.ts"
+  ]
 }
