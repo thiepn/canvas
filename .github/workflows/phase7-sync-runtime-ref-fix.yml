@@ -1,0 +1,44 @@
+name: Phase 7 sync runtime ref fix
+on:
+  push:
+    branches: [phase7/sync-health-ux]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: phase7/sync-health-ux
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Make runtime ref synchronous
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('app/canvas/SupabaseCanvasEditor.tsx')
+          text = path.read_text()
+          old = """  const patchSyncRuntime = useCallback((patch: Partial<SyncRuntimeState>) => {\n    setSyncRuntime(current => {\n      const next = { ...current, ...patch }\n      syncRuntimeRef.current = next\n      if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return current\n      return next\n    })\n  }, [])\n"""
+          new = """  const patchSyncRuntime = useCallback((patch: Partial<SyncRuntimeState>) => {\n    const current = syncRuntimeRef.current\n    const next = { ...current, ...patch }\n    syncRuntimeRef.current = next\n    if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return\n    setSyncRuntime(next)\n  }, [])\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'anchor count={text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Commit fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/canvas/SupabaseCanvasEditor.tsx
+          git diff --cached --check
+          git commit -m "Phase 7: keep sync runtime ref synchronous"
+          git push origin HEAD:phase7/sync-health-ux
