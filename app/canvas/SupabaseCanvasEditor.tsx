@@ -695,6 +695,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       pageSize: ANTI_ENTROPY_PAGE_SIZE,
       isCurrent,
       fetchPage: async (afterRevision, limit) => {
+        const queryStartedAt = performance.now()
         const { data, error } = await supabase.from(config.tableName)
           .select('id,version,version_nonce,is_deleted,element,revision')
           .gt('revision', afterRevision)
@@ -702,6 +703,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           .limit(limit)
           .abortSignal(AbortSignal.timeout(15_000))
         if (error) throw error
+        canvasDiagnostics.sample('hydrationQueryMs', performance.now() - queryStartedAt)
         return (data ?? []).map(normalizeRow).filter((row): row is SyncRow => row !== null)
       },
       onPage: rows => {
@@ -716,6 +718,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       canvasDiagnostics.gauge('initialHydrationPages', result.pages)
       canvasDiagnostics.gauge('initialHydrationRows', result.rows)
       canvasDiagnostics.increment('initialHydrationSceneCommits')
+      canvasDiagnostics.sample('initialHydrationMs', performance.now() - startedAt)
     }
     reconciliationCursorRef.current = result.cursor
     canvasDiagnostics.gauge('reconciliationCursor', result.cursor)

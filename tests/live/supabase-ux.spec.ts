@@ -139,11 +139,13 @@ test('offline state pauses editing and returns to Live after reconnect', async (
 
   await context.setOffline(true)
   await expect(page.getByText('Offline', { exact: true })).toBeVisible()
-  await expect(page.getByText(/editing is paused until the shared canvas is synchronized/i)).toBeVisible()
+  await expect(page.locator('[data-sync-health="offline"]')).toBeVisible()
+  await expect(page.locator('.network-banner')).toContainText('Editing is paused')
   await expect(page.getByRole('button', { name: 'Frame tool' })).toBeDisabled()
 
   await context.setOffline(false)
   await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('[data-sync-health="saved"]')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
 })
 
