@@ -1,0 +1,58 @@
+name: Phase 7 diagnostics and offline regression fix
+on:
+  push:
+    branches: [phase7/sync-health-ux]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: phase7/sync-health-ux
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Restore hydration timing diagnostics and update offline assertion
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          editor = Path('app/canvas/SupabaseCanvasEditor.tsx')
+          text = editor.read_text()
+          old = """      fetchPage: async (afterRevision, limit) => {\n        const { data, error } = await supabase.from(config.tableName)\n          .select('id,version,version_nonce,is_deleted,element,revision')\n          .gt('revision', afterRevision)\n          .order('revision', { ascending: true })\n          .limit(limit)\n          .abortSignal(AbortSignal.timeout(15_000))\n        if (error) throw error\n        return (data ?? []).map(normalizeRow).filter((row): row is SyncRow => row !== null)\n      },\n"""
+          new = """      fetchPage: async (afterRevision, limit) => {\n        const queryStartedAt = performance.now()\n        const { data, error } = await supabase.from(config.tableName)\n          .select('id,version,version_nonce,is_deleted,element,revision')\n          .gt('revision', afterRevision)\n          .order('revision', { ascending: true })\n          .limit(limit)\n          .abortSignal(AbortSignal.timeout(15_000))\n        if (error) throw error\n        canvasDiagnostics.sample('hydrationQueryMs', performance.now() - queryStartedAt)\n        return (data ?? []).map(normalizeRow).filter((row): row is SyncRow => row !== null)\n      },\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'fetchPage anchor count={text.count(old)}')
+          text = text.replace(old, new, 1)
+          old = """      canvasDiagnostics.gauge('initialHydrationRows', result.rows)\n      canvasDiagnostics.increment('initialHydrationSceneCommits')\n    }\n"""
+          new = """      canvasDiagnostics.gauge('initialHydrationRows', result.rows)\n      canvasDiagnostics.increment('initialHydrationSceneCommits')\n      canvasDiagnostics.sample('initialHydrationMs', performance.now() - startedAt)\n    }\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'initial timing anchor count={text.count(old)}')
+          editor.write_text(text.replace(old, new, 1))
+
+          ux = Path('tests/live/supabase-ux.spec.ts')
+          text = ux.read_text()
+          old = """  await context.setOffline(true)\n  await expect(page.getByText('Offline', { exact: true })).toBeVisible()\n  await expect(page.getByText(/editing is paused until the shared canvas is synchronized/i)).toBeVisible()\n  await expect(page.getByRole('button', { name: 'Frame tool' })).toBeDisabled()\n\n  await context.setOffline(false)\n  await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 30_000 })\n"""
+          new = """  await context.setOffline(true)\n  await expect(page.getByText('Offline', { exact: true })).toBeVisible()\n  await expect(page.locator('[data-sync-health=\"offline\"]')).toBeVisible()\n  await expect(page.locator('.network-banner')).toContainText('Editing is paused')\n  await expect(page.getByRole('button', { name: 'Frame tool' })).toBeDisabled()\n\n  await context.setOffline(false)\n  await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 30_000 })\n  await expect(page.locator('[data-sync-health=\"saved\"]')).toBeVisible({ timeout: 30_000 })\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'offline test anchor count={text.count(old)}')
+          ux.write_text(text.replace(old, new, 1))
+          PY
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Commit fixes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/canvas/SupabaseCanvasEditor.tsx tests/live/supabase-ux.spec.ts
+          git diff --cached --check
+          git commit -m "Phase 7: restore diagnostics and align offline regression"
+          git push origin HEAD:phase7/sync-health-ux
