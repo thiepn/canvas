@@ -16,6 +16,7 @@ export type SceneObservation<T> = {
   changed: T[]
   scanned: number
   skipped: number
+  ignored: number
   hasDisallowed: boolean
 }
 
@@ -33,18 +34,32 @@ function sameStamp<T extends SceneIndexElement>(entry: SceneIndexEntry<T>, eleme
  * work can be restricted to elements whose immutable version stamp changed.
  * A stamp snapshot is stored separately from the object reference so this
  * remains correct even if a caller ever mutates an object in place.
+ *
+ * `ignore` is deliberately evaluated before the index is mutated. It is used
+ * for known remote/quarantined versions (for example an ephemeral preview
+ * callback that arrives after authority has already been restored). Such an
+ * echo must not move the local observation index away from authoritative state.
  */
 export class SceneVersionIndex<T extends SceneIndexElement> {
   private readonly entries = new Map<string, SceneIndexEntry<T>>()
 
-  observe(elements: readonly T[], allowed: (element: T) => boolean): SceneObservation<T> {
+  observe(
+    elements: readonly T[],
+    allowed: (element: T) => boolean,
+    ignore: (element: T) => boolean = () => false,
+  ): SceneObservation<T> {
     const changed: T[] = []
     let skipped = 0
+    let ignored = 0
     let hasDisallowed = false
 
     for (const element of elements) {
       if (!allowed(element)) {
         hasDisallowed = true
+        continue
+      }
+      if (ignore(element)) {
+        ignored += 1
         continue
       }
       const previous = this.entries.get(element.id)
@@ -63,7 +78,7 @@ export class SceneVersionIndex<T extends SceneIndexElement> {
       changed.push(element)
     }
 
-    return { changed, scanned: elements.length, skipped, hasDisallowed }
+    return { changed, scanned: elements.length, skipped, ignored, hasDisallowed }
   }
 
   mark(elements: readonly T[], allowed: (element: T) => boolean = () => true): void {
