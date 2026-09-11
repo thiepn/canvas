@@ -11,6 +11,7 @@ import { recordMutationDiagnostics } from '../diagnostics/operations.ts'
 import { canvasDiagnostics } from '../diagnostics/metrics.ts'
 import { CanvasOperationTracker } from './operation-model.ts'
 import { readRevisionPages } from './revision-sync.ts'
+import { SceneVersionIndex, indexSceneById } from './scene-index.ts'
 import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 import {
   CANVAS_PREVIEW_TTL_MS,
@@ -230,6 +231,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const shadowRef = useRef(new Map<string, VersionStamp>())
   const authoritativeElementsRef = useRef(new Map<string, SceneElement>())
   const observedSceneRef = useRef(new Map<string, VersionStamp>())
+  const sceneVersionIndexRef = useRef(new SceneVersionIndex<SceneElement>())
   const previewSessionIdRef = useRef(globalThis.crypto?.randomUUID?.() ?? `preview-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const previewSequenceRef = useRef(0)
   const previewSequenceGateRef = useRef(new PreviewSequenceGate())
@@ -299,9 +301,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const editor = apiRef.current
     if (!editor || records.length === 0) return
     const current = editor.getSceneElementsIncludingDeleted()
+    const currentById = indexSceneById(current)
     const replacements = new Map<string, SceneElement | null>()
     for (const record of records) {
-      const visible = current.find(element => element.id === record.element.id)
+      const visible = currentById.get(record.element.id)
       if (!visible || pendingRef.current.has(record.element.id)) continue
       const visibleWasPreview = (previewEchoStampsRef.current.get(record.element.id)?.get(previewStampKey(stampOf(visible))) ?? 0) > Date.now()
       if (!visibleWasPreview) continue
@@ -316,6 +319,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     applyingRemote.current = true
     editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER })
+    sceneVersionIndexRef.current.replace(next, isAllowedElement)
     queueMicrotask(() => { applyingRemote.current = false })
   }, [])
 
@@ -411,6 +415,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     )
     applyingRemote.current = true
     editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
+    // Ephemeral previews are intentionally not authoritative scene-index state.
+    // Their delayed onChange callbacks are quarantined below, so the index can
+    // remain anchored to the last local/authoritative immutable version.
     queueMicrotask(() => { applyingRemote.current = false })
     canvasDiagnostics.increment('previewBroadcastsReceived')
     canvasDiagnostics.increment('previewElementsReceived', accepted.length)
@@ -560,11 +567,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (!editor || !pageActiveRef.current) return
     const rows = values.map(normalizeRow).filter((row): row is SyncRow => row !== null)
     const localElements = replace ? [] : editor.getSceneElementsIncludingDeleted()
+    const localById = indexSceneById(localElements)
     const remoteElements: SceneElement[] = []
     if (replace) {
       shadowRef.current.clear()
       authoritativeElementsRef.current.clear()
       observedSceneRef.current.clear()
+      sceneVersionIndexRef.current.clear()
       remotePreviewRef.current.clear()
       previewEchoStampsRef.current.clear()
       previewSequenceGateRef.current.clear()
@@ -610,13 +619,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       // Reapplying that same element through updateScene can make Excalidraw emit
       // a follow-up version and turn a server ACK into a second local mutation.
       if (!replace) {
-        const currentLocal = localElements.find(candidate => candidate.id === row.id)
+        const currentLocal = localById.get(row.id)
         if (currentLocal) {
           const currentStamp = stampOf(currentLocal)
           if (currentStamp.version === nextStamp.version
             && currentStamp.versionNonce === nextStamp.versionNonce
             && currentStamp.isDeleted === nextStamp.isDeleted) {
             shadowRef.current.set(row.id, nextStamp)
+            sceneVersionIndexRef.current.mark([currentLocal], isAllowedElement)
             continue
           }
         }
@@ -641,6 +651,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     )
     applyingRemote.current = true
     editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
+    if (replace) sceneVersionIndexRef.current.replace(reconciled as SceneElement[], isAllowedElement)
+    else sceneVersionIndexRef.current.mark(remoteElements, isAllowedElement)
     queueMicrotask(() => { applyingRemote.current = false })
   }, [])
 
@@ -648,7 +660,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (!pageActiveRef.current) return
     const startedAt = performance.now()
     const startAfter = mode === 'reconcile' ? reconciliationCursorRef.current : 0
-    let firstPage = true
+    const initialRows: SyncRow[] = []
     const result = await readRevisionPages<SyncRow>({
       startAfter,
       pageSize: ANTI_ENTROPY_PAGE_SIZE,
@@ -665,11 +677,17 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       },
       onPage: rows => {
         if (!isCurrent()) return
-        applyRows(rows, mode === 'initial' && firstPage && pendingRef.current.size === 0)
-        firstPage = false
+        if (mode === 'initial') initialRows.push(...rows)
+        else applyRows(rows, false)
       },
     })
     if (!result.completed || !isCurrent()) return
+    if (mode === 'initial') {
+      applyRows(initialRows, pendingRef.current.size === 0)
+      canvasDiagnostics.gauge('initialHydrationPages', result.pages)
+      canvasDiagnostics.gauge('initialHydrationRows', result.rows)
+      canvasDiagnostics.increment('initialHydrationSceneCommits')
+    }
     reconciliationCursorRef.current = result.cursor
     canvasDiagnostics.gauge('reconciliationCursor', result.cursor)
     if (mode === 'reconcile') {
@@ -1001,14 +1019,31 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       operationTracker.beginText()
       armCheckpointRef.current()
     }
-    const allowed = elements.filter(isAllowedElement)
-    if (allowed.length !== elements.length) {
+    const observationStarted = performance.now()
+    const observationNow = Date.now()
+    const observation = sceneVersionIndexRef.current.observe(
+      elements,
+      isAllowedElement,
+      element => (previewEchoStampsRef.current.get(element.id)?.get(previewStampKey(stampOf(element))) ?? 0) > observationNow,
+    )
+    canvasDiagnostics.increment('sceneObservationCallbacks')
+    canvasDiagnostics.increment('sceneElementsScanned', observation.scanned)
+    canvasDiagnostics.increment('sceneElementsStampSkipped', observation.skipped)
+    canvasDiagnostics.increment('sceneElementsChanged', observation.changed.length)
+    if (observation.ignored) {
+      canvasDiagnostics.increment('previewEchoesSuppressed', observation.ignored)
+      canvasDiagnostics.increment('sceneElementsIgnored', observation.ignored)
+    }
+    canvasDiagnostics.sample('sceneObservationMs', performance.now() - observationStarted)
+    if (observation.hasDisallowed) {
+      const allowed = elements.filter(isAllowedElement)
       notify('Images, embeds, and file-backed objects are disabled on this canvas.')
       applyingRemote.current = true
       apiRef.current?.updateScene({ elements: allowed, captureUpdate: CaptureUpdateAction.NEVER })
+      sceneVersionIndexRef.current.replace(allowed, isAllowedElement)
       queueMicrotask(() => { applyingRemote.current = false })
     }
-    for (const element of allowed) {
+    for (const element of observation.changed) {
       const nextStamp = stampOf(element)
       const previewEchoExpiresAt = previewEchoStampsRef.current.get(element.id)?.get(previewStampKey(nextStamp)) ?? 0
       // A preview can emit onChange after updateScene's synchronous guard clears,

@@ -41,6 +41,9 @@ export function DiagnosticsOverlay() {
     <span>Anti-entropy p95 <b>{ms(snapshot, 'antiEntropyMs')}</b></span>
     <span>Reconcile cursor <b>{number(snapshot.gauges.reconciliationCursor)}</b></span>
     <span>Reconcile runs / failures <b>{snapshot.counters.antiEntropyRuns ?? 0} / {snapshot.counters.antiEntropyFailures ?? 0}</b></span>
+    <span>Scene observe p95 <b>{ms(snapshot, 'sceneObservationMs')}</b></span>
+    <span>Scene changed / skipped <b>{snapshot.counters.sceneElementsChanged ?? 0} / {snapshot.counters.sceneElementsStampSkipped ?? 0}</b></span>
+    <span>Hydration pages / commits <b>{number(snapshot.gauges.initialHydrationPages)} / {snapshot.counters.initialHydrationSceneCommits ?? 0}</b></span>
     <span>Writes / gesture <b>{number(snapshot.samples.writesPerGesture?.p95, 1)}</b></span>
     <span>Logical ops <b>{snapshot.counters.logicalMutations ?? 0}</b></span>
     <span>Boundary flushes <b>{snapshot.counters.durabilityBoundaryFlushes ?? 0}</b></span>
