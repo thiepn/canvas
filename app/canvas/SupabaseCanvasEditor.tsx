@@ -266,12 +266,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const cursorAt = useRef(0)
   const editingTextRef = useRef<string | null>(null)
   const patchSyncRuntime = useCallback((patch: Partial<SyncRuntimeState>) => {
-    setSyncRuntime(current => {
-      const next = { ...current, ...patch }
-      syncRuntimeRef.current = next
-      if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return current
-      return next
-    })
+    const current = syncRuntimeRef.current
+    const next = { ...current, ...patch }
+    syncRuntimeRef.current = next
+    if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return
+    setSyncRuntime(next)
   }, [])
   const operationTracker = useMemo(() => new CanvasOperationTracker<SceneElement>({
     deviceId: () => identityRef.current.deviceId,
