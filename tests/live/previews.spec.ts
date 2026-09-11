@@ -129,13 +129,12 @@ test('an abandoned remote preview expires back to the authoritative element with
     const authoritativeVersion = Number(stored.version)
     const previewX = authoritativeX + 180
 
-    // Seeing the rectangle is not enough to prove the peer has received its
-    // durable row: Phase 4 deliberately renders Broadcast previews before
-    // Postgres durability. Bring the peer forward so the normal focus
-    // anti-entropy path establishes authoritative state before we test expiry.
-    await pageB.bringToFront()
+    // Seeing the rectangle is not enough to prove the peer can restore it:
+    // Phase 4 intentionally renders Broadcast previews before Postgres durability.
+    // Wait until applyRows has accepted a durable row into the exact authority map
+    // used by preview expiry, then require the authoritative geometry to be visible.
     await expect.poll(
-      async () => Number((await diagnostics(pageB)).gauges.reconciliationCursor ?? 0),
+      async () => Number((await diagnostics(pageB)).counters.authoritativeRowsAccepted ?? 0),
       { timeout: 10_000 },
     ).toBeGreaterThan(0)
     await expect.poll(
