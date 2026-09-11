@@ -84,9 +84,11 @@ The distinction between `scanned` and `changed` is intentional. Canvas cannot pr
 1. three authoritative 500-row transport pages;
 2. exactly one initial Excalidraw scene commit;
 3. all 1,100 active elements to be present in the exported scene;
-4. a real local move of the seed rectangle to persist normally;
-5. the move callbacks to scan the scene but skip hundreds of unchanged immutable stamps and send only the changed element(s) through the expensive path;
+4. a fresh local rectangle created through the real Excalidraw toolbar/pointer path to persist normally;
+5. those creation callbacks to scan the scene but skip hundreds of unchanged immutable stamps and send only the changed/new element through the expensive path;
 6. zero page errors.
+
+A predecessor version of this test tried to move the original seed rectangle using fixed browser coordinates after reopening the 1,100-element world. That was rejected because browser coordinates are not a stable locator for an existing Excalidraw world element after hydration. The final test creates a fresh rectangle in a viewport region deliberately left empty by the seeded fixture, preserving the intended production-path assertion without depending on unstable viewport positioning.
 
 The existing operation-boundary durability, preview lane, anti-entropy, conflict, reconnect, lifecycle, E2E and compiled-production suites remain mandatory.
 
