@@ -12,6 +12,7 @@ import { canvasDiagnostics } from '../diagnostics/metrics.ts'
 import { CanvasOperationTracker } from './operation-model.ts'
 import { readRevisionPages } from './revision-sync.ts'
 import { SceneVersionIndex, indexSceneById } from './scene-index.ts'
+import { deriveSyncHealth, recoveryMessage, type CanvasConnectionState, type SaveIssue, type SyncHealth } from './sync-health.ts'
 import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 import {
   CANVAS_PREVIEW_TTL_MS,
@@ -25,7 +26,7 @@ import {
 } from './preview-lane.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
-type ConnectionState = 'Connecting' | 'Synchronizing' | 'Live' | 'Reconnecting' | 'Offline' | 'Error'
+type ConnectionState = CanvasConnectionState
 type PresencePerson = { deviceId: string; displayName: string; color: string }
 type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown; revision: number }
 type CursorPayload = {
@@ -44,6 +45,7 @@ type RemotePreview = {
   element: SceneElement
 }
 type QueuedPreview = { source: CanvasPreviewSource; elements: SceneElement[] }
+type SyncRuntimeState = { queuedChanges: number; writeInFlight: boolean; localEditing: boolean; saveIssue: SaveIssue }
 
 const ALLOWED_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame'])
 const OPERATION_FLUSH_DELAY_MS = 0
@@ -148,11 +150,12 @@ function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   URL.revokeObjectURL(url)
 }
 
-function LiveHeader({ api, identity, people, status, theme, rename, changeTheme }: {
+function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme }: {
   api: ExcalidrawImperativeAPI | null
   identity: Identity
   people: PresencePerson[]
   status: ConnectionState
+  syncHealth: SyncHealth
   theme: ThemePreference
   rename: (name: string) => void
   changeTheme: (theme: ThemePreference) => void
@@ -186,7 +189,7 @@ function LiveHeader({ api, identity, people, status, theme, rename, changeTheme 
   }
   return <header className="canvas-header live-canvas-header">
     <h1>Canvas<span className="brand-period" aria-hidden="true">.</span></h1>
-    <div role="status" aria-live="polite" className={`connection connection--${status.toLowerCase()}`}><span aria-hidden="true" />{status}</div>
+    <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span></div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
     <button type="button" className="icon-button frame-button" aria-label="Frame tool" title="Frame tool" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" /></button>
@@ -217,6 +220,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const [status, setStatus] = useState<ConnectionState>('Connecting')
   const statusRef = useRef<ConnectionState>('Connecting')
+  const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeState>({ queuedChanges: 0, writeInFlight: false, localEditing: false, saveIssue: 'none' })
+  const syncRuntimeRef = useRef(syncRuntime)
   const [connectionAttempt, setConnectionAttempt] = useState(0)
   const pageActiveRef = useRef(true)
   const channelCleanupRef = useRef<Promise<unknown>>(Promise.resolve())
@@ -260,6 +265,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const collaboratorsRef = useRef(new Map<SocketId, Collaborator>())
   const cursorAt = useRef(0)
   const editingTextRef = useRef<string | null>(null)
+  const patchSyncRuntime = useCallback((patch: Partial<SyncRuntimeState>) => {
+    setSyncRuntime(current => {
+      const next = { ...current, ...patch }
+      syncRuntimeRef.current = next
+      if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return current
+      return next
+    })
+  }, [])
   const operationTracker = useMemo(() => new CanvasOperationTracker<SceneElement>({
     deviceId: () => identityRef.current.deviceId,
     onCommit: mutation => {
@@ -275,15 +288,18 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         if (!queued || isNewerVersion(nextStamp, stampOf(queued))) durablePendingRef.current.set(element.id, element)
       }
       canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+      patchSyncRuntime({ queuedChanges: durablePendingRef.current.size })
       durabilityCommitRef.current()
     },
-  }), [])
+  }), [patchSyncRuntime])
 
   const supabase = useMemo(() => createClient(config.supabaseUrl, config.supabaseKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   }), [config.supabaseKey, config.supabaseUrl])
 
   const resolvedTheme = theme === 'system' ? systemDark ? 'dark' : 'light' : theme
+  const syncHealth = useMemo(() => deriveSyncHealth({ connection: status, ...syncRuntime }), [status, syncRuntime])
+  const recoveryNotice = recoveryMessage(syncHealth)
 
   const notify = useCallback((message: string) => {
     setNotice(message)
@@ -295,7 +311,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const transition = useCallback((next: ConnectionState) => {
     statusRef.current = next
     setStatus(next)
-  }, [])
+    if (next !== 'Live') patchSyncRuntime({ localEditing: false })
+  }, [patchSyncRuntime])
 
   const restoreRemotePreviews = useCallback((records: RemotePreview[]) => {
     const editor = apiRef.current
@@ -447,10 +464,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (!durable || isNewerVersion(nextStamp, stampOf(durable))) durablePendingRef.current.set(element.id, element)
     }
     canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+    patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, localEditing: false })
     continuousOperationRef.current = null
     clearCheckpointRef.current()
     operationTracker.flush()
-  }, [operationTracker])
+  }, [operationTracker, patchSyncRuntime])
 
   useEffect(() => { identityRef.current = identity }, [identity])
   useEffect(() => { apiRef.current = api }, [api])
@@ -486,11 +504,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (!(target instanceof HTMLCanvasElement) || !target.matches('canvas.excalidraw__canvas.interactive')) return
       continuousOperationRef.current = 'pointer'
       operationTracker.beginPointer()
+      patchSyncRuntime({ localEditing: true })
       armCheckpointRef.current()
     }
     const pointerEnd = () => {
       if (continuousOperationRef.current !== 'pointer') return
       continuousOperationRef.current = null
+      patchSyncRuntime({ localEditing: false })
       clearCheckpointRef.current()
       operationTracker.endPointer()
     }
@@ -502,7 +522,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       document.removeEventListener('pointerup', pointerEnd, true)
       document.removeEventListener('pointercancel', pointerEnd, true)
     }
-  }, [operationTracker])
+  }, [operationTracker, patchSyncRuntime])
   useEffect(() => {
     pageActiveRef.current = true
     const hide = () => {
@@ -648,6 +668,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       changed = true
     }
 
+    patchSyncRuntime({ queuedChanges: durablePendingRef.current.size })
     if (!changed) return
     const reconciled = reconcileElements(
       localElements as Parameters<typeof reconcileElements>[0],
@@ -659,7 +680,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (replace) sceneVersionIndexRef.current.replace(reconciled as SceneElement[], isAllowedElement)
     else sceneVersionIndexRef.current.mark(remoteElements, isAllowedElement)
     queueMicrotask(() => { applyingRemote.current = false })
-  }, [])
+  }, [patchSyncRuntime])
 
   const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true, mode: 'initial' | 'reconcile' = 'initial') => {
     if (!pageActiveRef.current) return
@@ -707,13 +728,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     canvasDiagnostics.increment('antiEntropyRuns')
     try {
       await loadAuthoritative(() => pageActiveRef.current && statusRef.current === 'Live' && navigator.onLine, 'reconcile')
+      if (syncRuntimeRef.current.saveIssue === 'unconfirmed' && !writeInFlightRef.current && durablePendingRef.current.size === 0) patchSyncRuntime({ saveIssue: 'none' })
       canvasDiagnostics.increment('antiEntropySuccesses')
     } catch {
       canvasDiagnostics.increment('antiEntropyFailures')
     } finally {
       reconciliationInFlightRef.current = false
     }
-  }, [loadAuthoritative])
+  }, [loadAuthoritative, patchSyncRuntime])
 
   const flushDurablePending = useCallback(async () => {
     if (writeInFlightRef.current || !pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || durablePendingRef.current.size === 0) return
@@ -721,6 +743,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const elements = Array.from(durablePendingRef.current.values())
     durablePendingRef.current.clear()
     canvasDiagnostics.gauge('durableQueueElements', 0)
+    patchSyncRuntime({ queuedChanges: 0, writeInFlight: true })
     try {
       const rows = elements.map(element => ({
         id: element.id,
@@ -738,6 +761,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
         }
         canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+        patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, saveIssue: 'retrying' })
         if (!pageActiveRef.current) return
         if (!navigator.onLine) transition('Offline')
         notify(`Canvas could not save: ${error.message}`)
@@ -757,10 +781,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element,revision').in('id', ids)
       if (!pageActiveRef.current) return
       if (readError) {
+        patchSyncRuntime({ saveIssue: 'unconfirmed' })
         notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
+        void reconcileAuthoritative()
         return
       }
       applyRows(data ?? [])
+      patchSyncRuntime({ saveIssue: 'none' })
     } catch (error) {
       // Supabase normally reports write failures through the returned `error`
       // object, but a transport/runtime failure can reject the request instead.
@@ -771,6 +798,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
       }
       canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+      patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, saveIssue: 'retrying' })
       if (pageActiveRef.current) {
         if (!navigator.onLine) transition('Offline')
         const message = error && typeof error === 'object' && 'message' in error
@@ -790,11 +818,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       }
     } finally {
       writeInFlightRef.current = false
+      patchSyncRuntime({ writeInFlight: false, queuedChanges: durablePendingRef.current.size })
       if (pageActiveRef.current && statusRef.current === 'Live' && navigator.onLine && durablePendingRef.current.size && !flushTimer.current) {
         flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushDurablePending() }, OPERATION_FLUSH_DELAY_MS)
       }
     }
-  }, [applyRows, config.tableName, loadAuthoritative, notify, supabase, transition])
+  }, [applyRows, config.tableName, loadAuthoritative, notify, patchSyncRuntime, reconcileAuthoritative, supabase, transition])
 
   const scheduleFlush = useCallback((delayMs = RECONNECT_FLUSH_DELAY_MS) => {
     if (!pageActiveRef.current || flushTimer.current) return
@@ -802,6 +831,19 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       flushTimer.current = null
       void flushDurablePending()
     }, delayMs)
+  }, [flushDurablePending])
+
+  const retryConnectionNow = useCallback(() => {
+    if (!navigator.onLine) return
+    retryDelayRef.current = 1200
+    transition('Reconnecting')
+    setConnectionAttempt(value => value + 1)
+  }, [transition])
+
+  const retrySaveNow = useCallback(() => {
+    if (!navigator.onLine || statusRef.current !== 'Live' || writeInFlightRef.current || durablePendingRef.current.size === 0) return
+    if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
+    void flushDurablePending()
   }, [flushDurablePending])
 
   const clearLongOperationCheckpoint = useCallback(() => {
@@ -832,13 +874,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           canvasDiagnostics.increment('durabilityCheckpoints')
           canvasDiagnostics.gauge('lastDurabilityCheckpointSource', snapshot.source)
           canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+          patchSyncRuntime({ queuedChanges: durablePendingRef.current.size })
           void flushDurablePending()
         }
       }
       if (continuousOperationRef.current) checkpointTimer.current = setTimeout(checkpoint, LONG_OPERATION_CHECKPOINT_MS)
     }
     checkpointTimer.current = setTimeout(checkpoint, LONG_OPERATION_CHECKPOINT_MS)
-  }, [clearLongOperationCheckpoint, flushDurablePending, operationTracker])
+  }, [clearLongOperationCheckpoint, flushDurablePending, operationTracker, patchSyncRuntime])
 
   useEffect(() => {
     durabilityCommitRef.current = () => {
@@ -960,6 +1003,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
                 if (!stillCurrent()) return
                 retryDelayRef.current = 1200
                 transition('Live')
+                if (syncRuntimeRef.current.saveIssue === 'unconfirmed' && durablePendingRef.current.size === 0) patchSyncRuntime({ saveIssue: 'none' })
                 if (durablePendingRef.current.size) scheduleFlush()
               })
               .catch(error => {
@@ -991,7 +1035,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         channelCleanupRef.current = supabase.removeChannel(channel).catch(() => {})
       }
     }
-  }, [api, applyRemotePreview, applyRows, clearRemotePreviews, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, scheduleFlush, supabase, syncPresence, transition])
+  }, [api, applyRemotePreview, applyRows, clearRemotePreviews, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, patchSyncRuntime, scheduleFlush, supabase, syncPresence, transition])
 
   useEffect(() => {
     if (status !== 'Live') return
@@ -1022,6 +1066,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (previousEditingTextId) operationTracker.endText()
       continuousOperationRef.current = 'text'
       operationTracker.beginText()
+      patchSyncRuntime({ localEditing: true })
       armCheckpointRef.current()
     }
     const observationStarted = performance.now()
@@ -1078,11 +1123,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     if (previousEditingTextId && !nextEditingTextId) {
       continuousOperationRef.current = null
+      patchSyncRuntime({ localEditing: false })
       clearCheckpointRef.current()
       operationTracker.endText()
     }
     editingTextRef.current = nextEditingTextId
-  }, [notify, operationTracker, queuePreview])
+  }, [notify, operationTracker, patchSyncRuntime, queuePreview])
 
   const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return
@@ -1112,7 +1158,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }
 
   return <div className="canvas-app live-canvas-app" data-canvas-engine="excalidraw-supabase">
-    <LiveHeader api={api} identity={identity} people={people} status={status} theme={theme} rename={rename} changeTheme={changeTheme} />
+    <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} />
     <main className="canvas-workspace live-canvas-workspace" aria-label="Shared infinite canvas">
       <div className="live-excalidraw" onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
         <Excalidraw
@@ -1131,7 +1177,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
         </Excalidraw>
       </div>
-      {status !== 'Live' && <div className="network-banner" role="status">{status === 'Error' ? 'Canvas could not synchronize. Retrying automatically; editing remains paused.' : `${status} — editing is paused until the shared canvas is synchronized.`}</div>}
+      {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}
+      {status === 'Live' && (syncHealth.key === 'retrying-save' || syncHealth.key === 'confirming-save') && <div className={`save-health-banner save-health-banner--${syncHealth.tone}`}><span>{syncHealth.detail}</span>{syncHealth.key === 'retrying-save' && <button type="button" onClick={retrySaveNow}>Retry now</button>}</div>}
       {notice && <div className="canvas-notice" role="status">{notice}</div>}
     </main>
   </div>
