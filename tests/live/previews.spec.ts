@@ -129,10 +129,12 @@ test('an abandoned remote preview expires back to the authoritative element with
     const authoritativeVersion = Number(stored.version)
     const previewX = authoritativeX + 180
 
-    // Seeing the rectangle is not enough to prove the peer can restore it:
-    // Phase 4 intentionally renders Broadcast previews before Postgres durability.
-    // Wait until applyRows has accepted a durable row into the exact authority map
-    // used by preview expiry, then require the authoritative geometry to be visible.
+    // This test targets preview expiry, not Realtime row-delivery timing. The
+    // rectangle is already proven durable above, so reload the peer and let the
+    // production initial-hydration path deterministically establish the exact
+    // authoritative fallback map that expiry restores from.
+    await pageB.reload()
+    await expect(pageB.getByText('Live', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect.poll(
       async () => Number((await diagnostics(pageB)).counters.authoritativeRowsAccepted ?? 0),
       { timeout: 10_000 },
