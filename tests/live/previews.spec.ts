@@ -125,10 +125,27 @@ test('an abandoned remote preview expires back to the authoritative element with
   try {
     const stored = await createRectangle(pageA)
     const id = String(stored.id)
-    await expect.poll(async () => Boolean(await exportElement(pageB, id))).toBe(true)
     const authoritativeX = Number(stored.x)
     const authoritativeVersion = Number(stored.version)
     const previewX = authoritativeX + 180
+
+    // Seeing the rectangle is not enough to prove the peer has received its
+    // durable row: Phase 4 deliberately renders Broadcast previews before
+    // Postgres durability. Bring the peer forward so the normal focus
+    // anti-entropy path establishes authoritative state before we test expiry.
+    await pageB.bringToFront()
+    await expect.poll(
+      async () => Number((await diagnostics(pageB)).gauges.reconciliationCursor ?? 0),
+      { timeout: 10_000 },
+    ).toBeGreaterThan(0)
+    await expect.poll(
+      async () => Number((await exportElement(pageB, id))?.x),
+      { timeout: 5_000 },
+    ).toBe(authoritativeX)
+    await expect.poll(
+      async () => Number((await diagnostics(pageB)).gauges.activeRemotePreviews ?? 0),
+      { timeout: 5_000 },
+    ).toBe(0)
     await resetDiagnostics(pageB)
 
     const previewElement = { ...stored, x: previewX, version: authoritativeVersion + 1 }
