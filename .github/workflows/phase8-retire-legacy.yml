@@ -17,6 +17,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - name: Correct strict typecheck surface
+        run: python scripts/phase8-typecheck-surface.py
       - name: Apply production-only transform
         run: python scripts/phase8-retire-legacy.py
       - name: Regenerate dependency lock
@@ -31,7 +33,7 @@ jobs:
       - run: npm run build
       - name: Commit clean Phase 8 tree
         run: |
-          rm -f scripts/phase8-retire-legacy.py .github/workflows/phase8-retire-legacy.yml
+          rm -f scripts/phase8-retire-legacy.py scripts/phase8-typecheck-surface.py .github/workflows/phase8-retire-legacy.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
