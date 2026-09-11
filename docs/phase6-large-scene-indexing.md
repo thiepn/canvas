@@ -22,11 +22,25 @@ Phase 6 removes those avoidable costs while preserving the Phase 2–5 synchroni
 Excalidraw still calls `onChange` with the complete scene, so Canvas must perform one cheap traversal. The index changes what happens inside that traversal:
 
 1. allowed elements whose immutable stamp is unchanged are skipped immediately;
-2. only changed stamps enter preview quarantine checks, operation tracking, conflict protection and pending-state logic;
+2. only changed stamps enter operation tracking, conflict protection and pending-state logic;
 3. the index stores stamp snapshots independently of object references, so an unexpected in-place mutation is still detected;
-4. remote scene updates proactively refresh the index so delayed remote `onChange` callbacks do not become expensive local candidates.
+4. authoritative/local scene updates refresh the index directly so delayed callbacks do not make unchanged elements expensive again.
 
 This is a structural optimization, not a semantic shortcut. The existing version ordering remains the authority for whether a changed element may enter local pending state.
+
+### Preview-safe indexing
+
+The first full Phase 6 live candidate exposed a Firefox-only race in the existing Phase 4 abandoned-preview expiry test. The database and authoritative state remained correct, but a delayed Excalidraw callback from an ephemeral preview could reach the new scene index after authority had already been restored. Phase 4 already quarantined that exact immutable preview version from mutation/durability logic; Phase 6 initially updated the index *before* consulting that quarantine.
+
+The final design makes the index obey the same origin boundary:
+
+- ephemeral Broadcast previews never become authoritative scene-index state;
+- `SceneVersionIndex.observe()` accepts an ignore predicate evaluated before any index mutation;
+- exact preview versions still covered by Phase 4's preview-echo quarantine are ignored without moving the index;
+- exact authoritative acknowledgements explicitly mark their current local element in the index;
+- delayed preview callbacks can therefore neither enter the mutation pipeline nor move the optimization watermark away from authority.
+
+The failed candidate was rejected rather than weakening the Phase 4 regression test. The original preview-expiry test remains part of the mandatory real-browser matrix.
 
 ## Direct ID lookup for authoritative application
 
@@ -57,12 +71,13 @@ For a 1,100-row world this deterministically changes initial scene commits from 
 - elements scanned by Excalidraw callbacks;
 - unchanged immutable stamps skipped;
 - changed stamps entering the expensive local path;
+- quarantined remote stamps ignored before index mutation;
 - scene-observation duration p95;
 - initial hydration page count;
 - initial hydration row count;
 - initial hydration scene-commit count.
 
-The distinction between `scanned` and `changed` is intentional. Canvas cannot prevent Excalidraw from supplying the full scene to `onChange`, but it can keep unchanged elements out of mutation/conflict processing.
+The distinction between `scanned`, `skipped`, `ignored` and `changed` is intentional. Canvas cannot prevent Excalidraw from supplying the full scene to `onChange`, but it can keep unchanged and known-remote versions out of mutation/conflict processing.
 
 ## Verification contract
 
@@ -74,6 +89,7 @@ The distinction between `scanned` and `changed` is intentional. Canvas cannot pr
 - a recreated object with the same stamp is skipped;
 - an in-place mutation is detected because the previous stamp was snapshotted separately from the object reference;
 - nonce/tombstone changes remain observable;
+- ignored/quarantined remote versions do not move an authoritative index stamp;
 - disallowed elements are never indexed;
 - replace/mark/delete semantics and direct ID indexing behave deterministically.
 
@@ -90,7 +106,7 @@ The distinction between `scanned` and `changed` is intentional. Canvas cannot pr
 
 A predecessor version of this test tried to move the original seed rectangle using fixed browser coordinates after reopening the 1,100-element world. That was rejected because browser coordinates are not a stable locator for an existing Excalidraw world element after hydration. The final test creates a fresh rectangle in a viewport region deliberately left empty by the seeded fixture, preserving the intended production-path assertion without depending on unstable viewport positioning.
 
-The existing operation-boundary durability, preview lane, anti-entropy, conflict, reconnect, lifecycle, E2E and compiled-production suites remain mandatory.
+The existing operation-boundary durability, preview lane (including abandoned-preview expiry), anti-entropy, conflict, reconnect, lifecycle, E2E and compiled-production suites remain mandatory.
 
 ## Non-goals
 
