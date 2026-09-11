@@ -13,8 +13,8 @@ test('unchanged immutable stamps are skipped after the first observation', () =>
   const index = new SceneVersionIndex<Element>()
   const a = element('a')
   const b = element('b')
-  assert.deepEqual(index.observe([a, b], allowed), { changed: [a, b], scanned: 2, skipped: 0, hasDisallowed: false })
-  assert.deepEqual(index.observe([a, b], allowed), { changed: [], scanned: 2, skipped: 2, hasDisallowed: false })
+  assert.deepEqual(index.observe([a, b], allowed), { changed: [a, b], scanned: 2, skipped: 0, ignored: 0, hasDisallowed: false })
+  assert.deepEqual(index.observe([a, b], allowed), { changed: [], scanned: 2, skipped: 2, ignored: 0, hasDisallowed: false })
 })
 
 test('new object identity with the same immutable stamp is still skipped', () => {
@@ -41,6 +41,23 @@ test('version nonce and tombstone changes are observable changes', () => {
   index.observe([element('a', 4, 100, false)], allowed)
   assert.equal(index.observe([element('a', 4, 99, false)], allowed).changed.length, 1)
   assert.equal(index.observe([element('a', 4, 99, true)], allowed).changed.length, 1)
+})
+
+test('ignored remote versions do not move the index away from authoritative state', () => {
+  const index = new SceneVersionIndex<Element>()
+  const authority = element('a', 10, 55, false)
+  index.mark([authority])
+
+  const previewEcho = element('a', 11, 99, false)
+  const ignored = index.observe([previewEcho], allowed, () => true)
+  assert.deepEqual(ignored.changed, [])
+  assert.equal(ignored.ignored, 1)
+
+  // If the ignored preview had mutated the index, authority would now appear
+  // changed. Remaining skipped proves the authoritative stamp stayed indexed.
+  const restored = index.observe([{ ...authority }], allowed)
+  assert.equal(restored.changed.length, 0)
+  assert.equal(restored.skipped, 1)
 })
 
 test('disallowed elements are reported but never indexed', () => {
