@@ -189,7 +189,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   }
   return <header className="canvas-header live-canvas-header">
     <h1>Canvas<span className="brand-period" aria-hidden="true">.</span></h1>
-    <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span></div>
+    <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{status === 'Live' && <span className="connection-transport">Live</span>}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
     <button type="button" className="icon-button frame-button" aria-label="Frame tool" title="Frame tool" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" /></button>
