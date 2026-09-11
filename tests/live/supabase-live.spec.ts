@@ -58,6 +58,10 @@ async function createRectangle(page: Page): Promise<string> {
   return id
 }
 
+function isExpectedWebKitOfflineFetchNoise(message: string): boolean {
+  return message.includes('supabase.co/rest/v1/canvas_ci_elements') && message.includes('due to access control checks')
+}
+
 test.beforeEach(cleanTestWorld)
 test.afterEach(cleanTestWorld)
 
@@ -166,14 +170,18 @@ test('same-element equal-version conflict converges in both real clients', async
   }
 })
 
-test('repeated reconnects recover missed peer edits and resume real drawing without reload', async ({ browser }) => {
+test('repeated reconnects recover missed peer edits and resume real drawing without reload', async ({ browser, browserName }) => {
   test.setTimeout(120_000)
   const contextA = await browser.newContext()
   const contextB = await browser.newContext()
   const pageA = await contextA.newPage()
   const pageB = await contextB.newPage()
   const errors: string[] = []
-  pageA.on('pageerror', error => errors.push(error.message))
+  let intentionalDisconnect = false
+  pageA.on('pageerror', error => {
+    if (browserName === 'webkit' && intentionalDisconnect && isExpectedWebKitOfflineFetchNoise(error.message)) return
+    errors.push(error.message)
+  })
   pageB.on('pageerror', error => errors.push(error.message))
   try {
     await Promise.all([pageA.goto('./'), pageB.goto('./')])
@@ -184,6 +192,7 @@ test('repeated reconnects recover missed peer edits and resume real drawing with
     if (!stored) throw new Error('Missing reconnect test shape.')
 
     for (let cycle = 1; cycle <= 2; cycle++) {
+      intentionalDisconnect = true
       await contextA.setOffline(true)
       await expect(pageA.getByText('Offline', { exact: true })).toBeVisible()
       await expect(pageA.getByRole('button', { name: 'Frame tool' })).toBeDisabled()
@@ -198,6 +207,8 @@ test('repeated reconnects recover missed peer edits and resume real drawing with
       await expect(pageA.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
       await expect.poll(async () => (await exportElement(pageA, id))?.x).toBe(element.x)
       await expect(pageA.getByLabel('2 people connected')).toBeVisible()
+      await pageA.waitForTimeout(250)
+      intentionalDisconnect = false
     }
 
     await pageA.getByTitle(/^Ellipse\b/i).click()
