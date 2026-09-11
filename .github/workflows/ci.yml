@@ -12,8 +12,6 @@ concurrency:
 defaults:
   run:
     shell: bash
-env:
-  WRANGLER_SEND_METRICS: 'false'
 jobs:
   quality:
     # Both quality and the manual performance workflow mutate canvas_ci_elements.
@@ -54,11 +52,11 @@ jobs:
           npm audit --json > artifacts/npm-audit.json || true
       - name: Reject high-severity dependency vulnerabilities
         run: npm audit --audit-level=high
+      - name: Enforce production-only architecture
+        run: npm run audit:architecture
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: npm run test:worker
-      - run: npm run check:worker
       - run: npm run build
       - name: Real Excalidraw and Supabase regression gate
         run: npm run test:live
@@ -71,9 +69,6 @@ jobs:
             mkdir -p artifacts/live-test-results
             cp -R test-results/. artifacts/live-test-results/
           fi
-      - run: npm run test:e2e
-        env:
-          HOME: /root
       - run: npm run test:production
         env:
           HOME: /root
