@@ -197,10 +197,19 @@ test('repeated reconnects recover missed peer edits and resume real drawing with
       await expect(pageA.getByText('Offline', { exact: true })).toBeVisible()
       await expect(pageA.getByRole('button', { name: 'Frame tool' })).toBeDisabled()
       const version = stored.version + cycle
-      const element = { ...stored.element, x: Number(stored.element.x) + cycle * 70, version, versionNonce: 100 + cycle }
-      const { error } = await supabase.from(TABLE).update({ version, version_nonce: 100 + cycle, element, updated_by: 'reconnect-peer' }).eq('id', id)
+      const versionNonce = 100 + cycle
+      const element = { ...stored.element, x: Number(stored.element.x) + cycle * 70, version, versionNonce }
+      const { error } = await supabase.from(TABLE).update({ version, version_nonce: versionNonce, element, updated_by: 'reconnect-peer' }).eq('id', id)
       expect(error).toBeNull()
-      await expect.poll(async () => (await exportElement(pageB, id))?.x).toBe(element.x)
+
+      // This test is about A recovering a durable edit it necessarily missed while
+      // offline. Use Postgres itself as the durable barrier instead of making that
+      // invariant depend on B receiving an unrelated Realtime notification first.
+      await expect.poll(() => activeRow(id)).toMatchObject({
+        version,
+        version_nonce: versionNonce,
+        element: { x: element.x },
+      })
 
       await contextA.setOffline(false)
       await expect(pageA.getByText('Live', { exact: true })).toBeVisible()
