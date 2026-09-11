@@ -586,7 +586,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (!element) continue
       const nextStamp = { version: row.version, versionNonce: row.version_nonce, isDeleted: row.is_deleted }
       const previousAuthority = authoritativeElementsRef.current.get(row.id)
-      if (replace || !previousAuthority || isNewerVersion(nextStamp, stampOf(previousAuthority))) authoritativeElementsRef.current.set(row.id, element)
+      if (replace || !previousAuthority || isNewerVersion(nextStamp, stampOf(previousAuthority))) {
+        authoritativeElementsRef.current.set(row.id, element)
+        // Content-free observability for the exact map preview expiry restores from.
+        // This proves authority was accepted locally without recording element data.
+        canvasDiagnostics.increment('authoritativeRowsAccepted')
+      }
       const activePreview = remotePreviewRef.current.get(row.id)
       if (activePreview && !isNewerVersion(stampOf(activePreview.element), nextStamp)) {
         remotePreviewRef.current.delete(row.id)
