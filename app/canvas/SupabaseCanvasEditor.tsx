@@ -287,7 +287,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         if (!queued || isNewerVersion(nextStamp, stampOf(queued))) durablePendingRef.current.set(element.id, element)
       }
       canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
-      patchSyncRuntime({ queuedChanges: durablePendingRef.current.size })
+      patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, localEditing: false })
       durabilityCommitRef.current()
     },
   }), [patchSyncRuntime])
@@ -667,7 +667,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       changed = true
     }
 
-    patchSyncRuntime({ queuedChanges: durablePendingRef.current.size })
+    const durableQueueSize = durablePendingRef.current.size
+    patchSyncRuntime({
+      queuedChanges: durableQueueSize,
+      ...(durableQueueSize === 0 && !writeInFlightRef.current && syncRuntimeRef.current.saveIssue === 'retrying' ? { saveIssue: 'none' as const } : {}),
+    })
     if (!changed) return
     const reconciled = reconcileElements(
       localElements as Parameters<typeof reconcileElements>[0],
@@ -1115,6 +1119,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
       const queued = pendingRef.current.get(element.id)
       if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
+      patchSyncRuntime({ localEditing: true })
     }
     const activeSnapshot = operationTracker.snapshotActive()
     if (activeSnapshot && (activeSnapshot.source === 'pointer' || activeSnapshot.source === 'text')) {
