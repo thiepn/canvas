@@ -74,7 +74,7 @@ Do **not** grant that function to `anon`/`authenticated` and do not expose it as
 
 Automated browser tests use `public.canvas_ci_elements`, never the production world. That table intentionally permits DELETE for deterministic cleanup and therefore has broader policies than production. It must not be selected by the public deployment.
 
-The frontend defaults to `canvas_elements`; test configurations explicitly override `VITE_CANVAS_TABLE=canvas_ci_elements`.
+The frontend defaults to `canvas_elements`; test configurations explicitly override `VITE_CANVAS_TABLE=canvas_ci_elements`. CI and the manual performance workflow serialize access to the shared CI table so their cleanup cannot destroy each other's fixtures.
 
 ## Client-side identity
 
@@ -84,9 +84,9 @@ Do not make security decisions based on `deviceId`, display name, color or prese
 
 ## Dependencies and CI
 
-The workflow records an npm audit and fails on high-severity dependency findings. Lint, TypeScript, unit/integration tests, live Supabase tests, compiled-production tests and build audit are release gates.
+The workflow records an npm audit and fails on high-severity dependency findings. It also runs `npm run audit:architecture`, which prevents the retired tldraw/Wrangler/Worker runtime and package family from silently returning.
 
-The historical tldraw/Worker harness is test-only and must not be considered the production security boundary.
+Lint, strict TypeScript, production-model unit tests, real Supabase browser tests, compiled-production tests, build audit, merged-main repeat, Pages deployment and the published-site verifier form the release chain.
 
 ## Reporting
 

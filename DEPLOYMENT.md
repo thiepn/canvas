@@ -7,7 +7,7 @@ Canvas production consists of two independently provisioned pieces:
 1. a Supabase project containing `canvas_elements`, Realtime publication, RLS/validation and the private recovery schema;
 2. a static Vite build deployed by GitHub Actions to GitHub Pages.
 
-No Cloudflare Worker deployment is required for normal operation.
+There is no application server or Cloudflare Worker in the active architecture. GitHub Pages plus Supabase is the complete runtime.
 
 ## 1. Provision Supabase
 
@@ -17,7 +17,7 @@ Use the Supabase project intended for Canvas and apply every SQL file under `sup
 - `public.canvas_ci_elements` — isolated automated-test world;
 - Realtime publication for both tables;
 - RLS and validation constraints;
-- stale-write guards;
+- stale-write guards and revision anti-entropy support;
 - private `canvas_admin` history/recovery objects.
 
 For a new Supabase project, obtain its **Project URL** and **publishable/anon key** after migrations are applied. The publishable key is browser-safe. Never expose the service-role key.
@@ -69,6 +69,7 @@ From a clean checkout:
 ```bash
 npm ci
 npm audit --audit-level=high
+npm run audit:architecture
 npm run lint
 npm run typecheck
 npm test
@@ -77,40 +78,32 @@ npm run test:live
 npm run test:production
 ```
 
-`test:live` and `test:production` write only to `canvas_ci_elements` and clean that table before/after their scenario. They must never target `canvas_elements`.
-
-The retained historical Worker regression suite may also run in CI, but it is not the production deployment gate by itself.
+`audit:architecture` prevents the retired tldraw/Wrangler/Worker stack from returning. `test:live` and `test:production` write only to `canvas_ci_elements` and clean that table before/after their scenarios. They must never target `canvas_elements`.
 
 ## 4. GitHub Pages
 
 `.github/workflows/ci.yml` is the release pipeline. On a pull request it executes quality tests only. On `main`, the Pages deployment job is conditional on the quality job succeeding.
 
-The Pages job should:
+The Pages job:
 
-1. check out the exact successful commit;
-2. build with the repository base path `/canvas/`;
-3. configure GitHub Pages;
-4. upload `dist` as the Pages artifact;
-5. deploy that artifact.
+1. checks out the exact successful commit;
+2. rebuilds with the repository base path `/canvas/`;
+3. configures GitHub Pages;
+4. uploads `dist` as the Pages artifact;
+5. deploys that artifact;
+6. runs the published-site verifier against the returned HTTPS deployment URL.
 
-After merging, require both the quality job and the Pages deployment job to be green. A green pull-request run does **not** prove that Pages deployed.
+After merging, require both the quality job and the Pages deployment/verifier to be green. A green pull-request run does **not** prove that Pages deployed.
 
 ## 5. Post-deployment verification
 
-Open:
+The automated deployed-site verifier checks the published bundle, Live connection, reconnect behavior and mobile menu against the actual Pages URL. Manual verification can additionally inspect:
 
 ```text
 https://thiepn.github.io/canvas/
 ```
 
-Verify at minimum:
-
-- the app identifies itself as the Excalidraw/Supabase engine;
-- connection reaches `Live`;
-- browser console has no uncaught error;
-- repository-relative assets/manifest load without 404s;
-- a test vector made on the public canvas persists after refresh;
-- a second browser/device receives subsequent changes and presence.
+At minimum confirm the Excalidraw/Supabase engine loads, repository-relative assets are present, a real vector persists after refresh, and a second browser/device receives changes and presence.
 
 Because the public world is intentionally shared, remove any release-test objects manually after verification rather than adding a hidden cleanup endpoint.
 
@@ -175,4 +168,4 @@ Schema rollback: prefer a new forward migration that corrects the schema. Do not
 
 ## Cost model
 
-The design intentionally avoids application servers, object storage and scheduled background jobs. Static Pages hosting plus the existing Supabase project is the complete normal runtime. Monitor Supabase database/Realtime usage if the trusted-group usage pattern changes substantially.
+The design intentionally avoids application servers, object storage and scheduled background jobs. Static Pages hosting plus the existing Supabase project is the complete runtime. Monitor Supabase database/Realtime usage if the trusted-group usage pattern changes substantially.

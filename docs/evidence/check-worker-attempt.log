@@ -1,5 +1,0 @@
-
-> canvas@1.0.0-rc.1 check:worker
-> wrangler deploy --dry-run --outdir artifacts/worker
-
-sh: 1: wrangler: not found

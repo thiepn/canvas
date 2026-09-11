@@ -14,7 +14,7 @@ Upstream project: https://github.com/excalidraw/excalidraw
 
 Production persistence and realtime collaboration use Supabase Postgres, PostgREST and Realtime. The frontend contains only the project URL and browser-safe publishable key. A Supabase service-role credential is not bundled or required by the public app.
 
-Supabase receives the element rows, presence state and cursor broadcasts necessary to operate the shared canvas. Canvas does not intentionally send image/file uploads because media is outside the product model.
+Supabase receives the element rows, presence state, cursors and active-operation preview broadcasts necessary to operate the shared canvas. Canvas does not intentionally send image/file uploads because media is outside the product model.
 
 Upstream/project information: https://supabase.com/
 
@@ -22,15 +22,13 @@ Upstream/project information: https://supabase.com/
 
 React, React DOM, Vite, the Vite React plugin, TypeScript, Playwright, ESLint, Prettier and transitive dependencies retain their upstream licenses/notices.
 
-The repository commits `package-lock.json` so the installed dependency graph is auditable. CI records `npm audit --json` and fails on high-severity dependency findings.
+The repository commits `package-lock.json` so the installed dependency graph is auditable. CI records `npm audit --json`, fails on high-severity dependency findings, and runs an architecture audit against retired runtime dependencies.
 
-## Historical tldraw / Cloudflare test harness
+## Retired stack
 
-The repository still contains the previous tldraw + Cloudflare Worker implementation and its regression tests while migration coverage is retained. Those dependencies are **not the normal production editor** and the production Pages build does not require a tldraw license key or Cloudflare Worker deployment.
+Phase 8 removed the historical tldraw + Cloudflare Worker/Durable Object runtime and its installed dependency family from the active repository. Earlier source and dependency history remain available through Git history but are no longer installed, built, tested or shipped.
 
-`tldraw` SDK packages retain tldraw's upstream license terms. Their presence for the historical harness does not relicense them under the Canvas repository license. Any future decision to ship tldraw in production would require a fresh review of tldraw's then-current production licensing terms.
-
-Wrangler/Miniflare/Cloudflare-related packages used by the historical Worker tests retain their own licenses. They are development/test tooling in the current architecture.
+If tldraw or another editor/backend is reintroduced in the future, its then-current license and deployment terms require a fresh review before shipping.
 
 ## Canvas-owned assets
 
@@ -42,6 +40,6 @@ Before redistributing a compiled build or changing the editor/backend dependenci
 
 1. review the upstream licenses for the exact dependency versions in `package-lock.json`;
 2. retain attribution/notices required by those licenses;
-3. rerun the dependency audit and production build;
+3. rerun the dependency and architecture audits and production build;
 4. verify that the built application contains only the intended production engine;
 5. never treat this notice as a replacement for an upstream license text.

@@ -22,7 +22,7 @@ Images, screenshots, uploaded files, video, audio, PDFs and remote media are not
 
 ## Production architecture
 
-The public application uses:
+The application uses:
 
 - **React + TypeScript + Vite** for the static application;
 - **Excalidraw 0.18.1** for the canvas/editor interaction model;
@@ -30,7 +30,7 @@ The public application uses:
 - **Supabase Realtime** for Postgres changes, presence, cursors and ephemeral in-progress element previews;
 - **GitHub Pages** for static hosting.
 
-There is no application server in the normal production path and no login system. The older tldraw/Cloudflare Worker implementation remains only as an isolated regression harness while its historical tests are retained; normal production builds do not select it.
+There is no application server and no login system. Phase 8 retired the historical tldraw/Cloudflare Worker runtime, so the source tree, dependency graph, automated release gates and production deployment now describe the same Excalidraw + Supabase architecture.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the data/sync model and [DEPLOYMENT.md](./DEPLOYMENT.md) for release and recovery operations.
 
@@ -56,6 +56,7 @@ Production elements live in `public.canvas_elements`. Each row is one Excalidraw
 - `is_deleted` tombstone state;
 - validated `element` JSON;
 - anonymous `updated_by` device identifier;
+- monotonic `revision` used for anti-entropy;
 - server `updated_at` timestamp.
 
 Postgres constraints allow only the product's vector types and cap each serialized element at 256 KiB. RLS grants anonymous clients only the operations the open-canvas model needs. Physical DELETE is not granted in production; normal deletion is a versioned tombstone so peers converge.
@@ -66,9 +67,11 @@ Postgres constraints allow only the product's vector types and cap each serializ
 
 The browser loads the authoritative table before becoming editable and subscribes to Supabase Realtime. Excalidraw still renders every local intermediate frame immediately, but those frames stay in memory for conflict protection rather than being written on a generic timer. Phase 3 persists the final element state(s) from each completed logical `CanvasMutation`; unusually long continuous pointer/text operations receive bounded safety checkpoints. Durable writes are serialized and reconciled with authoritative rows after completion. Postgres still rejects stale update tuples, so delayed requests cannot overwrite a newer element version.
 
-Presence, cursors and active-operation previews are ephemeral Realtime channel state. Pointer/text previews are throttled Broadcast messages that let peers render in-progress geometry before the Phase 3 durability boundary; they never enter Postgres, expire automatically, and are replaced by authoritative rows when durability catches up.
+Presence, cursors and active-operation previews are ephemeral Realtime channel state. Pointer/text previews are throttled Broadcast messages that let peers render in-progress geometry before the durability boundary; they never enter Postgres, expire automatically, and are replaced by authoritative rows when durability catches up.
 
-If the connection is not `Live`, editing is disabled rather than pretending an unsafe offline edit has been saved.
+A monotonic database revision cursor lets the client repair missed Realtime events after reconnect/focus without replacing newer local work. Large scenes hydrate in pages and use indexed element stamps so unchanged elements do not repeatedly traverse the full validation/application path.
+
+If the connection is not `Live`, editing is disabled rather than pretending an unsafe offline edit has been saved. The header separately reports transport health and save health; `Saved` is shown only when no active operation, queued durable change, in-flight write or unresolved retry/confirmation remains.
 
 ## Recovery
 
@@ -92,6 +95,8 @@ Restore bumps element versions above the current state, so Realtime clients acce
 Primary commands:
 
 ```bash
+npm audit --audit-level=high
+npm run audit:architecture
 npm run lint
 npm run typecheck
 npm test
@@ -100,9 +105,9 @@ npm run test:live
 npm run test:production
 ```
 
-`test:live` runs real browser clients against the isolated Supabase CI table. `test:production` builds the same Excalidraw/Supabase architecture used on GitHub Pages and then tests the compiled `/canvas/` bundle against that isolated table.
+`audit:architecture` prevents the retired tldraw/Wrangler/Worker stack from re-entering the active tree. `test:live` runs real browser clients against the isolated Supabase CI table. `test:production` builds the same architecture used on GitHub Pages and tests the compiled `/canvas/` bundle.
 
-The historical Worker/tldraw suite is retained as regression coverage but is not treated as proof of the public architecture. See [TESTING.md](./TESTING.md).
+See [TESTING.md](./TESTING.md).
 
 ## Security model
 
@@ -120,7 +125,7 @@ Do not use the public canvas for secrets or sensitive personal information. See 
 
 ## Deployment
 
-GitHub Actions runs quality gates first. A `main` build deploys to GitHub Pages only after the quality job succeeds. The Pages base path is `/canvas/`; use `/` for a custom-domain root.
+GitHub Actions runs production-only quality gates first. A `main` build deploys to GitHub Pages only after the quality job succeeds, then verifies the published HTTPS application. The Pages base path is `/canvas/`; use `/` for a custom-domain root.
 
 Backend schema is versioned in `supabase/migrations/`. Apply those migrations in timestamp order when provisioning another Supabase project.
 
