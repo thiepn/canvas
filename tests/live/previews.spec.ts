@@ -125,10 +125,28 @@ test('an abandoned remote preview expires back to the authoritative element with
   try {
     const stored = await createRectangle(pageA)
     const id = String(stored.id)
-    await expect.poll(async () => Boolean(await exportElement(pageB, id))).toBe(true)
     const authoritativeX = Number(stored.x)
     const authoritativeVersion = Number(stored.version)
     const previewX = authoritativeX + 180
+
+    // This test targets preview expiry, not Realtime row-delivery timing. The
+    // rectangle is already proven durable above, so reload the peer and let the
+    // production initial-hydration path deterministically establish the exact
+    // authoritative fallback map that expiry restores from.
+    await pageB.reload()
+    await expect(pageB.getByText('Live', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(
+      async () => Number((await diagnostics(pageB)).counters.authoritativeRowsAccepted ?? 0),
+      { timeout: 10_000 },
+    ).toBeGreaterThan(0)
+    await expect.poll(
+      async () => Number((await exportElement(pageB, id))?.x),
+      { timeout: 5_000 },
+    ).toBe(authoritativeX)
+    await expect.poll(
+      async () => Number((await diagnostics(pageB)).gauges.activeRemotePreviews ?? 0),
+      { timeout: 5_000 },
+    ).toBe(0)
     await resetDiagnostics(pageB)
 
     const previewElement = { ...stored, x: previewX, version: authoritativeVersion + 1 }
