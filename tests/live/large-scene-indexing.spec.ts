@@ -118,17 +118,37 @@ test('large scenes hydrate atomically and local edits skip unchanged element wor
     expect(hydrated.gauges.initialHydrationPages).toBe(3)
     expect(hydrated.gauges.initialHydrationRows).toBe(TARGET_ROWS)
     expect(hydrated.counters.initialHydrationSceneCommits).toBe(1)
-    expect((await readScene(page)).length).toBe(TARGET_ROWS)
+    const initialScene = await readScene(page)
+    expect(initialScene.length).toBe(TARGET_ROWS)
+    const initialIds = new Set(initialScene.map(element => element.id))
 
+    // Create a fresh shape in a viewport area that is intentionally left empty
+    // by the seeded scene. Reopening a large Excalidraw world does not guarantee
+    // that fixed browser coordinates still map to the original seed rectangle,
+    // so a new shape is a deterministic way to exercise the same Phase 6 path:
+    // 1,100 unchanged elements plus one genuine local mutation.
     const before = await diagnostics(page)
-    await page.keyboard.press('v')
-    await dragOnCanvas(page, [350, 290], [390, 320], 5)
+    await page.getByTitle(/^Rectangle\b/i).click()
+    await expect(page.getByRole('radio', { name: /^Rectangle\b/i })).toBeChecked()
+    await dragOnCanvas(page, [600, 450], [710, 520], 5)
 
+    let createdId = ''
     await expect.poll(async () => {
-      const { data, error } = await supabase.from(TABLE).select('version').eq('id', template.id).maybeSingle()
+      const { data, error } = await supabase.from(TABLE)
+        .select('id,element,is_deleted,updated_by,revision')
+        .eq('is_deleted', false)
+        .order('revision', { ascending: false })
+        .limit(1)
+        .maybeSingle()
       if (error) throw error
-      return Number(data?.version ?? 0)
-    }).toBeGreaterThan(template.version)
+      if (!data || initialIds.has(data.id)) return ''
+      if (data.updated_by === 'phase6-large-scene-seed') return ''
+      if (data.element?.type !== 'rectangle' || data.element.width !== 110 || data.element.height !== 70) return ''
+      createdId = data.id
+      return createdId
+    }, { message: 'A fresh rectangle must persist from the 1,100-element scene.' }).not.toBe('')
+
+    await expect.poll(async () => (await readScene(page)).some(element => element.id === createdId)).toBe(true)
 
     const after = await diagnostics(page)
     const skipped = (after.counters.sceneElementsStampSkipped ?? 0) - (before.counters.sceneElementsStampSkipped ?? 0)
