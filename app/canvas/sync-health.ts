@@ -1,17 +1,18 @@
 export type CanvasConnectionState = 'Connecting' | 'Synchronizing' | 'Live' | 'Reconnecting' | 'Offline' | 'Error'
+export type SaveIssue = 'none' | 'retrying' | 'unconfirmed'
 
 export type SyncHealthInput = {
   connection: CanvasConnectionState
   queuedChanges: number
   writeInFlight: boolean
   localEditing: boolean
-  saveIssue: boolean
+  saveIssue: SaveIssue
 }
 
 export type SyncHealthTone = 'ok' | 'busy' | 'offline' | 'error'
 
 export type SyncHealth = {
-  key: 'connecting' | 'synchronizing' | 'saved' | 'editing' | 'saving' | 'waiting' | 'retrying-save' | 'reconnecting' | 'offline' | 'error'
+  key: 'connecting' | 'synchronizing' | 'saved' | 'editing' | 'saving' | 'waiting' | 'retrying-save' | 'confirming-save' | 'reconnecting' | 'offline' | 'error'
   label: string
   detail: string
   tone: SyncHealthTone
@@ -77,7 +78,17 @@ export function deriveSyncHealth(input: SyncHealthInput): SyncHealth {
     }
   }
 
-  if (input.saveIssue && queued > 0) {
+  if (input.writeInFlight) {
+    return {
+      key: 'saving',
+      label: 'Saving…',
+      detail: 'Saving your completed change to the shared canvas.',
+      tone: 'busy',
+      busy: true,
+    }
+  }
+
+  if (input.saveIssue === 'retrying') {
     return {
       key: 'retrying-save',
       label: 'Retrying save…',
@@ -87,11 +98,11 @@ export function deriveSyncHealth(input: SyncHealthInput): SyncHealth {
     }
   }
 
-  if (input.writeInFlight) {
+  if (input.saveIssue === 'unconfirmed') {
     return {
-      key: 'saving',
-      label: 'Saving…',
-      detail: 'Saving your completed change to the shared canvas.',
+      key: 'confirming-save',
+      label: 'Confirming save…',
+      detail: 'The write completed, but Canvas is checking the latest shared state before claiming everything is saved.',
       tone: 'busy',
       busy: true,
     }
