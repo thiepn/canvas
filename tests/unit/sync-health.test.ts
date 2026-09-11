@@ -7,7 +7,7 @@ const live = (patch: Partial<SyncHealthInput> = {}): SyncHealthInput => ({
   queuedChanges: 0,
   writeInFlight: false,
   localEditing: false,
-  saveIssue: false,
+  saveIssue: 'none',
   ...patch,
 })
 
@@ -19,10 +19,22 @@ test('saved is shown only when live and no local or durable work remains', () =>
 })
 
 test('save failures outrank ordinary queue state while preserving retry semantics', () => {
-  const health = deriveSyncHealth(live({ queuedChanges: 2, saveIssue: true }))
+  const health = deriveSyncHealth(live({ queuedChanges: 2, saveIssue: 'retrying' }))
   assert.equal(health.key, 'retrying-save')
   assert.equal(health.tone, 'error')
   assert.match(health.detail, /still in this tab/i)
+})
+
+test('an accepted but unconfirmed write cannot claim saved', () => {
+  const health = deriveSyncHealth(live({ saveIssue: 'unconfirmed' }))
+  assert.equal(health.key, 'confirming-save')
+  assert.equal(health.tone, 'busy')
+  assert.match(health.detail, /before claiming everything is saved/i)
+})
+
+test('an active retry reports saving while its request is actually in flight', () => {
+  const health = deriveSyncHealth(live({ queuedChanges: 2, saveIssue: 'retrying', writeInFlight: true }))
+  assert.equal(health.key, 'saving')
 })
 
 test('connection loss outranks save activity and explains queued changes', () => {
