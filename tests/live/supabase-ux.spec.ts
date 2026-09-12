@@ -121,7 +121,8 @@ test('320px mobile shell stays contained and the identity/settings menu remains 
   await expect(page.getByTestId('main-menu-trigger')).toBeHidden()
   await expect(page.locator('.default-sidebar-trigger')).toBeHidden()
   await expect(page.locator('.App-toolbar__extra-tools-trigger')).toBeHidden()
-  await expect(page.getByTestId('toolbar-LaserPointer')).toBeVisible()
+  // Excalidraw's compact 320px toolbar intentionally omits the Laser button.
+  await expect(page.getByTestId('toolbar-LaserPointer')).toHaveCount(0)
 
   const menuButton = page.getByRole('button', { name: 'Canvas menu and presence' })
   await expect(menuButton).toBeVisible()
