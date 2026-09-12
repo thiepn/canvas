@@ -6,7 +6,7 @@ export function readPreference(storage: LocalStorageLike | null, key: string): s
 export function writePreference(storage: LocalStorageLike | null, key: string, value: string): void {
   try { storage?.setItem(key, value) } catch { /* Optional device preference, not shared persistence. */ }
 }
-export function loadTheme(storage: LocalStorageLike | null): ThemePreference {
-  const saved = readPreference(storage, 'canvas.theme.v1')
-  return saved === 'light' || saved === 'dark' ? saved : 'system'
+/** Canvas is intentionally light-only. Legacy saved theme values are ignored. */
+export function loadTheme(_storage: LocalStorageLike | null): ThemePreference {
+  return 'light'
 }
