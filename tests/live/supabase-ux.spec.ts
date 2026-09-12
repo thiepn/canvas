@@ -49,7 +49,7 @@ test('required vector tools persist through the real Excalidraw + Supabase path'
   await expect(page.getByTestId('main-menu-trigger')).toBeHidden()
   await expect(page.locator('.default-sidebar-trigger')).toBeHidden()
   await expect(page.locator('.App-toolbar__extra-tools-trigger')).toBeHidden()
-  await expect(page.getByTestId('toolbar-LaserPointer')).toBeHidden()
+  await expect(page.getByTestId('toolbar-LaserPointer')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Frame tool' })).toBeVisible()
 
   // The properties panel occupies the left 220px when a drawing tool is active.
@@ -121,6 +121,7 @@ test('320px mobile shell stays contained and the identity/settings menu remains 
   await expect(page.getByTestId('main-menu-trigger')).toBeHidden()
   await expect(page.locator('.default-sidebar-trigger')).toBeHidden()
   await expect(page.locator('.App-toolbar__extra-tools-trigger')).toBeHidden()
+  await expect(page.getByTestId('toolbar-LaserPointer')).toBeVisible()
 
   const menuButton = page.getByRole('button', { name: 'Canvas menu and presence' })
   await expect(menuButton).toBeVisible()
@@ -128,7 +129,7 @@ test('320px mobile shell stays contained and the identity/settings menu remains 
   const settings = page.getByLabel('Canvas settings')
   await expect(settings).toBeVisible()
   await expect(settings.getByLabel('Display name')).toBeVisible()
-  await expect(settings.getByLabel('Appearance')).toBeVisible()
+  await expect(settings.getByLabel('Appearance')).toBeHidden()
   await expect(settings.getByRole('button', { name: 'Frame tool' })).toBeVisible()
   await expect(settings.getByRole('button', { name: 'Export JSON backup' })).toBeVisible()
 })
