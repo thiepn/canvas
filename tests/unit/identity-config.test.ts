@@ -1,11 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { loadIdentity, cleanName, colorForId, IDENTITY_KEY, saveIdentity } from '../../app/presence/identity.ts'
+import { loadIdentity, cleanName, colorForId, defaultDisplayNameForId, IDENTITY_KEY, PRESENCE_COLORS, saveIdentity } from '../../app/presence/identity.ts'
 import { loadTheme } from '../../app/storage/preferences.ts'
 import { createLiveConfig, DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL, normalizeBasePath } from '../../app/config/public-config.ts'
 function memory() { const map = new Map<string, string>(); return { getItem: (key: string) => map.get(key) ?? null, setItem: (key: string, value: string) => { map.set(key, value) } } }
 const id = 'ec4145a1-f218-416e-bdb5-a5f79a5f03c0'
-test('anonymous identity persists locally and color is deterministic', () => { const storage = memory(), first = loadIdentity(storage, () => id); assert.equal(first.deviceId, id); assert.match(first.displayName, /^Guest \d{4}$/); assert.deepEqual(loadIdentity(storage, () => { throw new Error('Must reuse ID') }), first); assert.equal(first.color, colorForId(id)) })
+test('anonymous identity persists locally with a deterministic friendly alias and color', () => { const storage = memory(), first = loadIdentity(storage, () => id); assert.equal(first.deviceId, id); assert.equal(first.displayName, defaultDisplayNameForId(id)); assert.match(first.displayName, /^[A-Z][a-z]+ [A-Z][a-z]+ \d{2}$/); assert.deepEqual(loadIdentity(storage, () => { throw new Error('Must reuse ID') }), first); assert.equal(first.color, colorForId(id)); assert.ok(PRESENCE_COLORS.length >= 12) })
+test('saved display names remain user-controlled instead of being replaced by generated aliases', () => { const storage = memory(); storage.setItem(IDENTITY_KEY, JSON.stringify({ deviceId: id, displayName: 'Jonathan' })); assert.equal(loadIdentity(storage).displayName, 'Jonathan') })
 test('corrupt local identity safely regenerates, without a login flow', () => { const storage = memory(); storage.setItem(IDENTITY_KEY, '{broken'); assert.equal(loadIdentity(storage, () => id).deviceId, id) })
 test('names are bounded and sanitized, not authenticated', () => { assert.equal(cleanName('\n Jonathan\u0000 '), 'Jonathan'); assert.equal(cleanName('a'.repeat(100)).length, 32); assert.equal(cleanName('  '), 'Guest') })
 test('unavailable browser storage does not prevent use', () => { const storage = { getItem: () => { throw new Error('disabled') }, setItem: () => { throw new Error('disabled') } }; const identity = loadIdentity(storage, () => id); assert.equal(identity.deviceId, id); assert.equal(saveIdentity(storage, identity), false) })
