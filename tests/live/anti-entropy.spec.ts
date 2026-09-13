@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
 import { DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL } from '../../app/config/public-config.ts'
 import { dragOnCanvas, exportElement } from './scene-helpers.ts'
+import { retryTransientSupabaseTestOperation } from './supabase-test-helpers.ts'
 
 const TABLE = 'canvas_ci_elements'
 const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE_KEY, {
@@ -9,7 +10,7 @@ const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE
 })
 
 async function clean() {
-  const { error } = await supabase.from(TABLE).delete().neq('id', '')
+  const { error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).delete().neq('id', ''))
   if (error) throw error
 }
 
@@ -33,7 +34,8 @@ test('focus anti-entropy repairs a deliberately dropped Postgres change without 
 
     let id = ''
     await expect.poll(async () => {
-      const { data } = await supabase.from(TABLE).select('id,element,is_deleted').eq('is_deleted', false).limit(1)
+      const { data, error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).select('id,element,is_deleted').eq('is_deleted', false).limit(1))
+      if (error) throw error
       const row = data?.[0]
       if (row?.element?.type === 'rectangle' && row.element.width === 130) id = row.id
       return id

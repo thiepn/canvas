@@ -3,6 +3,7 @@ import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
 import { DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL } from '../../app/config/public-config.ts'
 import { CANVAS_PREVIEW_PROTOCOL } from '../../app/canvas/preview-lane.ts'
 import { dragOnCanvas, exportElement } from './scene-helpers.ts'
+import { retryTransientSupabaseTestOperation } from './supabase-test-helpers.ts'
 
 const TABLE = 'canvas_ci_elements'
 const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE_KEY, {
@@ -10,12 +11,12 @@ const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE
 })
 
 async function cleanWorld() {
-  const { error } = await supabase.from(TABLE).delete().neq('id', '')
+  const { error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).delete().neq('id', ''))
   if (error) throw error
 }
 
 async function rows() {
-  const { data, error } = await supabase.from(TABLE).select('id,version,version_nonce,is_deleted,element')
+  const { data, error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).select('id,version,version_nonce,is_deleted,element'))
   if (error) throw error
   return data ?? []
 }
