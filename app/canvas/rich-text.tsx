@@ -701,7 +701,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       if (!editor || !selection?.rangeCount) return
       const range = selection.getRangeAt(0)
       if (!selectionInside(editor, range)) return
-      selectionRef.current = range.cloneRange()
+      selectionRef.current = selectionBookmark(editor, range)
       const format = computedInlineFormat(editor, range)
       if (format.fontFamily) setFontQuery(fontLabel(format.fontFamily))
       if (format.fontSize) setFontSize(cleanFontSize(Number.parseFloat(format.fontSize)))
