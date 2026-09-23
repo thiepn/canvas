@@ -24,6 +24,7 @@ import {
   type CanvasPreviewElement,
   type CanvasPreviewSource,
 } from './preview-lane.ts'
+import { createRichTextElement, RichTextLayer, type RichTextLayerHandle } from './rich-text.tsx'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = CanvasConnectionState
@@ -150,7 +151,7 @@ function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   URL.revokeObjectURL(url)
 }
 
-function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme }: {
+function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText }: {
   api: ExcalidrawImperativeAPI | null
   identity: Identity
   people: PresencePerson[]
@@ -159,6 +160,8 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   theme: ThemePreference
   rename: (name: string) => void
   changeTheme: (theme: ThemePreference) => void
+  richTextMode: boolean
+  toggleRichText: () => void
 }) {
   const [menu, setMenu] = useState(false)
   const [name, setName] = useState(identity.displayName)
@@ -192,6 +195,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
     <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{status === 'Live' && <span className="connection-transport">Live</span>}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
+    <button type="button" className={`icon-button rich-text-button${richTextMode ? ' is-active' : ''}`} aria-label="Rich text" aria-pressed={richTextMode} title="Rich text (T)" disabled={!api || status !== 'Live'} onClick={toggleRichText}><Icon name="text" /></button>
     <button type="button" className="icon-button frame-button" aria-label="Frame tool" title="Frame tool" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" /></button>
     <button type="button" className="icon-button fit-button" aria-label="Fit content" title="Fit all content" disabled={!api} onClick={fit}><Icon name="fit" /></button>
     <button ref={triggerRef} type="button" className="identity-trigger" aria-label="Canvas menu and presence" aria-expanded={menu} aria-controls={menu ? 'live-canvas-menu' : undefined} onClick={() => setMenu(!menu)}><span className="identity-initial" style={{ borderColor: safeColor(identity.color) }}>{identity.displayName.slice(0, 1).toUpperCase()}</span><span className="identity-name">{identity.displayName}</span><Icon name="more" /></button>
@@ -218,6 +222,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null)
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const richTextLayerRef = useRef<RichTextLayerHandle | null>(null)
+  const [richTextMode, setRichTextMode] = useState(false)
   const [status, setStatus] = useState<ConnectionState>('Connecting')
   const statusRef = useRef<ConnectionState>('Connecting')
   const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeState>({ queuedChanges: 0, writeInFlight: false, localEditing: false, saveIssue: 'none' })
@@ -1065,6 +1071,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [identity, status])
 
   const onChange = useCallback((elements: readonly SceneElement[], appState: AppState) => {
+    richTextLayerRef.current?.sync(elements, appState)
     if (applyingRemote.current || statusRef.current !== 'Live') return
     const previousEditingTextId = editingTextRef.current
     const nextEditingTextId = appState.editingTextElement?.id ?? null
@@ -1154,6 +1161,87 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (!saveIdentity(storage, next)) notify('Browser storage is unavailable. This name lasts until the tab closes.')
   }
   const changeTheme = (next: ThemePreference) => { setTheme(next); writePreference(storage, 'canvas.theme.v1', next) }
+  const createRichTextAt = useCallback((sceneX: number, sceneY: number) => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    const richText = createRichTextElement({ x: sceneX, y: sceneY })
+    const current = editor.getSceneElementsIncludingDeleted()
+    editor.updateScene({
+      elements: [...current, richText],
+      appState: { selectedElementIds: { [richText.id]: true } },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    })
+    editor.setActiveTool({ type: 'selection' })
+    setRichTextMode(false)
+    requestAnimationFrame(() => richTextLayerRef.current?.beginEditing(richText.id))
+  }, [])
+
+  const toggleRichTextMode = useCallback(() => {
+    if (!apiRef.current || statusRef.current !== 'Live') return
+    apiRef.current.setActiveTool({ type: 'selection' })
+    setRichTextMode(value => !value)
+  }, [])
+
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input,textarea,select,[contenteditable="true"]')) return
+      if (event.key === 'Escape' && richTextMode) {
+        event.preventDefault()
+        event.stopPropagation()
+        setRichTextMode(false)
+        return
+      }
+      if (event.altKey || event.ctrlKey || event.metaKey || event.key.toLowerCase() !== 't') return
+      event.preventDefault()
+      event.stopPropagation()
+      toggleRichTextMode()
+    }
+    window.addEventListener('keydown', keydown, true)
+    return () => window.removeEventListener('keydown', keydown, true)
+  }, [richTextMode, toggleRichTextMode])
+
+  useEffect(() => {
+    if (status !== 'Live' && richTextMode) setRichTextMode(false)
+  }, [richTextMode, status])
+
+  const scenePointFromPointer = (clientX: number, clientY: number, target: HTMLDivElement) => {
+    const editor = apiRef.current
+    if (!editor) return null
+    const appState = editor.getAppState()
+    const rect = target.getBoundingClientRect()
+    const zoom = Math.max(0.01, appState.zoom.value)
+    return {
+      x: (clientX - rect.left) / zoom - appState.scrollX,
+      y: (clientY - rect.top) / zoom - appState.scrollY,
+    }
+  }
+
+  const handleRichTextPlacement = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!richTextMode || event.button !== 0) return
+    const point = scenePointFromPointer(event.clientX, event.clientY, event.currentTarget)
+    if (!point) return
+    event.preventDefault()
+    event.stopPropagation()
+    createRichTextAt(point.x, point.y)
+  }
+
+  const handleCanvasDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (richTextLayerRef.current?.editSelected()) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    if (Object.keys(editor.getAppState().selectedElementIds).length > 0) return
+    const point = scenePointFromPointer(event.clientX, event.clientY, event.currentTarget)
+    if (!point) return
+    event.preventDefault()
+    event.stopPropagation()
+    createRichTextAt(point.x, point.y)
+  }
+
   const blockPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     const hasFile = Array.from(event.clipboardData.items).some(item => item.kind === 'file')
     if (!hasFile) return
@@ -1165,9 +1253,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }
 
   return <div className="canvas-app live-canvas-app" data-canvas-engine="excalidraw-supabase">
-    <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} />
+    <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} richTextMode={richTextMode} toggleRichText={toggleRichTextMode} />
     <main className="canvas-workspace live-canvas-workspace" aria-label="Shared infinite canvas">
-      <div className="live-excalidraw" onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
+      <div className={`live-excalidraw${richTextMode ? ' rich-text-insert-mode' : ''}`} onPointerDownCapture={handleRichTextPlacement} onDoubleClickCapture={handleCanvasDoubleClick} onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
         <Excalidraw
           excalidrawAPI={setApi}
           onChange={onChange}
@@ -1183,6 +1271,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           <MainMenu />
           <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
         </Excalidraw>
+        <RichTextLayer ref={richTextLayerRef} api={api} disabled={status !== 'Live'} />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}
       {status === 'Live' && (syncHealth.key === 'retrying-save' || syncHealth.key === 'confirming-save') && <div className={`save-health-banner save-health-banner--${syncHealth.tone}`}><span>{syncHealth.detail}</span>{syncHealth.key === 'retrying-save' && <button type="button" onClick={retrySaveNow}>Retry now</button>}</div>}

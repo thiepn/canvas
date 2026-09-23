@@ -35,3 +35,31 @@
 :root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right .ToolIcon__icon,
 :root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right .ToolIcon__label,
 :root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right svg{color:#34363a!important}
+
+
+/* Rich text editing V2. */
+.live-excalidraw [data-testid="toolbar-text"]{display:none!important}
+.rich-text-insert-mode .excalidraw canvas{cursor:text!important}
+:root[data-canvas-rich-text-selected="true"] .live-excalidraw .App-menu__left{display:none!important}
+.rich-text-layer{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}
+.rich-text-block{position:absolute;box-sizing:border-box;pointer-events:none}
+.rich-text-block.is-editing{z-index:20;pointer-events:auto}
+.rich-text-content{width:100%;min-height:100%;padding:4px 6px;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;font-size:20px;line-height:1.35;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;user-select:none}
+.rich-text-content span{box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.rich-text-editor{pointer-events:auto;cursor:text;user-select:text;outline:2px solid var(--focus);outline-offset:2px;background:color-mix(in srgb,var(--panel) 88%,transparent);min-height:100%;overflow:visible}
+.rich-text-toolbar{position:absolute;z-index:750;top:56px;left:50%;transform:translateX(-50%);display:flex;align-items:center;flex-wrap:wrap;gap:6px;max-width:calc(100% - 24px);max-height:calc(100% - 68px);overflow:auto;padding:7px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;box-shadow:var(--shadow);pointer-events:auto;font-size:12px}
+.rich-text-toolbar button,.rich-text-toolbar select,.rich-text-toolbar input{min-height:32px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:4px}
+.rich-text-toolbar button{min-width:32px;padding:4px 8px}
+.rich-text-toolbar button:hover:not(:disabled),.rich-text-button.is-active{background:var(--hover)}
+.rich-text-toolbar button:disabled,.rich-text-toolbar select:disabled,.rich-text-toolbar input:disabled{opacity:.42;cursor:not-allowed}
+.rich-text-edit-button,.rich-text-done-button{font-weight:600}
+.rich-text-done-button{border-color:var(--accent)!important}
+.rich-text-control{display:flex;align-items:center;gap:4px}
+.rich-text-control select{height:32px;max-width:150px;padding:0 6px}
+.rich-text-size-control input{width:64px;padding:0 6px}
+.rich-text-color-group{display:flex;align-items:center;gap:3px;padding-left:4px;border-left:1px solid var(--line)}
+.rich-text-color-group>span{color:var(--muted);margin-right:2px}
+.rich-text-swatch{--swatch:#000;width:20px!important;min-width:20px!important;height:20px!important;min-height:20px!important;padding:0!important;border-radius:50%!important;background:var(--swatch)!important}
+.rich-text-color-group input[type=color]{width:28px;height:28px;min-height:28px;padding:2px;cursor:pointer}
+.rich-text-clear-highlight{font-size:18px;line-height:1}
+@media(max-width:800px){.rich-text-toolbar{top:50px;justify-content:flex-start}.rich-text-color-group{max-width:100%;overflow-x:auto}.rich-text-control select{max-width:120px}}
