@@ -203,10 +203,10 @@ function appendSanitizedNode(node: Node, target: HTMLElement) {
 
 export function sanitizeRichTextHtml(html: string): string {
   if (typeof document === 'undefined') return plainTextToRichHtml(html.slice(0, MAX_HTML_LENGTH))
-  const source = document.createElement('div')
+  const source = document.createElement('template')
   source.innerHTML = html
   const target = document.createElement('div')
-  for (const child of Array.from(source.childNodes)) appendSanitizedNode(child, target)
+  for (const child of Array.from(source.content.childNodes)) appendSanitizedNode(child, target)
   const sanitized = target.innerHTML
   if (sanitized.length <= MAX_HTML_LENGTH) return sanitized
   return plainTextToRichHtml((target.textContent ?? '').slice(0, 60_000))
