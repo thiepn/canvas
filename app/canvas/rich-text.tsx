@@ -744,6 +744,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     document.execCommand('styleWithCSS', false, 'true')
     document.execCommand(command, false)
     rememberSelection()
+    queueMicrotask(captureDraft)
   }
 
   const applyInlineStyle = (styles: Partial<CSSStyleDeclaration>) => {
@@ -776,6 +777,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       selectionRef.current = nextRange.cloneRange()
     }
     editor.focus({ preventScroll: true })
+    queueMicrotask(captureDraft)
   }
 
   const applyFont = (value: string) => {
@@ -852,6 +854,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       }
       rememberSelection()
     }
+    queueMicrotask(captureDraft)
   }
 
   const updateBlockStyle = (patch: Partial<RichTextBlockStyle>) => {
@@ -865,7 +868,10 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     const block = normalizeBlockStyle({ ...data.block, ...patch })
     rememberSelection()
     const next = updateRichTextElement(current, html, block, dimensionsFor(current, { ...data, block }, editingId === current.id ? editorRef.current : null))
-    if (editingId === current.id) draftElementRef.current = next
+    if (editingId === current.id) {
+      draftElementRef.current = next
+      onDraft?.(next)
+    }
     updateSceneElement(next)
     if (editingId === current.id) requestAnimationFrame(() => { restoreSelection() })
   }
@@ -891,6 +897,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     restoreSelection()
     document.execCommand('insertHTML', false, html)
     rememberSelection()
+    queueMicrotask(captureDraft)
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
