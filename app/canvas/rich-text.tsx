@@ -583,10 +583,10 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
 
   const beginEditing = (elementId: string) => {
     if (disabled) return
-    onEditStart?.()
     const element = snapshotRef.current.elements.find(item => item.id === elementId)
       ?? api?.getSceneElementsIncludingDeleted().find(item => item.id === elementId)
     if (!element || !isRichTextElement(element)) return
+    onEditStart?.()
     api?.updateScene({ appState: { selectedElementIds: { [elementId]: true } } })
     if (api) {
       const appState = api.getAppState()
