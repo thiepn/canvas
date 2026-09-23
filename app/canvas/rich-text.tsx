@@ -931,6 +931,12 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
   const mergedTextColors = [...new Set([...recentFormatting.colors, ...TEXT_COLORS])]
   const mergedHighlights = [...new Set([...recentFormatting.highlights, ...HIGHLIGHT_COLORS])]
   const block = selectedData?.block ?? DEFAULT_BLOCK_STYLE
+  const setWidthMode = (value: string) => updateBlockStyle({ widthMode: value === 'auto' ? 'auto' : 'fixed' })
+  const setVerticalAlign = (value: string) => updateBlockStyle({ verticalAlign: value === 'middle' ? 'middle' : value === 'bottom' ? 'bottom' : 'top' })
+  const setBlockNumber = (key: 'lineHeight' | 'letterSpacing' | 'paragraphSpacing' | 'padding' | 'borderRadius', value: string) => {
+    updateBlockStyle({ [key]: Number(value) } as Partial<RichTextBlockStyle>)
+  }
+  const setBlockOpacity = (value: string) => updateBlockStyle({ opacity: Number(value) / 100 })
 
   return <>
     <div className="rich-text-layer" aria-label="Rich text layer">
@@ -1017,14 +1023,37 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
 
           <div className="rich-text-section rich-text-layout-controls">
             <strong>Layout</strong>
-            <label>Width <select value={block.widthMode} onChange={event => updateBlockStyle({ widthMode: event.target.value as RichTextWidthMode })}><option value="fixed">Fixed</option><option value="auto">Auto</option></select></label>
-            <label>Vertical <select value={block.verticalAlign} onChange={event => updateBlockStyle({ verticalAlign: event.target.value as RichTextVerticalAlign })}><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select></label>
-            <label>Line <input type="number" min="0.8" max="3" step="0.05" value={block.lineHeight} onChange={event => updateBlockStyle({ lineHeight: Number(event.target.value) })} /></label>
-            <label>Tracking <input type="number" min="-5" max="20" step="0.1" value={block.letterSpacing} onChange={event => updateBlockStyle({ letterSpacing: Number(event.target.value) })} /></label>
-            <label>Paragraph <input type="number" min="0" max="64" step="1" value={block.paragraphSpacing} onChange={event => updateBlockStyle({ paragraphSpacing: Number(event.target.value) })} /></label>
-            <label>Padding <input type="number" min="0" max="64" step="1" value={block.padding} onChange={event => updateBlockStyle({ padding: Number(event.target.value) })} /></label>
-            <label>Radius <input type="number" min="0" max="48" step="1" value={block.borderRadius} onChange={event => updateBlockStyle({ borderRadius: Number(event.target.value) })} /></label>
-            <label>Opacity <input type="number" min="10" max="100" step="5" value={Math.round(block.opacity * 100)} onChange={event => updateBlockStyle({ opacity: Number(event.target.value) / 100 })} /></label>
+            <label>Width
+              <select value={block.widthMode} onChange={event => setWidthMode(event.currentTarget.value)}>
+                <option value="fixed">Fixed</option>
+                <option value="auto">Auto</option>
+              </select>
+            </label>
+            <label>Vertical
+              <select value={block.verticalAlign} onChange={event => setVerticalAlign(event.currentTarget.value)}>
+                <option value="top">Top</option>
+                <option value="middle">Middle</option>
+                <option value="bottom">Bottom</option>
+              </select>
+            </label>
+            <label>Line
+              <input type="number" min="0.8" max="3" step="0.05" value={block.lineHeight} onChange={event => setBlockNumber('lineHeight', event.currentTarget.value)} />
+            </label>
+            <label>Tracking
+              <input type="number" min="-5" max="20" step="0.1" value={block.letterSpacing} onChange={event => setBlockNumber('letterSpacing', event.currentTarget.value)} />
+            </label>
+            <label>Paragraph
+              <input type="number" min="0" max="64" step="1" value={block.paragraphSpacing} onChange={event => setBlockNumber('paragraphSpacing', event.currentTarget.value)} />
+            </label>
+            <label>Padding
+              <input type="number" min="0" max="64" step="1" value={block.padding} onChange={event => setBlockNumber('padding', event.currentTarget.value)} />
+            </label>
+            <label>Radius
+              <input type="number" min="0" max="48" step="1" value={block.borderRadius} onChange={event => setBlockNumber('borderRadius', event.currentTarget.value)} />
+            </label>
+            <label>Opacity
+              <input type="number" min="10" max="100" step="5" value={Math.round(block.opacity * 100)} onChange={event => setBlockOpacity(event.currentTarget.value)} />
+            </label>
           </div>
 
           <div className="rich-text-section rich-text-background-section">
