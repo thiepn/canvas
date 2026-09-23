@@ -77,13 +77,23 @@ test('required vector tools persist through the real Excalidraw + Supabase path'
   await dragOnCanvas(page, [660, 285], [750, 340], 14)
   await waitForType('freedraw')
 
-  await selectTool(page, /^Text\b/i, /^Text\b/i)
+  await page.getByRole('button', { name: 'Rich text' }).click()
   const box = await page.locator('.live-excalidraw').boundingBox()
   if (!box) throw new Error('Live Excalidraw surface has no bounding box.')
   await page.mouse.click(box.x + 300, box.y + 410)
-  await page.keyboard.type('Production path text')
+  const richEditor = page.locator('.rich-text-editor')
+  await expect(richEditor).toBeVisible()
+  await richEditor.pressSequentially('Production path text')
   await page.keyboard.press('Escape')
-  await waitForType('text')
+  await expect.poll(async () => {
+    const { data, error } = await supabase.from(TABLE).select('element,is_deleted').eq('is_deleted', false)
+    if (error) throw error
+    return (data ?? []).filter(row => {
+      const element = row.element as Record<string, unknown> | null
+      const customData = element?.customData as Record<string, unknown> | undefined
+      return Boolean(customData?.canvasRichText)
+    }).length
+  }).toBeGreaterThan(0)
 
   await page.getByRole('button', { name: 'Frame tool' }).click()
   await dragOnCanvas(page, [630, 385], [820, 485])
@@ -94,7 +104,7 @@ test('required vector tools persist through the real Excalidraw + Supabase path'
   await dragOnCanvas(page, [280, 185], [430, 185], 14)
   await expect.poll(deletedCount).toBeGreaterThan(beforeDelete)
 
-  const expectedTypes = ['ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text', 'frame']
+  const expectedTypes = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'frame']
   const types = await activeTypes()
   for (const type of expectedTypes) expect(types).toContain(type)
   await page.reload()
@@ -102,6 +112,62 @@ test('required vector tools persist through the real Excalidraw + Supabase path'
   const restored = await readScene(page)
   for (const type of expectedTypes) expect(restored.map(element => element.type)).toContain(type)
   expect(restored.some(element => element.type === 'rectangle')).toBe(false)
+})
+
+test('rich text supports mixed inline formatting, layout controls and reload persistence', async ({ page }) => {
+  await page.goto('./')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Rich text' }).click()
+  const box = await page.locator('.live-excalidraw').boundingBox()
+  if (!box) throw new Error('Live Excalidraw surface has no bounding box.')
+  await page.mouse.click(box.x + 390, box.y + 210)
+
+  const editor = page.locator('.rich-text-editor')
+  await expect(editor).toBeVisible()
+  await editor.pressSequentially('Alpha Beta')
+  await page.keyboard.press('Control+Shift+ArrowLeft')
+  await page.getByRole('button', { name: 'Bold' }).click()
+
+  const font = page.getByLabel('Font')
+  await font.fill('Georgia')
+  await font.press('Enter')
+  const size = page.getByLabel('Size')
+  await size.fill('32')
+  await size.press('Enter')
+  await page.getByRole('button', { name: 'Text color #2563eb' }).click()
+  await page.getByRole('button', { name: 'Highlight #fff3bf' }).click()
+  await page.getByRole('button', { name: 'Align center' }).click()
+
+  await page.getByText('More', { exact: true }).click()
+  await page.getByLabel('Line').fill('1.5')
+  await page.getByLabel('Width').selectOption('auto')
+  await page.getByRole('button', { name: 'Done' }).click()
+
+  let richId = ''
+  await expect.poll(async () => {
+    const { data, error } = await supabase.from(TABLE).select('element,is_deleted').eq('is_deleted', false)
+    if (error) throw error
+    const rich = (data ?? []).map(row => row.element as Record<string, unknown>).find(element => {
+      const customData = element.customData as Record<string, unknown> | undefined
+      return Boolean(customData?.canvasRichText)
+    })
+    if (!rich) return false
+    richId = String(rich.id)
+    const dataValue = (rich.customData as Record<string, unknown>).canvasRichText as Record<string, unknown>
+    const block = dataValue.block as Record<string, unknown>
+    return dataValue.version === 2
+      && String(dataValue.html).includes('font-weight')
+      && String(dataValue.html).includes('Georgia')
+      && String(dataValue.html).includes('32px')
+      && block.textAlign === 'center'
+      && block.widthMode === 'auto'
+      && Number(block.lineHeight) === 1.5
+  }).toBe(true)
+
+  await page.reload()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await expect(page.locator(`[data-rich-text-id="${richId}"] .rich-text-body`)).toContainText('Alpha Beta')
 })
 
 test('320px mobile shell stays contained and the identity/settings menu remains usable', async ({ page }) => {
