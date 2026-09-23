@@ -849,7 +849,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, { api: ExcalidrawIm
     requestAnimationFrame(() => beginEditing(converted.id))
   }
 
-  const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {  const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
+  const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
     event.preventDefault()
     const rich = event.clipboardData.getData('text/html')
     const plain = event.clipboardData.getData('text/plain')
