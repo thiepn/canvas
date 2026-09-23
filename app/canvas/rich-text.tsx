@@ -4,6 +4,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -631,19 +632,6 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     })
   }
 
-  const focusAtEnd = () => {
-    const editor = editorRef.current
-    if (!editor) return
-    editor.focus({ preventScroll: true })
-    const range = document.createRange()
-    range.selectNodeContents(editor)
-    range.collapse(false)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    selectionRef.current = selectionBookmark(editor, range)
-  }
-
   const beginEditing = (elementId: string) => {
     if (disabled) return
     const element = snapshotRef.current.elements.find(item => item.id === elementId)
@@ -666,8 +654,27 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       setSnapshot(immediate)
     }
     setEditingId(elementId)
-    requestAnimationFrame(focusAtEnd)
   }
+
+  useLayoutEffect(() => {
+    if (!editingId) return
+    const editor = editorRef.current
+    const current = draftElementRef.current?.id === editingId
+      ? draftElementRef.current
+      : snapshotRef.current.elements.find(element => element.id === editingId)
+    const data = current ? richData(current) : null
+    if (!editor || !data) return
+
+    editor.innerHTML = sanitizeRichTextHtml(data.html)
+    editor.focus({ preventScroll: true })
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    selectionRef.current = selectionBookmark(editor, range)
+  }, [editingId])
 
   const selectedRich = useMemo(() => snapshot.elements.find(element => snapshot.selectedIds[element.id]) ?? null, [snapshot])
   const selectedData = selectedRich ? richData(selectedRich) : null
@@ -918,7 +925,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       draftElementRef.current = next
       onDraft?.(next)
     }
-    updateSceneElement(next)
+    updateSceneElement(next, editingId === current.id ? CaptureUpdateAction.NEVER : CaptureUpdateAction.IMMEDIATELY)
     if (editingId === current.id) requestAnimationFrame(() => { restoreSelection() })
   }
 
@@ -1015,23 +1022,25 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
         const html = sanitizeRichTextHtml(draftData.html)
         return <div key={element.id} className={`rich-text-block${editing ? ' is-editing' : ''}`} style={positionStyle(draft, snapshot)} data-rich-text-id={element.id} data-width-mode={draftData.block.widthMode}>
           <div className="rich-text-content" style={blockStyle(draftData.block)}>
-            <div
-              ref={editing ? editorRef : undefined}
-              className={`rich-text-body${editing ? ' rich-text-editor' : ''}`}
-              contentEditable={editing || undefined}
-              suppressContentEditableWarning={editing || undefined}
-              spellCheck={editing || undefined}
-              dangerouslySetInnerHTML={{ __html: html }}
-              onInput={editing ? captureDraft : undefined}
-              onPaste={editing ? handlePaste : undefined}
-              onDrop={editing ? event => event.preventDefault() : undefined}
-              onKeyDown={editing ? handleKeyDown : undefined}
-              onKeyUp={editing ? rememberSelection : undefined}
-              onPointerUp={editing ? rememberSelection : undefined}
-              onBlur={editing ? handleEditorBlur : undefined}
-              onFocus={editing ? handleEditorFocus : undefined}
-              onClick={editing ? handleEditorClick : undefined}
-            />
+            {editing
+              ? <div
+                  key="editor"
+                  ref={editorRef}
+                  className="rich-text-body rich-text-editor"
+                  contentEditable
+                  suppressContentEditableWarning
+                  spellCheck
+                  onInput={captureDraft}
+                  onPaste={handlePaste}
+                  onDrop={event => event.preventDefault()}
+                  onKeyDown={handleKeyDown}
+                  onKeyUp={rememberSelection}
+                  onPointerUp={rememberSelection}
+                  onBlur={handleEditorBlur}
+                  onFocus={handleEditorFocus}
+                  onClick={handleEditorClick}
+                />
+              : <div key="display" className="rich-text-body" dangerouslySetInnerHTML={{ __html: html }} />}
           </div>
         </div>
       })}
