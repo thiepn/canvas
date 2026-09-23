@@ -700,7 +700,10 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     }
   }, [editingId, onEditEnd, snapshot.elements])
 
-  const updateSceneElement = (next: SceneElement, captureUpdate = CaptureUpdateAction.IMMEDIATELY) => {
+  const updateSceneElement = (
+    next: SceneElement,
+    captureUpdate: Parameters<ExcalidrawImperativeAPI['updateScene']>[0]['captureUpdate'] = CaptureUpdateAction.IMMEDIATELY,
+  ) => {
     if (!api) return
     api.updateScene({
       elements: api.getSceneElementsIncludingDeleted().map(element => element.id === next.id ? next : element),
