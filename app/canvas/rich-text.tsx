@@ -437,10 +437,71 @@ function legacyTextToRich(element: SceneElement): SceneElement {
   })
 }
 
+type SelectionBookmark = { start: number; end: number }
+
 function selectionInside(editor: HTMLElement, range: Range | null): range is Range {
   if (!range) return false
   const node = range.commonAncestorContainer
   return node === editor || editor.contains(node.nodeType === Node.TEXT_NODE ? node.parentNode : node)
+}
+
+function logicalTextLength(value: string): number {
+  return value.replace(/\u200b/g, '').length
+}
+
+function selectionBookmark(editor: HTMLElement, range: Range): SelectionBookmark {
+  const prefix = document.createRange()
+  prefix.selectNodeContents(editor)
+  prefix.setEnd(range.startContainer, range.startOffset)
+  const suffix = document.createRange()
+  suffix.selectNodeContents(editor)
+  suffix.setEnd(range.endContainer, range.endOffset)
+  return {
+    start: logicalTextLength(prefix.toString()),
+    end: logicalTextLength(suffix.toString()),
+  }
+}
+
+function rawOffsetForLogical(value: string, logicalOffset: number): number {
+  if (logicalOffset <= 0) return 0
+  let logical = 0
+  for (let raw = 0; raw < value.length; raw++) {
+    if (value[raw] !== '\u200b') logical++
+    if (logical >= logicalOffset) return raw + 1
+  }
+  return value.length
+}
+
+function rangeFromBookmark(editor: HTMLElement, bookmark: SelectionBookmark): Range {
+  const range = document.createRange()
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT)
+  let total = 0
+  let startSet = false
+  let endSet = false
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    const value = node.data
+    const length = logicalTextLength(value)
+    const nextTotal = total + length
+
+    if (!startSet && bookmark.start <= nextTotal) {
+      range.setStart(node, rawOffsetForLogical(value, Math.max(0, bookmark.start - total)))
+      startSet = true
+    }
+    if (!endSet && bookmark.end <= nextTotal) {
+      range.setEnd(node, rawOffsetForLogical(value, Math.max(0, bookmark.end - total)))
+      endSet = true
+      break
+    }
+    total = nextTotal
+  }
+
+  if (!startSet || !endSet) {
+    range.selectNodeContents(editor)
+    range.collapse(false)
+  }
+  return range
 }
 
 function positionStyle(element: SceneElement, snapshot: RichTextSnapshot): CSSProperties {
@@ -527,7 +588,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
   const [editingId, setEditingId] = useState<string | null>(null)
   const editorRef = useRef<HTMLDivElement | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
-  const selectionRef = useRef<Range | null>(null)
+  const selectionRef = useRef<SelectionBookmark | null>(null)
   const draftElementRef = useRef<SceneElement | null>(null)
   const [fontQuery, setFontQuery] = useState<string>(RICH_TEXT_FONTS[0].label)
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
@@ -580,7 +641,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     const selection = window.getSelection()
     selection?.removeAllRanges()
     selection?.addRange(range)
-    selectionRef.current = range.cloneRange()
+    selectionRef.current = selectionBookmark(editor, range)
   }
 
   const beginEditing = (elementId: string) => {
@@ -706,19 +767,16 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     const editor = editorRef.current
     if (!editor) return null
     editor.focus({ preventScroll: true })
-    const saved = selectionRef.current
     const selection = window.getSelection()
-    if (saved && selectionInside(editor, saved)) {
-      selection?.removeAllRanges()
-      selection?.addRange(saved)
-      return saved
+    const saved = selectionRef.current
+    const range = saved ? rangeFromBookmark(editor, saved) : document.createRange()
+    if (!saved) {
+      range.selectNodeContents(editor)
+      range.collapse(false)
     }
-    const range = document.createRange()
-    range.selectNodeContents(editor)
-    range.collapse(false)
     selection?.removeAllRanges()
     selection?.addRange(range)
-    selectionRef.current = range.cloneRange()
+    selectionRef.current = selectionBookmark(editor, range)
     return range
   }
 
@@ -727,7 +785,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     const selection = window.getSelection()
     if (!editor || !selection?.rangeCount) return
     const range = selection.getRangeAt(0)
-    if (selectionInside(editor, range)) selectionRef.current = range.cloneRange()
+    if (selectionInside(editor, range)) selectionRef.current = selectionBookmark(editor, range)
   }
 
   const recordRecent = (patch: Partial<RecentFormatting>) => {
@@ -764,7 +822,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       const selection = window.getSelection()
       selection?.removeAllRanges()
       selection?.addRange(nextRange)
-      selectionRef.current = nextRange.cloneRange()
+      selectionRef.current = selectionBookmark(editor, nextRange)
     } else {
       const fragment = range.extractContents()
       span.append(fragment)
@@ -774,7 +832,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       const selection = window.getSelection()
       selection?.removeAllRanges()
       selection?.addRange(nextRange)
-      selectionRef.current = nextRange.cloneRange()
+      selectionRef.current = selectionBookmark(editor, nextRange)
     }
     editor.focus({ preventScroll: true })
     queueMicrotask(captureDraft)
@@ -840,7 +898,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       const selection = window.getSelection()
       selection?.removeAllRanges()
       selection?.addRange(nextRange)
-      selectionRef.current = nextRange.cloneRange()
+      selectionRef.current = selectionBookmark(editor, nextRange)
     } else {
       document.execCommand('createLink', false, href)
       for (const anchor of Array.from(editor.querySelectorAll('a'))) {
@@ -931,10 +989,11 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     if (!saved) return
     queueMicrotask(() => {
       const editor = editorRef.current
-      if (!editor || document.activeElement !== editor || !selectionInside(editor, saved)) return
+      if (!editor || document.activeElement !== editor) return
+      const range = rangeFromBookmark(editor, saved)
       const selection = window.getSelection()
       selection?.removeAllRanges()
-      selection?.addRange(saved.cloneRange())
+      selection?.addRange(range)
     })
   }
 
