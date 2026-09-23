@@ -1161,6 +1161,24 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (!saveIdentity(storage, next)) notify('Browser storage is unavailable. This name lasts until the tab closes.')
   }
   const changeTheme = (next: ThemePreference) => { setTheme(next); writePreference(storage, 'canvas.theme.v1', next) }
+  const recordRichTextDraft = useCallback((element: SceneElement) => {
+    if (statusRef.current !== 'Live') return
+    const nextStamp = stampOf(element)
+    const observed = observedSceneRef.current.get(element.id)
+    if (isNewerVersion(nextStamp, observed)) {
+      operationTracker.record(element, observed !== undefined)
+      observedSceneRef.current.set(element.id, nextStamp)
+    }
+    if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) return
+    const queued = pendingRef.current.get(element.id)
+    if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
+    patchSyncRuntime({ localEditing: true })
+    const activeSnapshot = operationTracker.snapshotActive()
+    if (activeSnapshot?.source === 'text') {
+      queuePreview('text', activeSnapshot.changes.map(change => change.type === 'delete' ? change.tombstone : change.element))
+    }
+  }, [operationTracker, patchSyncRuntime, queuePreview])
+
   const beginRichTextOperation = useCallback(() => {
     if (statusRef.current !== 'Live') return
     continuousOperationRef.current = 'text'
@@ -1294,6 +1312,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           disabled={status !== 'Live'}
           onEditStart={beginRichTextOperation}
           onEditEnd={endRichTextOperation}
+          onDraft={recordRichTextDraft}
         />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}

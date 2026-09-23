@@ -119,6 +119,40 @@ test('a slow text-edit session remains one logical mutation and saves once at it
   expect(settled.counters.durabilityBoundaryFlushes).toBe(1)
 })
 
+test('a long rich-text edit checkpoints the latest draft without splitting the logical edit', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'The durability checkpoint contract needs one browser execution.')
+
+  await page.goto('./?debug=1')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await resetDiagnostics(page)
+
+  await page.getByRole('button', { name: 'Rich text' }).click()
+  const box = await page.locator('.live-excalidraw').boundingBox()
+  if (!box) throw new Error('Live Excalidraw surface has no bounding box.')
+  await page.mouse.click(box.x + 410, box.y + 320)
+  const editor = page.locator('.rich-text-editor')
+  await expect(editor).toBeVisible()
+  await editor.pressSequentially('Checkpoint draft')
+
+  await expect.poll(async () => (await operationSnapshot(page)).counters.durabilityCheckpoints ?? 0, { timeout: 5000 }).toBeGreaterThanOrEqual(1)
+  await expect.poll(async () => {
+    const [persisted] = await persistedElements()
+    const customData = persisted?.customData as Record<string, unknown> | undefined
+    const richText = customData?.canvasRichText as Record<string, unknown> | undefined
+    return String(richText?.html ?? '')
+  }, { timeout: 5000 }).toContain('Checkpoint draft')
+
+  await editor.pressSequentially(' final')
+  await page.keyboard.press('Escape')
+  await expect.poll(async () => (await operationSnapshot(page)).counters.logicalMutations ?? 0).toBe(1)
+  await expect.poll(async () => {
+    const [persisted] = await persistedElements()
+    const customData = persisted?.customData as Record<string, unknown> | undefined
+    const richText = customData?.canvasRichText as Record<string, unknown> | undefined
+    return String(richText?.html ?? '')
+  }).toContain('Checkpoint draft final')
+})
+
 test('an unusually long pointer operation receives bounded safety checkpoints', async ({ page }) => {
   await page.goto('./?debug=1')
   await expect(page.getByText('Live', { exact: true })).toBeVisible()

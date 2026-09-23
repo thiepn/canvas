@@ -518,7 +518,8 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
   disabled: boolean
   onEditStart?: () => void
   onEditEnd?: () => void
-}>(function RichTextLayer({ api, disabled, onEditStart, onEditEnd }, ref) {
+  onDraft?: (element: SceneElement) => void
+}>(function RichTextLayer({ api, disabled, onEditStart, onEditEnd, onDraft }, ref) {
   const [snapshot, setSnapshot] = useState<RichTextSnapshot>({ elements: [], selectedIds: {}, selectedLegacyText: null, scrollX: 0, scrollY: 0, zoom: 1 })
   const snapshotRef = useRef(snapshot)
   const pendingSnapshotRef = useRef<RichTextSnapshot | null>(null)
@@ -527,6 +528,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
   const editorRef = useRef<HTMLDivElement | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
   const selectionRef = useRef<Range | null>(null)
+  const draftElementRef = useRef<SceneElement | null>(null)
   const [fontQuery, setFontQuery] = useState<string>(RICH_TEXT_FONTS[0].label)
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
   const [textColor, setTextColor] = useState('#111827')
@@ -586,6 +588,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     const element = snapshotRef.current.elements.find(item => item.id === elementId)
       ?? api?.getSceneElementsIncludingDeleted().find(item => item.id === elementId)
     if (!element || !isRichTextElement(element)) return
+    draftElementRef.current = element
     onEditStart?.()
     api?.updateScene({ appState: { selectedElementIds: { [elementId]: true } } })
     if (api) {
@@ -623,6 +626,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     if (!editingId) return
     const current = snapshot.elements.find(element => element.id === editingId)
     if (!current) {
+      draftElementRef.current = null
       setEditingId(null)
       queueMicrotask(() => onEditEnd?.())
     }
@@ -647,11 +651,11 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     return () => document.removeEventListener('selectionchange', selectionChange)
   }, [editingId])
 
-  const updateSceneElement = (next: SceneElement) => {
+  const updateSceneElement = (next: SceneElement, captureUpdate = CaptureUpdateAction.IMMEDIATELY) => {
     if (!api) return
     api.updateScene({
       elements: api.getSceneElementsIncludingDeleted().map(element => element.id === next.id ? next : element),
-      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      captureUpdate,
     })
   }
 
@@ -663,20 +667,37 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     return { width, height: Math.max(current.height, editor.scrollHeight + data.block.padding * 2 + 2, 48) }
   }
 
-  const commit = () => {
+  const captureDraft = () => {
     if (!editingId || !api) return
     const editor = editorRef.current
-    const current = api.getSceneElementsIncludingDeleted().find(element => element.id === editingId)
+    const apiElement = api.getSceneElementsIncludingDeleted().find(element => element.id === editingId)
+    const current = draftElementRef.current?.id === editingId ? draftElementRef.current : apiElement
     if (!editor || !current || !isRichTextElement(current)) return
     const data = richData(current)
     if (!data) return
-    updateSceneElement(updateRichTextElement(current, editor.innerHTML, data.block, dimensionsFor(current, data, editor)))
+    const next = updateRichTextElement(current, editor.innerHTML, data.block, dimensionsFor(current, data, editor))
+    draftElementRef.current = next
+    onDraft?.(next)
+  }
+
+  const commit = () => {
+    if (!editingId || !api) return
+    const editor = editorRef.current
+    const apiElement = api.getSceneElementsIncludingDeleted().find(element => element.id === editingId)
+    const current = draftElementRef.current?.id === editingId ? draftElementRef.current : apiElement
+    if (!editor || !current || !isRichTextElement(current)) return
+    const data = richData(current)
+    if (!data) return
+    const next = updateRichTextElement(current, editor.innerHTML, data.block, dimensionsFor(current, data, editor))
+    draftElementRef.current = next
+    updateSceneElement(next)
   }
 
   const finishEditing = () => {
     commit()
     setEditingId(null)
     selectionRef.current = null
+    draftElementRef.current = null
     api?.setActiveTool({ type: 'selection' })
     queueMicrotask(() => onEditEnd?.())
   }
@@ -835,14 +856,17 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
 
   const updateBlockStyle = (patch: Partial<RichTextBlockStyle>) => {
     if (!selectedRich || !api) return
-    const current = api.getSceneElementsIncludingDeleted().find(element => element.id === selectedRich.id)
+    const apiElement = api.getSceneElementsIncludingDeleted().find(element => element.id === selectedRich.id)
+    const current = editingId === selectedRich.id && draftElementRef.current?.id === selectedRich.id ? draftElementRef.current : apiElement
     if (!current || !isRichTextElement(current)) return
     const data = richData(current)
     if (!data) return
     const html = editingId === current.id && editorRef.current ? editorRef.current.innerHTML : data.html
     const block = normalizeBlockStyle({ ...data.block, ...patch })
     rememberSelection()
-    updateSceneElement(updateRichTextElement(current, html, block, dimensionsFor(current, { ...data, block }, editingId === current.id ? editorRef.current : null)))
+    const next = updateRichTextElement(current, html, block, dimensionsFor(current, { ...data, block }, editingId === current.id ? editorRef.current : null))
+    if (editingId === current.id) draftElementRef.current = next
+    updateSceneElement(next)
     if (editingId === current.id) requestAnimationFrame(() => { restoreSelection() })
   }
 
@@ -924,6 +948,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
               suppressContentEditableWarning={editing || undefined}
               spellCheck={editing || undefined}
               dangerouslySetInnerHTML={{ __html: html }}
+              onInput={editing ? captureDraft : undefined}
               onPaste={editing ? handlePaste : undefined}
               onDrop={editing ? event => event.preventDefault() : undefined}
               onKeyDown={editing ? handleKeyDown : undefined}
