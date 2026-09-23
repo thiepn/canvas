@@ -80,16 +80,17 @@ test('a slow text-edit session remains one logical mutation and saves once at it
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
   await resetDiagnostics(page)
 
-  await page.getByTitle(/^Text\b/i).click()
-  await expect(page.getByRole('radio', { name: /^Text\b/i })).toBeChecked()
+  await page.getByRole('button', { name: 'Rich text' }).click()
   const box = await page.locator('.live-excalidraw').boundingBox()
   if (!box) throw new Error('Live Excalidraw surface has no bounding box.')
   await page.mouse.click(box.x + 360, box.y + 300)
-  await page.keyboard.type('Slow')
+  const editor = page.locator('.rich-text-editor')
+  await expect(editor).toBeVisible()
+  await editor.pressSequentially('Slow')
   await page.waitForTimeout(450)
-  await page.keyboard.type(' text')
+  await editor.pressSequentially(' text')
   await page.waitForTimeout(450)
-  await page.keyboard.type(' session')
+  await editor.pressSequentially(' session')
   await page.keyboard.press('Escape')
 
   await expect.poll(async () => (await operationSnapshot(page)).counters.logicalMutations ?? 0).toBe(1)
@@ -106,7 +107,9 @@ test('a slow text-edit session remains one logical mutation and saves once at it
 
   await expect.poll(async () => (await persistedElements()).length).toBe(1)
   const [persisted] = await persistedElements()
-  expect(persisted.text).toBe('Slow text session')
+  const customData = persisted.customData as Record<string, unknown> | undefined
+  const richText = customData?.canvasRichText as Record<string, unknown> | undefined
+  expect(String(richText?.html ?? '')).toContain('Slow text session')
 
   await page.waitForTimeout(900)
   const settled = await operationSnapshot(page)

@@ -111,7 +111,10 @@ test('required vector tools persist through the real Excalidraw + Supabase path'
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
   const restored = await readScene(page)
   for (const type of expectedTypes) expect(restored.map(element => element.type)).toContain(type)
-  expect(restored.some(element => element.type === 'rectangle')).toBe(false)
+  expect(restored.some(element => {
+    const customData = element.customData as Record<string, unknown> | undefined
+    return Boolean(customData?.canvasRichText)
+  })).toBe(true)
 })
 
 test('rich text supports mixed inline formatting, layout controls and reload persistence', async ({ page }) => {
@@ -140,8 +143,9 @@ test('rich text supports mixed inline formatting, layout controls and reload per
   await page.getByRole('button', { name: 'Align center' }).click()
 
   await page.getByText('More', { exact: true }).click()
-  await page.getByLabel('Line').fill('1.5')
-  await page.getByLabel('Width').selectOption('auto')
+  const layout = page.locator('.rich-text-layout-controls')
+  await layout.getByLabel('Line').fill('1.5')
+  await layout.getByLabel('Width').selectOption('auto')
   await page.getByRole('button', { name: 'Done' }).click()
 
   let richId = ''

@@ -1161,9 +1161,26 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (!saveIdentity(storage, next)) notify('Browser storage is unavailable. This name lasts until the tab closes.')
   }
   const changeTheme = (next: ThemePreference) => { setTheme(next); writePreference(storage, 'canvas.theme.v1', next) }
+  const beginRichTextOperation = useCallback(() => {
+    if (statusRef.current !== 'Live') return
+    continuousOperationRef.current = 'text'
+    operationTracker.beginText()
+    patchSyncRuntime({ localEditing: true })
+    armCheckpointRef.current()
+  }, [operationTracker, patchSyncRuntime])
+
+  const endRichTextOperation = useCallback(() => {
+    if (continuousOperationRef.current !== 'text') return
+    continuousOperationRef.current = null
+    patchSyncRuntime({ localEditing: false })
+    clearCheckpointRef.current()
+    operationTracker.endText()
+  }, [operationTracker, patchSyncRuntime])
+
   const createRichTextAt = useCallback((sceneX: number, sceneY: number) => {
     const editor = apiRef.current
     if (!editor || statusRef.current !== 'Live') return
+    beginRichTextOperation()
     const richText = createRichTextElement({ x: sceneX, y: sceneY })
     const current = editor.getSceneElementsIncludingDeleted()
     editor.updateScene({
@@ -1174,7 +1191,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     editor.setActiveTool({ type: 'selection' })
     setRichTextMode(false)
     requestAnimationFrame(() => richTextLayerRef.current?.beginEditing(richText.id))
-  }, [])
+  }, [beginRichTextOperation])
 
   const toggleRichTextMode = useCallback(() => {
     if (!apiRef.current || statusRef.current !== 'Live') return
@@ -1271,7 +1288,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           <MainMenu />
           <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
         </Excalidraw>
-        <RichTextLayer ref={richTextLayerRef} api={api} disabled={status !== 'Live'} />
+        <RichTextLayer
+          ref={richTextLayerRef}
+          api={api}
+          disabled={status !== 'Live'}
+          onEditStart={beginRichTextOperation}
+          onEditEnd={endRichTextOperation}
+        />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}
       {status === 'Live' && (syncHealth.key === 'retrying-save' || syncHealth.key === 'confirming-save') && <div className={`save-health-banner save-health-banner--${syncHealth.tone}`}><span>{syncHealth.detail}</span>{syncHealth.key === 'retrying-save' && <button type="button" onClick={retrySaveNow}>Retry now</button>}</div>}

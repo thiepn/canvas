@@ -513,7 +513,12 @@ function computedInlineFormat(editor: HTMLElement, range: Range | null): InlineF
   }
 }
 
-export const RichTextLayer = forwardRef<RichTextLayerHandle, { api: ExcalidrawImperativeAPI | null; disabled: boolean }>(function RichTextLayer({ api, disabled }, ref) {
+export const RichTextLayer = forwardRef<RichTextLayerHandle, {
+  api: ExcalidrawImperativeAPI | null
+  disabled: boolean
+  onEditStart?: () => void
+  onEditEnd?: () => void
+}>(function RichTextLayer({ api, disabled, onEditStart, onEditEnd }, ref) {
   const [snapshot, setSnapshot] = useState<RichTextSnapshot>({ elements: [], selectedIds: {}, selectedLegacyText: null, scrollX: 0, scrollY: 0, zoom: 1 })
   const snapshotRef = useRef(snapshot)
   const pendingSnapshotRef = useRef<RichTextSnapshot | null>(null)
@@ -578,6 +583,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, { api: ExcalidrawIm
 
   const beginEditing = (elementId: string) => {
     if (disabled) return
+    onEditStart?.()
     const element = snapshotRef.current.elements.find(item => item.id === elementId)
       ?? api?.getSceneElementsIncludingDeleted().find(item => item.id === elementId)
     if (!element || !isRichTextElement(element)) return
@@ -616,8 +622,11 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, { api: ExcalidrawIm
   useEffect(() => {
     if (!editingId) return
     const current = snapshot.elements.find(element => element.id === editingId)
-    if (!current) setEditingId(null)
-  }, [editingId, snapshot.elements])
+    if (!current) {
+      setEditingId(null)
+      queueMicrotask(() => onEditEnd?.())
+    }
+  }, [editingId, onEditEnd, snapshot.elements])
 
   useEffect(() => {
     if (!editingId) return
@@ -669,6 +678,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, { api: ExcalidrawIm
     setEditingId(null)
     selectionRef.current = null
     api?.setActiveTool({ type: 'selection' })
+    queueMicrotask(() => onEditEnd?.())
   }
 
   const restoreSelection = (): Range | null => {
