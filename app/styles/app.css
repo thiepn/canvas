@@ -15,3 +15,23 @@
 /* Production Excalidraw + Supabase surface. */
 .live-canvas-workspace{touch-action:none}.live-excalidraw{position:absolute;inset:0;overflow:hidden}.live-excalidraw>.excalidraw{height:100%;width:100%}.live-excalidraw .App-menu_top{top:8px}.live-excalidraw .layer-ui__wrapper__footer-center{padding-bottom:max(8px,env(safe-area-inset-bottom))}.live-excalidraw .dropdown-menu-button,.live-excalidraw button{touch-action:manipulation}.live-excalidraw .main-menu-trigger,.live-excalidraw .default-sidebar-trigger,.live-excalidraw .default-sidebar,.live-excalidraw .App-toolbar__extra-tools-trigger{display:none!important}.live-canvas-app .network-banner,.live-canvas-app .save-health-banner{top:16px;pointer-events:auto}.live-canvas-app .canvas-notice{bottom:max(88px,calc(env(safe-area-inset-bottom) + 70px));z-index:650}.live-canvas-header{box-shadow:0 1px 0 #00000003}
 @media(max-width:700px){.live-excalidraw .App-menu_top{top:4px}.live-canvas-app .network-banner,.live-canvas-app .save-health-banner{top:10px}.live-canvas-app .canvas-notice{bottom:max(92px,calc(env(safe-area-inset-bottom) + 74px))}}
+
+
+/* Canvas-owned navigation + top-right contrast hardening. */
+/* Keep the embedded drawing engine, but remove its branded outbound website links from the product UI. */
+.live-excalidraw a[href*="excalidraw.com"],
+.live-excalidraw a[href*="plus.excalidraw.com"],
+.live-excalidraw a[href*="github.com/excalidraw"],
+.live-excalidraw a[href*="twitter.com/excalidraw"],
+.live-excalidraw a[href*="x.com/excalidraw"]{display:none!important}
+
+/* Light mode must never inherit Excalidraw's low-contrast gray for controls shown on white surfaces. */
+:root:not([data-theme="dark"]) .live-canvas-header .icon-button,
+:root:not([data-theme="dark"]) .live-canvas-header .identity-trigger,
+:root:not([data-theme="dark"]) .live-canvas-header .identity-name,
+:root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right,
+:root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right button,
+:root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right [role="button"],
+:root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right .ToolIcon__icon,
+:root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right .ToolIcon__label,
+:root:not([data-theme="dark"]) .live-excalidraw .App-menu_top__right svg{color:#34363a!important}
