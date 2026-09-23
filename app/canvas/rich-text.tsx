@@ -693,25 +693,6 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     }
   }, [editingId, onEditEnd, snapshot.elements])
 
-  useEffect(() => {
-    if (!editingId) return
-    const selectionChange = () => {
-      const editor = editorRef.current
-      const selection = window.getSelection()
-      if (!editor || !selection?.rangeCount) return
-      const range = selection.getRangeAt(0)
-      if (!selectionInside(editor, range)) return
-      selectionRef.current = selectionBookmark(editor, range)
-      const format = computedInlineFormat(editor, range)
-      if (format.fontFamily) setFontQuery(fontLabel(format.fontFamily))
-      if (format.fontSize) setFontSize(cleanFontSize(Number.parseFloat(format.fontSize)))
-      if (format.color) setTextColor(format.color)
-      if (format.backgroundColor && format.backgroundColor !== 'transparent') setHighlightColor(format.backgroundColor)
-    }
-    document.addEventListener('selectionchange', selectionChange)
-    return () => document.removeEventListener('selectionchange', selectionChange)
-  }, [editingId])
-
   const updateSceneElement = (next: SceneElement, captureUpdate = CaptureUpdateAction.IMMEDIATELY) => {
     if (!api) return
     api.updateScene({
@@ -730,6 +711,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
 
   const captureDraft = () => {
     if (!editingId || !api) return
+    rememberSelection()
     const editor = editorRef.current
     const apiElement = api.getSceneElementsIncludingDeleted().find(element => element.id === editingId)
     const current = draftElementRef.current?.id === editingId ? draftElementRef.current : apiElement
@@ -785,7 +767,13 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     const selection = window.getSelection()
     if (!editor || !selection?.rangeCount) return
     const range = selection.getRangeAt(0)
-    if (selectionInside(editor, range)) selectionRef.current = selectionBookmark(editor, range)
+    if (!selectionInside(editor, range)) return
+    selectionRef.current = selectionBookmark(editor, range)
+    const format = computedInlineFormat(editor, range)
+    if (format.fontFamily) setFontQuery(fontLabel(format.fontFamily))
+    if (format.fontSize) setFontSize(cleanFontSize(Number.parseFloat(format.fontSize)))
+    if (format.color) setTextColor(format.color)
+    if (format.backgroundColor && format.backgroundColor !== 'transparent') setHighlightColor(format.backgroundColor)
   }
 
   const recordRecent = (patch: Partial<RecentFormatting>) => {
@@ -1038,6 +1026,8 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
               onPaste={editing ? handlePaste : undefined}
               onDrop={editing ? event => event.preventDefault() : undefined}
               onKeyDown={editing ? handleKeyDown : undefined}
+              onKeyUp={editing ? rememberSelection : undefined}
+              onPointerUp={editing ? rememberSelection : undefined}
               onBlur={editing ? handleEditorBlur : undefined}
               onFocus={editing ? handleEditorFocus : undefined}
               onClick={editing ? handleEditorClick : undefined}
