@@ -926,6 +926,18 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     }, 0)
   }
 
+  const handleEditorFocus = () => {
+    const saved = selectionRef.current
+    if (!saved) return
+    queueMicrotask(() => {
+      const editor = editorRef.current
+      if (!editor || document.activeElement !== editor || !selectionInside(editor, saved)) return
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(saved.cloneRange())
+    })
+  }
+
   const handleEditorClick = (event: MouseEvent<HTMLDivElement>) => {
     const target = event.target
     if (!(target instanceof HTMLAnchorElement)) return
@@ -968,6 +980,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
               onDrop={editing ? event => event.preventDefault() : undefined}
               onKeyDown={editing ? handleKeyDown : undefined}
               onBlur={editing ? handleEditorBlur : undefined}
+              onFocus={editing ? handleEditorFocus : undefined}
               onClick={editing ? handleEditorClick : undefined}
             />
           </div>

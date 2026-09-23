@@ -129,7 +129,24 @@ test('rich text supports mixed inline formatting, layout controls and reload per
   const editor = page.locator('.rich-text-editor')
   await expect(editor).toBeVisible()
   await editor.pressSequentially('Alpha Beta')
-  await page.keyboard.press('Control+Shift+ArrowLeft')
+  await editor.evaluate(node => {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+    let textNode: Node | null = null
+    while (walker.nextNode()) {
+      const candidate = walker.currentNode
+      if ((candidate.textContent ?? '').includes('Alpha Beta')) {
+        textNode = candidate
+        break
+      }
+    }
+    if (!textNode) throw new Error('Rich text editor did not contain the expected text node.')
+    const range = document.createRange()
+    range.setStart(textNode, 6)
+    range.setEnd(textNode, 10)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  })
   await page.getByRole('button', { name: 'Bold' }).click()
 
   const font = page.getByLabel('Font')
