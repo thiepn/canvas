@@ -944,9 +944,11 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
         const data = richData(element)
         if (!data) return null
         const editing = editingId === element.id
-        const html = sanitizeRichTextHtml(data.html)
-        return <div key={element.id} className={`rich-text-block${editing ? ' is-editing' : ''}`} style={positionStyle(element, snapshot)} data-rich-text-id={element.id} data-width-mode={data.block.widthMode}>
-          <div className="rich-text-content" style={blockStyle(data.block)}>
+        const draft = editing && draftElementRef.current?.id === element.id ? draftElementRef.current : element
+        const draftData = richData(draft) ?? data
+        const html = sanitizeRichTextHtml(draftData.html)
+        return <div key={element.id} className={`rich-text-block${editing ? ' is-editing' : ''}`} style={positionStyle(draft, snapshot)} data-rich-text-id={element.id} data-width-mode={draftData.block.widthMode}>
+          <div className="rich-text-content" style={blockStyle(draftData.block)}>
             <div
               ref={editing ? editorRef : undefined}
               className={`rich-text-body${editing ? ' rich-text-editor' : ''}`}
