@@ -147,6 +147,7 @@ test('rich text supports mixed inline formatting, layout controls and reload per
     selection?.removeAllRanges()
     selection?.addRange(range)
   })
+  await editor.dispatchEvent('keyup', { key: 'Shift' })
   await page.getByRole('button', { name: 'Bold' }).click()
 
   const font = page.getByLabel('Font')
