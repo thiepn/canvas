@@ -194,9 +194,10 @@ test('selected frame and its children align as one spatial unit', () => {
   const child = element('child', 20, 40, 20, 20, { frameId: 'frame' })
   const other = element('other', 200, 120, 20, 20)
   const next = alignSelection([frame, child, other], new Set(['frame', 'child', 'other']), 'bottom')
-  assert.equal(next[0].y, 40)
-  assert.equal(next[1].y, 60)
+  assert.equal(next[0].y, 60)
+  assert.equal(next[1].y, 80)
   assert.equal(next[2].y, 120)
+  assert.equal(next[1].y - next[0].y, child.y - frame.y)
 })
 
 test('resizing uses element centers so rotated selections do not drift from scaling geometry', () => {
