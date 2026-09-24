@@ -65,6 +65,7 @@ import {
   assetBucketForTable,
   generateCanvasFileId,
   isPersistableCanvasElement,
+  isSafeCanvasLink,
   isSupportedImageMime,
   referencedAssetIds,
 } from './media-assets.ts'
@@ -150,6 +151,7 @@ function elementFromRow(row: SyncRow): SceneElement | null {
   if (!row.element || typeof row.element !== 'object') return null
   const element = row.element as Record<string, unknown>
   if (element.id !== row.id || typeof element.type !== 'string' || !ALLOWED_TYPES.has(element.type)) return null
+  if (!isSafeCanvasLink(element.link)) return null
   if (!isPersistableCanvasElement(element as unknown as SceneElement)) return null
   if (Number(element.version) !== row.version || Number(element.versionNonce) !== row.version_nonce || Boolean(element.isDeleted) !== row.is_deleted) return null
   return row.element as SceneElement
@@ -178,9 +180,7 @@ function elementFromPreview(value: CanvasPreviewElement): SceneElement | null {
   if (![raw.x, raw.y, raw.width, raw.height, raw.angle].every(finiteCoordinate)) return null
   if ((raw.type === 'line' || raw.type === 'arrow' || raw.type === 'freedraw') && !hasSafePoints(raw.points)) return null
   if (raw.type === 'text' && (typeof raw.text !== 'string' || raw.text.length > 200_000)) return null
-  if (raw.link !== null && raw.link !== undefined) {
-    if (typeof raw.link !== 'string' || raw.link.length > 4096 || /^\s*javascript:/i.test(raw.link)) return null
-  }
+  if (!isSafeCanvasLink(raw.link)) return null
   try {
     const restored = restoreElements([value as unknown as SceneElement], null, { repairBindings: false, refreshDimensions: false })
     const element = restored[0] as SceneElement | undefined
