@@ -62,3 +62,11 @@ test('recovery banners are limited to connection/recovery states', () => {
   assert.equal(recoveryMessage(deriveSyncHealth(live({ queuedChanges: 1 }))), null)
   assert.match(recoveryMessage(deriveSyncHealth(live({ connection: 'Offline' }))) ?? '', /editing is paused/i)
 })
+
+test('failed image upload remains an explicit unsaved state until retry succeeds', () => {
+  const health = deriveSyncHealth(live({ saveIssue: 'asset-error' }))
+  assert.equal(health.key, 'retrying-save')
+  assert.equal(health.label, 'Image not saved')
+  assert.equal(health.tone, 'error')
+  assert.match(health.detail, /only in this tab/i)
+})
