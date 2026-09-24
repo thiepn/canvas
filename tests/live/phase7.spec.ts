@@ -39,17 +39,23 @@ async function rows() {
 }
 
 
-async function removeStorageFixtureAndWait(path: string) {
+async function replaceStorageFixture(path: string, bytes: Buffer) {
   await expect.poll(async () => {
     const removed = await supabase.storage.from(BUCKET).remove([path])
     if (removed.error) throw removed.error
-    const probe = await supabase.storage.from(BUCKET).download(path)
-    return probe.error ? 'missing' : 'present'
+
+    const inserted = await supabase.storage.from(BUCKET).upload(path, bytes, {
+      contentType: 'image/svg+xml',
+      upsert: false,
+    })
+    if (!inserted.error) return 'inserted'
+    if (/already exists|resource already exists|duplicate/i.test(inserted.error.message)) return 'occupied'
+    throw inserted.error
   }, {
-    message: `Storage object ${path} must be observably deleted before the next immutable insert.`,
+    message: `Storage object ${path} must accept a fresh immutable insert after deletion.`,
     timeout: 15_000,
     intervals: [100, 200, 400, 800, 1200],
-  }).toBe('missing')
+  }).toBe('inserted')
 }
 
 async function openMediaMenu(page: Page) {
@@ -293,17 +299,11 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
 
     const { error: probeDeleteError } = await supabase.from(TABLE).delete().eq('id', probeElementId)
     expect(probeDeleteError).toBeNull()
-    await removeStorageFixtureAndWait(collisionPath)
+    await replaceStorageFixture(collisionPath, poison)
 
     await page.reload()
     await expect(page.getByText('Live', { exact: true })).toBeVisible()
     await expect.poll(async () => (await rows()).length).toBe(0)
-
-    const poisoned = await supabase.storage.from(BUCKET).upload(collisionPath, poison, {
-      contentType: 'image/svg+xml',
-      upsert: false,
-    })
-    expect(poisoned.error).toBeNull()
 
     await chooseImage(page, intended, 'phase7-collision.svg')
 
@@ -319,7 +319,7 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
     expect(poisonedStored.error).toBeNull()
     expect(Buffer.from(await poisonedStored.data!.arrayBuffer())).toEqual(poison)
 
-    await removeStorageFixtureAndWait(collisionPath)
+    await replaceStorageFixture(collisionPath, canonicalBytes)
     await page.getByRole('button', { name: 'Retry now' }).click()
 
     await expect.poll(async () => {
@@ -333,6 +333,6 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
     const storedBytes = Buffer.from(await stored.data!.arrayBuffer())
     expect(createHash('sha256').update(storedBytes).digest('hex')).toBe(collisionId)
   } finally {
-    if (collisionPath) await Promise.allSettled([removeStorageFixtureAndWait(collisionPath)])
+    if (collisionPath) await Promise.allSettled([supabase.storage.from(BUCKET).remove([collisionPath])])
   }
 })
