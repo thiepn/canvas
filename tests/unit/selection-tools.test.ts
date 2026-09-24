@@ -226,7 +226,7 @@ test('custom Canvas shape logical type does not collapse into rectangles', () =>
 })
 
 test('connector routing and arrowhead presets update only arrows', () => {
-  const arrow = element('arrow', 0, 0, 100, 0, { type: 'arrow', startArrowhead: null, endArrowhead: 'arrow', elbowed: false })
+  const arrow = element('arrow', 0, 0, 100, 0, { type: 'arrow', points: [[0, 0], [100, 0]], startArrowhead: null, endArrowhead: 'arrow', elbowed: false })
   const rect = element('rect', 120, 0)
   const curved = setConnectorRouting([arrow, rect], new Set(['arrow']), 'curved')
   assert.deepEqual(curved[0].roundness, { type: 2 })
