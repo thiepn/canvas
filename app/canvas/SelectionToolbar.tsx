@@ -672,10 +672,10 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
             <label>Stroke <input type="color" aria-label="Shape stroke color" value={shapeStrokeColor} onChange={event => applyShapeStyle({ strokeColor: event.target.value })} /></label>
             <label>Fill <input type="color" aria-label="Shape fill color" value={shapeFillColor} onChange={event => applyShapeStyle({ fillColor: event.target.value })} /></label>
           </div>
-          <div className="phase3-swatches" aria-label="Shape stroke colors">
+          <div className="phase3-swatches" aria-label="Stroke palette">
             {SHAPE_COLORS.map(color => <button key={color} type="button" className="phase3-swatch" style={{ '--swatch': color } as CSSProperties} aria-label={`Stroke ${color}`} onClick={() => applyShapeStyle({ strokeColor: color })} />)}
           </div>
-          <div className="phase3-swatches" aria-label="Shape fill colors">
+          <div className="phase3-swatches" aria-label="Fill palette">
             {SHAPE_FILLS.map(color => <button key={color} type="button" className="phase3-swatch" style={{ '--swatch': color } as CSSProperties} aria-label={`Fill ${color}`} onClick={() => applyShapeStyle({ fillColor: color, fillMode: 'solid' })} />)}
           </div>
           <div className="phase3-field-grid">

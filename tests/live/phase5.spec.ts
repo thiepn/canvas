@@ -42,6 +42,21 @@ async function selectPoints(page: Page, points: Array<[number, number]>) {
   await expect(page.getByRole('toolbar', { name: 'Selection tools' })).toBeVisible()
 }
 
+async function selectRectangleEdges(page: Page, rectangles: Array<Record<string, unknown>>) {
+  const box = await canvasBox(page)
+  await page.keyboard.press('v')
+  for (let index = 0; index < rectangles.length; index++) {
+    const rectangle = rectangles[index]
+    if (index) await page.keyboard.down('Shift')
+    await page.mouse.click(
+      box.x + Number(rectangle.x) + 1,
+      box.y + Number(rectangle.y) + Number(rectangle.height) / 2,
+    )
+    if (index) await page.keyboard.up('Shift')
+  }
+  await expect(page.getByRole('toolbar', { name: 'Selection tools' })).toBeVisible()
+}
+
 test.beforeEach(cleanWorld)
 test.afterEach(cleanWorld)
 
@@ -104,7 +119,8 @@ test('frame selection, rename, auto-fit and content locking persist', async ({ p
   await drawRectangle(page, [500, 300], [590, 370])
   await expect.poll(async () => (await rows()).filter(element => element.type === 'rectangle').length).toBe(2)
 
-  await selectPoints(page, [[315, 208], [545, 335]])
+  const rectangles = (await rows()).filter(element => element.type === 'rectangle')
+  await selectRectangleEdges(page, rectangles)
   let toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
   await toolbar.getByText('Frame', { exact: true }).click()
   await toolbar.getByRole('button', { name: 'Frame selection' }).click()
@@ -151,7 +167,9 @@ test('zoom to selection and frame use spatial navigation without changing scene 
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
   await drawRectangle(page, [360, 220], [430, 280])
   const before = await rows()
-  await selectPoints(page, [[395, 250]])
+  const rectangle = before.find(element => element.type === 'rectangle')
+  if (!rectangle) throw new Error('Expected rectangle.')
+  await selectRectangleEdges(page, [rectangle])
 
   const navigation = page.getByRole('toolbar', { name: 'Canvas navigation' })
   await navigation.getByLabel('Zoom presets').click()

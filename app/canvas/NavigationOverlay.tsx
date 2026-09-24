@@ -329,8 +329,8 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
       <details className="navigation-zoom-presets">
         <summary aria-label="Zoom presets">Zoom</summary>
         <div>
-          {[0.5, 1, 2].map(value => <button key={value} type="button" onClick={() => setZoom(value)}>{Math.round(value * 100)}%</button>)}
-          <button type="button" onClick={setCurrentHome}>Set home</button>
+          {[0.5, 1, 2].map(value => <button key={value} type="button" onClick={event => { setZoom(value); event.currentTarget.closest('details')?.removeAttribute('open') }}>{Math.round(value * 100)}%</button>)}
+          <button type="button" onClick={event => { setCurrentHome(); event.currentTarget.closest('details')?.removeAttribute('open') }}>Set home</button>
         </div>
       </details>
     </div>

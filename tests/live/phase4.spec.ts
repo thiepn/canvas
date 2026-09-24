@@ -34,7 +34,7 @@ test('pen uses exact width, smoothing and pressure settings on persisted freedra
   await openDrawing(page)
   await page.getByRole('button', { name: 'Pen', exact: true }).click()
   await page.getByLabel('Pen color').fill('#2563eb')
-  await page.getByLabel('Drawing width').fill('6')
+  await page.getByRole('spinbutton', { name: 'Drawing width', exact: true }).fill('6')
   await page.getByLabel('Smoothing').fill('80')
   await page.getByLabel('Pen opacity').fill('75')
   await page.getByRole('button', { name: 'Pressure' }).click()
@@ -62,7 +62,7 @@ test('highlighter persists as a wide translucent constant-width stroke', async (
   await openDrawing(page)
   await page.getByRole('button', { name: 'Highlight', exact: true }).click()
   await page.getByLabel('Highlight color').fill('#fff3bf')
-  await page.getByLabel('Drawing width').fill('18')
+  await page.getByRole('spinbutton', { name: 'Drawing width', exact: true }).fill('18')
   await page.keyboard.press('Escape')
   await dragOnCanvas(page, [300, 260], [650, 260], 10)
 

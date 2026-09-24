@@ -38,6 +38,9 @@ export function DrawingControls({ disabled, mode, settings, onMode, onSetting }:
     }
     const keydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
         setOpen(false)
         triggerRef.current?.focus()
       }
@@ -99,7 +102,7 @@ export function DrawingControls({ disabled, mode, settings, onMode, onSetting }:
             />
           </label>
         </div>
-        <div className="drawing-width-presets" aria-label="Drawing width presets">
+        <div className="drawing-width-presets" aria-label="Width presets">
           {presets.map(value => <button key={value} type="button" className={width === value ? 'is-active' : ''} onClick={() => onSetting(mode === 'highlighter' ? 'highlighterWidth' : 'penWidth', value)}>{value}</button>)}
         </div>
         <label className="drawing-range-control">Smoothing
