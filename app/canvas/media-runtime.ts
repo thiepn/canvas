@@ -256,7 +256,7 @@ export function createBookmarkCard(urlText: string, api: ExcalidrawImperativeAPI
 export function insertElements(api: ExcalidrawImperativeAPI, elements: MediaSceneElement[], files: BinaryFiles = {}): void {
   if (Object.keys(files).length) api.addFiles(Object.values(files))
   const current = api.getSceneElementsIncludingDeleted()
-  const selectedElementIds = Object.fromEntries(elements.map(element => [element.id, true]))
+  const selectedElementIds = Object.fromEntries(elements.map(element => [element.id, true as const])) as Record<string, true>
   api.updateScene({
     elements: [...current, ...elements],
     appState: { selectedElementIds, selectedGroupIds: {}, editingGroupId: null },
