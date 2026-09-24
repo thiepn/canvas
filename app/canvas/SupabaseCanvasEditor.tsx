@@ -1095,6 +1095,26 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     setHasLockedElements(previous => previous === locked ? previous : locked)
   }, [])
 
+  const refreshSelectionUi = useCallback(() => {
+    const editor = apiRef.current
+    if (!editor) return
+    syncSelectionUi(editor.getSceneElementsIncludingDeleted(), editor.getAppState())
+  }, [syncSelectionUi])
+
+  const refreshSelectionAfterInteraction = useCallback(() => {
+    requestAnimationFrame(refreshSelectionUi)
+  }, [refreshSelectionUi])
+
+  useEffect(() => {
+    const keyup = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input,textarea,select,[contenteditable="true"]')) return
+      requestAnimationFrame(refreshSelectionUi)
+    }
+    document.addEventListener('keyup', keyup, true)
+    return () => document.removeEventListener('keyup', keyup, true)
+  }, [refreshSelectionUi])
+
   const onChange = useCallback((elements: readonly SceneElement[], appState: AppState) => {
     richTextLayerRef.current?.sync(elements, appState)
     syncSelectionUi(elements, appState)
@@ -1334,8 +1354,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const editor = apiRef.current
     if (!editor || statusRef.current !== 'Live') return
     const count = unlockAllElements(editor)
-    if (count) notify(`Unlocked ${count} object${count === 1 ? '' : 's'}.`)
-  }, [notify])
+    if (count) {
+      requestAnimationFrame(refreshSelectionUi)
+      notify(`Unlocked ${count} object${count === 1 ? '' : 's'}.`)
+    }
+  }, [notify, refreshSelectionUi])
 
   return <div className="canvas-app live-canvas-app" data-canvas-engine="excalidraw-supabase">
     <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} richTextMode={richTextMode} toggleRichText={toggleRichTextMode} hasLockedElements={hasLockedElements} unlockAll={unlockAllLocked} />
@@ -1345,6 +1368,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           excalidrawAPI={setApi}
           onChange={onChange}
           onPointerUpdate={onPointerUpdate}
+          onPointerUp={refreshSelectionAfterInteraction}
           theme={resolvedTheme}
           viewModeEnabled={status !== 'Live'}
           isCollaborating={status === 'Live'}
@@ -1371,6 +1395,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onNotice={notify}
           onObjectsSnapPreference={rememberObjectsSnap}
           onGridPreference={rememberGridMode}
+          onSelectionRefresh={refreshSelectionUi}
         />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}

@@ -44,6 +44,7 @@ type Props = {
   onNotice: (message: string) => void
   onObjectsSnapPreference: (enabled: boolean) => void
   onGridPreference: (enabled: boolean) => void
+  onSelectionRefresh: () => void
 }
 
 function isRichTextAnchor(element: SceneElement): boolean {
@@ -81,7 +82,7 @@ function numeric(value: string): number | null {
   return Number.isFinite(next) ? next : null
 }
 
-export function SelectionToolbar({ api, selection, disabled, onNotice, onObjectsSnapPreference, onGridPreference }: Props) {
+export function SelectionToolbar({ api, selection, disabled, onNotice, onObjectsSnapPreference, onGridPreference, onSelectionRefresh }: Props) {
   const [copiedStyle, setCopiedStyle] = useState<VisualStyle | null>(null)
   const [x, setX] = useState('')
   const [y, setY] = useState('')
@@ -120,6 +121,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
   }
 
   const currentElements = () => api.getSceneElementsIncludingDeleted() as unknown as CanvasElementLike[]
+  const refreshSelection = () => requestAnimationFrame(onSelectionRefresh)
 
   const ids = () => selectedSet(api)
   const relatedIds = () => relatedSelectionIds(api.getSceneElementsIncludingDeleted(), ids())
@@ -133,6 +135,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       appState: { selectedElementIds: result.selectedIds, selectedGroupIds: result.selectedGroupIds, editingGroupId: null },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
+    refreshSelection()
   }
   const ungroup = () => {
     const result = ungroupSelection(currentElements(), ids(), selectedGroupSet(api))
@@ -142,6 +145,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       appState: { selectedGroupIds: {}, editingGroupId: null },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
+    refreshSelection()
   }
   const lock = () => {
     const result = toggleLockSelection(currentElements(), relatedIds())
@@ -150,6 +154,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       ...(result.locked ? { appState: { selectedElementIds: {}, selectedGroupIds: {} } } : {}),
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
+    refreshSelection()
     if (result.locked) onNotice('Locked selection. Use Canvas menu → Unlock all to unlock it.')
   }
   const duplicate = () => {
@@ -160,6 +165,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       appState: { selectedElementIds: result.duplicatedIds, selectedGroupIds: {}, editingGroupId: null },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
+    refreshSelection()
   }
   const align = (mode: AlignMode) => apply(alignSelection(currentElements(), geometryIds(), mode))
   const distribute = (axis: 'x' | 'y') => apply(distributeSelection(currentElements(), geometryIds(), axis))
@@ -169,6 +175,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
   const selectMatching = (mode: SameSelectionMode) => {
     const selectedElementIds = selectSame(currentElements(), ids(), mode)
     api.updateScene({ appState: { selectedElementIds, selectedGroupIds: {}, editingGroupId: null }, captureUpdate: CaptureUpdateAction.NEVER })
+    refreshSelection()
   }
   const copyStyle = () => {
     const source = selected[0]
@@ -230,6 +237,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       captureUpdate: CaptureUpdateAction.NEVER,
     })
     onObjectsSnapPreference(next)
+    refreshSelection()
   }
   const toggleGrid = () => {
     const next = !selection.gridModeEnabled
@@ -238,6 +246,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       captureUpdate: CaptureUpdateAction.NEVER,
     })
     onGridPreference(next)
+    refreshSelection()
   }
   const selectContentsOfFrame = () => {
     if (selected.length !== 1 || selected[0].type !== 'frame') return
@@ -254,6 +263,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       appState: { selectedElementIds, selectedGroupIds: {}, editingGroupId: null },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
+    refreshSelection()
   }
 
   return <div className="selection-toolbar" role="toolbar" aria-label="Selection tools">
