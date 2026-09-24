@@ -6,6 +6,7 @@ const live = (patch: Partial<SyncHealthInput> = {}): SyncHealthInput => ({
   connection: 'Live',
   queuedChanges: 0,
   writeInFlight: false,
+  assetTransfers: 0,
   localEditing: false,
   saveIssue: 'none',
   ...patch,
@@ -16,6 +17,9 @@ test('saved is shown only when live and no local or durable work remains', () =>
   assert.equal(deriveSyncHealth(live({ localEditing: true })).key, 'editing')
   assert.equal(deriveSyncHealth(live({ queuedChanges: 1 })).key, 'waiting')
   assert.equal(deriveSyncHealth(live({ writeInFlight: true })).key, 'saving')
+  const assets = deriveSyncHealth(live({ assetTransfers: 1 }))
+  assert.equal(assets.key, 'saving')
+  assert.match(assets.label, /image/i)
 })
 
 test('save failures outrank ordinary queue state while preserving retry semantics', () => {
