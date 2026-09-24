@@ -14,6 +14,7 @@ type StoredRow = {
   version_nonce: number
   is_deleted: boolean
   element: Record<string, unknown>
+  revision?: number
 }
 
 async function cleanTestWorld() {
@@ -38,10 +39,10 @@ async function activeRow(id: string): Promise<StoredRow | null> {
   return data as StoredRow
 }
 
-async function isDeleted(id: string): Promise<boolean> {
-  const { data, error } = await supabase.from(TABLE).select('is_deleted').eq('id', id).maybeSingle()
+async function deletedRevision(id: string): Promise<number> {
+  const { data, error } = await supabase.from(TABLE).select('is_deleted,revision').eq('id', id).maybeSingle()
   if (error) throw error
-  return data?.is_deleted === true
+  return data?.is_deleted === true ? Number(data.revision) : 0
 }
 
 async function createRectangle(page: Page): Promise<string> {
@@ -76,7 +77,7 @@ test('two live clients persist and synchronize a real rectangle through Supabase
 
   try {
     await test.step('connect both clients to the live Supabase canvas', async () => {
-      await Promise.all([pageA.goto('./'), pageB.goto('./')])
+      await Promise.all([pageA.goto('./?debug=1'), pageB.goto('./')])
       await expect(pageA.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
       await expect(pageB.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
       await expect(pageA.getByText('Live', { exact: true })).toBeVisible()
@@ -93,14 +94,23 @@ test('two live clients persist and synchronize a real rectangle through Supabase
       await pageB.getByTitle(/^Eraser\b/i).click()
       await expect(eraserTool).toBeChecked()
       await dragOnCanvas(pageB, [280, 290], [450, 290], 12)
-      await expect.poll(() => isDeleted(elementId)).toBe(true)
+      let tombstoneRevision = 0
+      await expect.poll(async () => {
+        tombstoneRevision = await deletedRevision(elementId)
+        return tombstoneRevision
+      }).toBeGreaterThan(0)
 
       // B's gesture foregrounds B. If A misses the fast Realtime tombstone while
-      // backgrounded, returning to A must trigger the anti-entropy fallback.
-      // This is the user-visible convergence guarantee for a background tab.
+      // backgrounded, returning to A must trigger anti-entropy. Wait for A's
+      // revision cursor to cross the authoritative deletion before asserting
+      // its rendered scene, so this verifies merge correctness rather than timing.
       await pageA.bringToFront()
       await pageA.evaluate(() => window.dispatchEvent(new Event('focus')))
-      await expect.poll(() => exportElement(pageA, elementId)).toBeNull()
+      await expect.poll(async () => {
+        const snapshot = await pageA.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
+        return Number(snapshot?.gauges.reconciliationCursor ?? 0)
+      }).toBeGreaterThanOrEqual(tombstoneRevision)
+      expect(await exportElement(pageA, elementId)).toBeNull()
     })
 
     await test.step('both clients reload the durable deletion', async () => {
