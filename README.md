@@ -16,7 +16,7 @@ Supported content stays deliberately canvas-native:
 - text;
 - frames;
 - bounded PNG/JPEG/WebP/GIF/static-SVG images with crop/resize/rotate/opacity and replacement;
-- image/text clipboard workflows plus Canvas/Excalidraw JSON import;
+- portable cross-session object/image clipboard plus text clipboard workflows and Canvas/Excalidraw JSON import;
 - JSON, PNG, SVG and PDF export;
 - eraser;
 - realtime collaborator presence and cursors.
