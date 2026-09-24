@@ -32,6 +32,12 @@ export function isSupportedImageMime(mimeType: string): boolean {
   return SUPPORTED_IMAGE_MIME_TYPES.has(mimeType.toLowerCase())
 }
 
+export function isSafeCanvasLink(value: unknown): boolean {
+  if (value === null || value === undefined || value === '') return true
+  if (typeof value !== 'string' || value.length > 4096) return false
+  return /^https?:\/\//i.test(value) || value.startsWith('#')
+}
+
 export function validateImageBlob(blob: Blob): void {
   if (!isSupportedImageMime(blob.type)) throw new Error('Canvas supports PNG, JPEG, WebP, GIF, and SVG images.')
   if (blob.size <= 0) throw new Error('The image file is empty.')
