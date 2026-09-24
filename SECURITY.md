@@ -31,20 +31,31 @@ Postgres independently validates each production row:
 - updater attribution <=128 characters;
 - JSON must be an object;
 - serialized element JSON <=256 KiB;
-- element type must be one of the explicit vector allowlist;
+- element type must be one of the explicit canvas allowlist;
+- image rows require a saved state, SHA-256 `fileId` and valid scale metadata;
 - JSON ID must match the row ID;
 - JSON version/nonce/deletion state must agree with relational columns through RLS checks;
 - stale/non-increasing update tuples are rejected by the version-order trigger.
 
 The application also filters input client-side, but database constraints are the authoritative boundary.
 
-## Media/file rejection
+## Image asset containment
 
-The product has no upload/storage pipeline. File/image paste and drop are blocked in the browser, and media element types are rejected by Postgres. Supported stored types are limited to:
+Canvas supports bounded image assets but not arbitrary file storage. Supported stored element types are:
 
-`rectangle`, `diamond`, `ellipse`, `line`, `arrow`, `freedraw`, `text`, `frame`.
+`rectangle`, `diamond`, `ellipse`, `line`, `arrow`, `freedraw`, `text`, `frame`, `image`.
 
-Remote media previews are not an authorization mechanism and should not be added without a separate threat review.
+Image binaries use public-read Supabase Storage buckets because the canvas itself is intentionally public-read. Uploads are constrained independently of the client:
+
+- 12 MB bucket file-size limit;
+- PNG/JPEG/WebP/GIF/SVG MIME allowlist;
+- object path must be `sha256/<64 lowercase hex>`;
+- the client verifies SHA-256 before upload and after download;
+- production has INSERT but no public UPDATE/DELETE policy, making digest objects immutable;
+- CI has DELETE only for exact fixture cleanup;
+- active/external SVG constructs are rejected client-side before upload.
+
+Postgres accepts an image element only after the asset lane marks it `saved` with a valid SHA-256 file ID. Pending/error images cannot become authoritative rows. Video, audio, PDF objects, arbitrary attachments, iframes and embeddables remain rejected.
 
 ## Abuse limitations
 
@@ -57,7 +68,7 @@ Existing controls reduce blast radius:
 - no public physical DELETE;
 - per-element conflict ordering instead of whole-document overwrite;
 - private history/recovery;
-- no file storage;
+- content-addressed immutable image storage instead of arbitrary file storage;
 - editing disabled when the client cannot establish a trustworthy live connection.
 
 If the URL becomes broadly distributed or adversarial traffic becomes a real problem, the appropriate next step is an access-control layer—not hiding the publishable key or relying on obscurity inside JavaScript.
