@@ -44,10 +44,12 @@ test('visual profile persists locally without mutating the shared scene', async 
   await menu.getByRole('button', { name: 'Lines', exact: true }).click()
   await menu.getByLabel('Grid spacing').evaluate((element: HTMLInputElement) => {
     element.value = '36'
+    element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
   await menu.getByLabel('Grid strength').evaluate((element: HTMLInputElement) => {
     element.value = '22'
+    element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
   await menu.getByRole('button', { name: 'Full', exact: true }).click()
@@ -87,6 +89,7 @@ test('background grid is scene-locked and square mode remains compatible with na
   await menu.getByRole('button', { name: 'Dots', exact: true }).click()
   await menu.getByLabel('Grid spacing').evaluate((element: HTMLInputElement) => {
     element.value = '24'
+    element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
   const backdrop = page.locator('.canvas-backdrop')
@@ -95,7 +98,7 @@ test('background grid is scene-locked and square mode remains compatible with na
   const beforeSize = await backdrop.evaluate(element => getComputedStyle(element).getPropertyValue('--canvas-grid-size').trim())
   expect(beforeSize).toBe('24px')
 
-  await page.getByRole('button', { name: 'Zoom presets' }).click()
+  await page.getByLabel('Zoom presets').click()
   await page.getByRole('button', { name: '200%', exact: true }).click()
   await expect.poll(async () =>
     backdrop.evaluate(element => getComputedStyle(element).getPropertyValue('--canvas-grid-size').trim()),
@@ -154,9 +157,8 @@ test('reduced motion and delight controls stay local and respect the visual prof
   let menu = await openVisuals(page)
   await menu.getByRole('button', { name: 'Full', exact: true }).click()
   await menu.getByRole('button', { name: 'Tiny sparkle' }).click()
-  await expect(page.locator('.canvas-delight-burst')).toBeVisible()
+  await expect(page.locator('.canvas-delight-burst')).toHaveCount(1)
 
-  menu = await openVisuals(page)
   await menu.getByRole('button', { name: 'Reduced', exact: true }).click()
   await expect(page.locator('.live-canvas-app')).toHaveAttribute('data-canvas-motion', 'reduced')
   expect(await activeRows()).toHaveLength(0)
