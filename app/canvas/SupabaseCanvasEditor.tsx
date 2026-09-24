@@ -39,6 +39,27 @@ import {
 } from './drawing-tools.ts'
 import { reorderSelection, type CanvasElementLike } from './selection-tools.ts'
 import { NavigationOverlay, type NavigationOverlayHandle } from './NavigationOverlay.tsx'
+import { CollaborationOverlay } from './CollaborationOverlay.tsx'
+import { CollaborationPanel } from './CollaborationPanel.tsx'
+import {
+  COLLABORATION_IDLE_POINTER_AFTER_MS,
+  COLLABORATION_REACTION_TTL_MS,
+  CollaborationSequenceGate,
+  createCollaborationEffectPayload,
+  createCollaborationStatePayload,
+  followerViewport,
+  isStaleCollaborationPayload,
+  parseCollaborationEffectPayload,
+  parseCollaborationStatePayload,
+  viewportCenter,
+  type CollaborationActivity,
+  type CollaborationEffectPayload,
+  type CollaborationEffectView,
+  type CollaborationReaction,
+  type CollaborationViewport,
+  type RemoteCollaborationState,
+} from './collaboration-v2.ts'
+import { canUndoOwnAction, restoreOwnActionElement, type OwnUndoEntry } from './own-action-undo.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = CanvasConnectionState
@@ -71,6 +92,8 @@ const PREVIEW_ECHO_GRACE_MS = 1000
 const PREVIEW_ECHO_STAMPS_PER_ELEMENT = 16
 const ANTI_ENTROPY_PAGE_SIZE = 500
 const ANTI_ENTROPY_INTERVAL_MS = 15_000
+const COLLABORATION_BROADCAST_INTERVAL_MS = 50
+const COLLABORATION_HEARTBEAT_MS = 5_000
 const UI_OPTIONS = {
   canvasActions: {
     changeViewBackgroundColor: false,
@@ -180,7 +203,7 @@ function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   URL.revokeObjectURL(url)
 }
 
-function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape, drawingControls, deactivateDrawing }: {
+function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape, drawingControls, collaborationPanel, deactivateDrawing }: {
   api: ExcalidrawImperativeAPI | null
   identity: Identity
   people: PresencePerson[]
@@ -195,6 +218,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   unlockAll: () => void
   insertCustomShape: (kind: CanvasShapeKind) => void
   drawingControls: ReactNode
+  collaborationPanel: ReactNode
   deactivateDrawing: () => void
 }) {
   const [menu, setMenu] = useState(false)
@@ -282,6 +306,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
     {menu && <div ref={menuRef} id="live-canvas-menu" className="canvas-menu" aria-label="Canvas settings">
       <div className="menu-heading">ON THIS CANVAS</div>
       <div className="people-list"><div><span className="presence-dot" style={{ backgroundColor: safeColor(identity.color) }} />{identity.displayName}<small>You</small></div>{status === 'Live' && people.map(person => <div key={person.deviceId}><span className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />{person.displayName || 'Guest'}</div>)}</div>
+      {collaborationPanel}
       <form onSubmit={submit}><label htmlFor="live-display-name">Display name</label><div className="name-input"><input id="live-display-name" autoComplete="off" maxLength={32} value={name} onChange={event => setName(event.target.value)} /><button type="submit">Save</button></div></form>
       <label htmlFor="live-theme">Appearance</label><select id="live-theme" value={theme} onChange={event => changeTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
       <div className="menu-heading menu-tools-heading">CANVAS CONTROLS</div>
@@ -359,6 +384,31 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const reconciliationInFlightRef = useRef(false)
   const dropRealtimeForDiagnosticsRef = useRef(canvasDiagnostics.enabled && new URLSearchParams(window.location.search).get('dropRealtime') === '1')
   const [people, setPeople] = useState<PresencePerson[]>([])
+  const collaborationSessionIdRef = useRef(globalThis.crypto?.randomUUID?.() ?? `collaboration-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const collaborationSequenceRef = useRef(0)
+  const collaborationEffectSequenceRef = useRef(0)
+  const collaborationSequenceGateRef = useRef(new CollaborationSequenceGate())
+  const collaborationEffectGateRef = useRef(new CollaborationSequenceGate())
+  const remoteCollaborationRef = useRef(new Map<string, RemoteCollaborationState>())
+  const [remoteCollaboration, setRemoteCollaboration] = useState<RemoteCollaborationState[]>([])
+  const [collaborationEffects, setCollaborationEffects] = useState<CollaborationEffectView[]>([])
+  const [followDeviceId, setFollowDeviceId] = useState<string | null>(null)
+  const followDeviceIdRef = useRef<string | null>(null)
+  const [showRemoteCursors, setShowRemoteCursors] = useState(() => readPreference(storage, 'canvas.show-remote-cursors.v1') !== 'false')
+  const [shareCursor, setShareCursor] = useState(() => readPreference(storage, 'canvas.share-cursor.v1') !== 'false')
+  const shareCursorRef = useRef(shareCursor)
+  const [viewportRevision, setViewportRevision] = useState(0)
+  const latestLocalPointerRef = useRef<{ x: number; y: number; tool: 'pointer' | 'laser'; button: 'up' | 'down' } | null>(null)
+  const collaborationActivityRef = useRef<CollaborationActivity>('idle')
+  const collaborationSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const collaborationLastSentAtRef = useRef(0)
+  const collaborationStateQueuedRef = useRef(false)
+  const queueCollaborationStateRef = useRef<(immediate?: boolean) => void>(() => {})
+  const localSceneSnapshotRef = useRef(new Map<string, SceneElement>())
+  const ownUndoBeforeRef = useRef(new Map<string, SceneElement | null>())
+  const ownUndoStackRef = useRef<OwnUndoEntry<SceneElement>[]>([])
+  const undoModeRef = useRef(false)
+  const [undoDepth, setUndoDepth] = useState(0)
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
@@ -405,6 +455,24 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     deviceId: () => identityRef.current.deviceId,
     onCommit: mutation => {
       recordMutationDiagnostics(mutation)
+      const undoChanges = mutation.changes.map(change => {
+        const element = change.type === 'delete' ? change.tombstone : change.element
+        const before = ownUndoBeforeRef.current.has(element.id)
+          ? ownUndoBeforeRef.current.get(element.id) ?? null
+          : change.existedBefore ? authoritativeElementsRef.current.get(element.id) ?? null : null
+        return { id: element.id, before, after: stampOf(element) }
+      })
+      for (const change of mutation.changes) {
+        const element = change.type === 'delete' ? change.tombstone : change.element
+        ownUndoBeforeRef.current.delete(element.id)
+      }
+      if (undoModeRef.current) {
+        undoModeRef.current = false
+      } else if (undoChanges.length) {
+        ownUndoStackRef.current.push({ mutationId: mutation.mutationId, committedAt: mutation.committedAt, changes: undoChanges })
+        if (ownUndoStackRef.current.length > 100) ownUndoStackRef.current.splice(0, ownUndoStackRef.current.length - 100)
+      }
+      setUndoDepth(ownUndoStackRef.current.length)
       if (mutation.source === 'pointer' || mutation.source === 'text') {
         commitPreviewRef.current(mutation.source, mutation.changes.map(change => change.type === 'delete' ? change.tombstone : change.element))
       }
@@ -441,6 +509,217 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     setStatus(next)
     if (next !== 'Live') patchSyncRuntime({ localEditing: false })
   }, [patchSyncRuntime])
+
+  const publishRemoteCollaboration = useCallback(() => {
+    setRemoteCollaboration([...remoteCollaborationRef.current.values()].sort((a, b) => a.displayName.localeCompare(b.displayName)))
+  }, [])
+
+  const localCollaborationViewport = useCallback((): CollaborationViewport | null => {
+    const editor = apiRef.current
+    if (!editor) return null
+    const state = editor.getAppState()
+    return { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom.value, width: state.width, height: state.height }
+  }, [])
+
+  const sendCollaborationStateNow = useCallback(() => {
+    if (!pageActiveRef.current || !navigator.onLine || (statusRef.current !== 'Live' && statusRef.current !== 'Synchronizing')) return
+    const channel = channelRef.current
+    const editor = apiRef.current
+    const viewport = localCollaborationViewport()
+    if (!channel || !editor || !viewport) return
+    const selectedElementIds = Object.entries(editor.getAppState().selectedElementIds).filter(([, selected]) => selected).map(([id]) => id)
+    const pointer = shareCursorRef.current ? latestLocalPointerRef.current : null
+    const payload = createCollaborationStatePayload({
+      deviceId: identityRef.current.deviceId,
+      sessionId: collaborationSessionIdRef.current,
+      sequence: ++collaborationSequenceRef.current,
+      sentAt: Date.now(),
+      displayName: identityRef.current.displayName,
+      color: identityRef.current.color,
+      cursorVisible: shareCursorRef.current,
+      pointer,
+      selectedElementIds,
+      viewport,
+      activity: collaborationActivityRef.current,
+    })
+    if (!payload) {
+      canvasDiagnostics.increment('collaborationStateRejectedLocally')
+      return
+    }
+    collaborationLastSentAtRef.current = performance.now()
+    collaborationStateQueuedRef.current = false
+    canvasDiagnostics.increment('collaborationStateSent')
+    void channel.send({ type: 'broadcast', event: 'collab-state', payload }).then(result => {
+      if (result !== 'ok') canvasDiagnostics.increment('collaborationStateSendFailures')
+    }).catch(() => { canvasDiagnostics.increment('collaborationStateSendFailures') })
+  }, [localCollaborationViewport])
+
+  const queueCollaborationState = useCallback((immediate = false) => {
+    collaborationStateQueuedRef.current = true
+    if (collaborationSendTimerRef.current && immediate) {
+      clearTimeout(collaborationSendTimerRef.current)
+      collaborationSendTimerRef.current = null
+    }
+    if (immediate) {
+      sendCollaborationStateNow()
+      return
+    }
+    const elapsed = performance.now() - collaborationLastSentAtRef.current
+    if (elapsed >= COLLABORATION_BROADCAST_INTERVAL_MS) {
+      sendCollaborationStateNow()
+      return
+    }
+    if (collaborationSendTimerRef.current) return
+    collaborationSendTimerRef.current = setTimeout(() => {
+      collaborationSendTimerRef.current = null
+      if (collaborationStateQueuedRef.current) sendCollaborationStateNow()
+    }, Math.max(0, COLLABORATION_BROADCAST_INTERVAL_MS - elapsed))
+  }, [sendCollaborationStateNow])
+
+  useEffect(() => {
+    queueCollaborationStateRef.current = queueCollaborationState
+    return () => { queueCollaborationStateRef.current = () => {} }
+  }, [queueCollaborationState])
+
+  const setCollaborationActivity = useCallback((activity: CollaborationActivity) => {
+    if (collaborationActivityRef.current === activity) return
+    collaborationActivityRef.current = activity
+    queueCollaborationStateRef.current(true)
+  }, [])
+
+  const applyFollowerViewport = useCallback((viewport: CollaborationViewport) => {
+    const editor = apiRef.current
+    if (!editor) return
+    const current = editor.getAppState()
+    const next = followerViewport(viewport, { width: current.width, height: current.height })
+    editor.updateScene({
+      appState: {
+        zoom: { value: next.zoom } as AppState['zoom'],
+        scrollX: next.scrollX,
+        scrollY: next.scrollY,
+      },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    })
+    navigationRef.current?.sync(editor.getSceneElementsIncludingDeleted(), editor.getAppState())
+    setViewportRevision(value => value + 1)
+  }, [])
+
+  const applyCollaborationState = useCallback((value: unknown) => {
+    const payload = parseCollaborationStatePayload(value)
+    if (!payload || payload.deviceId === identityRef.current.deviceId || isStaleCollaborationPayload(payload.sentAt)) {
+      if (value && typeof value === 'object') canvasDiagnostics.increment('collaborationStateRejected')
+      return
+    }
+    if (!collaborationSequenceGateRef.current.accept(payload.deviceId, payload.sessionId, payload.sequence)) {
+      canvasDiagnostics.increment('collaborationStateStale')
+      return
+    }
+    const remote: RemoteCollaborationState = {
+      ...payload,
+      displayName: cleanName(payload.displayName),
+      color: safeColor(payload.color),
+      receivedAt: Date.now(),
+    }
+    remoteCollaborationRef.current.set(payload.deviceId, remote)
+    publishRemoteCollaboration()
+    const socketId = payload.deviceId as SocketId
+    const existing = collaboratorsRef.current.get(socketId)
+    collaboratorsRef.current.set(socketId, {
+      ...existing,
+      username: remote.displayName,
+      selectedElementIds: Object.fromEntries(payload.selectedElementIds.map(id => [id, true])),
+    } as Collaborator)
+    apiRef.current?.updateScene({ collaborators: new Map(collaboratorsRef.current) })
+    if (followDeviceIdRef.current === payload.deviceId) applyFollowerViewport(payload.viewport)
+    canvasDiagnostics.increment('collaborationStateReceived')
+  }, [applyFollowerViewport, publishRemoteCollaboration])
+
+  const addCollaborationEffect = useCallback((payload: CollaborationEffectPayload) => {
+    const now = Date.now()
+    const view: CollaborationEffectView = {
+      ...payload,
+      effectId: `${payload.deviceId}:${payload.sessionId}:${payload.sequence}:${payload.kind}`,
+      expiresAt: now + COLLABORATION_REACTION_TTL_MS,
+    }
+    setCollaborationEffects(current => [...current.filter(item => item.expiresAt > now), view].slice(-32))
+  }, [])
+
+  const applyCollaborationEffect = useCallback((value: unknown) => {
+    const payload = parseCollaborationEffectPayload(value)
+    if (!payload || payload.deviceId === identityRef.current.deviceId || isStaleCollaborationPayload(payload.sentAt)) return
+    if (!collaborationEffectGateRef.current.accept(payload.deviceId, payload.sessionId, payload.sequence)) return
+    if (payload.targetDeviceId && payload.targetDeviceId !== identityRef.current.deviceId) return
+    addCollaborationEffect(payload)
+    if (payload.kind === 'ping' && payload.targetDeviceId === identityRef.current.deviceId) notify(`${cleanName(payload.displayName)} wants your attention.`)
+  }, [addCollaborationEffect, notify])
+
+  const sendCollaborationEffect = useCallback((kind: 'ping' | 'reaction', emoji: CollaborationReaction | null, targetDeviceId: string | null = null) => {
+    if (statusRef.current !== 'Live' || !navigator.onLine) return
+    const channel = channelRef.current
+    const viewport = localCollaborationViewport()
+    if (!channel || !viewport) return
+    const point = latestLocalPointerRef.current
+      ? { x: latestLocalPointerRef.current.x, y: latestLocalPointerRef.current.y }
+      : viewportCenter(viewport)
+    const payload = createCollaborationEffectPayload({
+      kind,
+      deviceId: identityRef.current.deviceId,
+      sessionId: collaborationSessionIdRef.current,
+      sequence: ++collaborationEffectSequenceRef.current,
+      sentAt: Date.now(),
+      displayName: identityRef.current.displayName,
+      color: identityRef.current.color,
+      targetDeviceId,
+      point,
+      emoji,
+    })
+    if (!payload) return
+    addCollaborationEffect(payload)
+    void channel.send({ type: 'broadcast', event: 'collab-effect', payload }).catch(() => {})
+  }, [addCollaborationEffect, localCollaborationViewport])
+
+  const jumpToCollaborator = useCallback((deviceId: string) => {
+    const remote = remoteCollaborationRef.current.get(deviceId)
+    if (!remote) {
+      notify('That collaborator has not shared a current viewport yet.')
+      return
+    }
+    applyFollowerViewport(remote.viewport)
+  }, [applyFollowerViewport, notify])
+
+  const toggleFollowCollaborator = useCallback((deviceId: string) => {
+    const next = followDeviceIdRef.current === deviceId ? null : deviceId
+    followDeviceIdRef.current = next
+    setFollowDeviceId(next)
+    if (next) {
+      const remote = remoteCollaborationRef.current.get(next)
+      if (remote) applyFollowerViewport(remote.viewport)
+    }
+  }, [applyFollowerViewport])
+
+  const stopFollowing = useCallback(() => {
+    followDeviceIdRef.current = null
+    setFollowDeviceId(null)
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now()
+      let changed = false
+      for (const [deviceId, remote] of remoteCollaborationRef.current) {
+        if (now - remote.receivedAt <= COLLABORATION_IDLE_POINTER_AFTER_MS) continue
+        if (!remote.pointer && remote.activity === 'idle') continue
+        remoteCollaborationRef.current.set(deviceId, { ...remote, pointer: null, activity: 'idle' })
+        changed = true
+      }
+      if (changed) publishRemoteCollaboration()
+      setCollaborationEffects(current => {
+        const next = current.filter(effect => effect.expiresAt > now)
+        return next.length === current.length ? current : next
+      })
+    }, 500)
+    return () => clearInterval(timer)
+  }, [publishRemoteCollaboration])
 
   const restoreRemotePreviews = useCallback((records: RemotePreview[]) => {
     const editor = apiRef.current
@@ -583,9 +862,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const nextStamp = stampOf(element)
       const observed = observedSceneRef.current.get(element.id)
       if (isNewerVersion(nextStamp, observed)) {
+        if (!ownUndoBeforeRef.current.has(element.id)) ownUndoBeforeRef.current.set(element.id, localSceneSnapshotRef.current.get(element.id) ?? null)
         operationTracker.record(element, observed !== undefined)
         observedSceneRef.current.set(element.id, nextStamp)
       }
+      localSceneSnapshotRef.current.set(element.id, element)
       const queued = pendingRef.current.get(element.id)
       if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
       const durable = durablePendingRef.current.get(element.id)
@@ -598,7 +879,48 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     operationTracker.flush()
   }, [operationTracker, patchSyncRuntime])
 
+  const undoMyLastAction = useCallback(() => {
+    const editor = apiRef.current
+    const entry = ownUndoStackRef.current.at(-1)
+    if (!editor || statusRef.current !== 'Live' || !entry) return
+    const current = editor.getSceneElementsIncludingDeleted()
+    const currentById = indexSceneById(current)
+    if (!canUndoOwnAction(entry, currentById)) {
+      notify('That action cannot be undone safely because a collaborator changed one of its objects.')
+      return
+    }
+    ownUndoStackRef.current.pop()
+    setUndoDepth(ownUndoStackRef.current.length)
+    undoModeRef.current = true
+    const replacements = new Map<string, SceneElement>()
+    for (const change of entry.changes) {
+      const element = currentById.get(change.id)
+      if (!element) continue
+      replacements.set(change.id, restoreOwnActionElement(element, change.before))
+    }
+    const next = current.map(element => replacements.get(element.id) ?? element)
+    editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+    requestAnimationFrame(captureCurrentScene)
+  }, [captureCurrentScene, notify])
+
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'z') return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input,textarea,select,[contenteditable="true"]')) return
+      if (statusRef.current !== 'Live' || ownUndoStackRef.current.length === 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+      undoMyLastAction()
+    }
+    document.addEventListener('keydown', keydown, true)
+    return () => document.removeEventListener('keydown', keydown, true)
+  }, [undoMyLastAction])
+
   useEffect(() => { identityRef.current = identity }, [identity])
+  useEffect(() => { shareCursorRef.current = shareCursor }, [shareCursor])
+  useEffect(() => { followDeviceIdRef.current = followDeviceId }, [followDeviceId])
   useEffect(() => { apiRef.current = api }, [api])
   useEffect(() => () => operationTracker.dispose(), [operationTracker])
   useEffect(() => {
@@ -633,6 +955,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       continuousOperationRef.current = 'pointer'
       operationTracker.beginPointer()
       patchSyncRuntime({ localEditing: true })
+      const activeTool = apiRef.current?.getAppState().activeTool.type
+      if (drawingModeRef.current || activeTool && ['freedraw', 'rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'frame'].includes(activeTool)) setCollaborationActivity('drawing')
       armCheckpointRef.current()
     }
     const pointerEnd = () => {
@@ -641,6 +965,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       patchSyncRuntime({ localEditing: false })
       clearCheckpointRef.current()
       operationTracker.endPointer()
+      if (collaborationActivityRef.current === 'drawing') setCollaborationActivity('idle')
     }
     document.addEventListener('pointerdown', pointerDown, true)
     document.addEventListener('pointerup', pointerEnd, true)
@@ -650,7 +975,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       document.removeEventListener('pointerup', pointerEnd, true)
       document.removeEventListener('pointercancel', pointerEnd, true)
     }
-  }, [operationTracker, patchSyncRuntime])
+  }, [operationTracker, patchSyncRuntime, setCollaborationActivity])
   useEffect(() => {
     pageActiveRef.current = true
     const hide = () => {
@@ -663,7 +988,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
       if (checkpointTimer.current) { clearTimeout(checkpointTimer.current); checkpointTimer.current = null }
       if (previewSendTimerRef.current) { clearTimeout(previewSendTimerRef.current); previewSendTimerRef.current = null }
+      if (collaborationSendTimerRef.current) { clearTimeout(collaborationSendTimerRef.current); collaborationSendTimerRef.current = null }
       previewSendQueuedRef.current = null
+      collaborationStateQueuedRef.current = false
       setConnectionAttempt(value => value + 1)
     }
     const show = () => {
@@ -682,7 +1009,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
       if (checkpointTimer.current) { clearTimeout(checkpointTimer.current); checkpointTimer.current = null }
       if (previewSendTimerRef.current) { clearTimeout(previewSendTimerRef.current); previewSendTimerRef.current = null }
+      if (collaborationSendTimerRef.current) { clearTimeout(collaborationSendTimerRef.current); collaborationSendTimerRef.current = null }
       previewSendQueuedRef.current = null
+      collaborationStateQueuedRef.current = false
       clearRemotePreviews()
     }
   }, [captureCurrentScene, clearRemotePreviews, transition])
@@ -809,8 +1138,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     )
     applyingRemote.current = true
     editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
-    if (replace) sceneVersionIndexRef.current.replace(reconciled as SceneElement[], isAllowedElement)
-    else sceneVersionIndexRef.current.mark(remoteElements, isAllowedElement)
+    if (replace) {
+      sceneVersionIndexRef.current.replace(reconciled as SceneElement[], isAllowedElement)
+      localSceneSnapshotRef.current = indexSceneById(reconciled as SceneElement[])
+    } else {
+      sceneVersionIndexRef.current.mark(remoteElements, isAllowedElement)
+      for (const element of remoteElements) localSceneSnapshotRef.current.set(element.id, element)
+    }
     queueMicrotask(() => { applyingRemote.current = false })
   }, [patchSyncRuntime])
 
@@ -1060,9 +1394,27 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     for (const socketId of collaboratorsRef.current.keys()) {
       if (!active.has(socketId as string)) collaboratorsRef.current.delete(socketId)
     }
+    let remoteChanged = false
+    for (const [deviceId, remote] of remoteCollaborationRef.current) {
+      const person = active.get(deviceId)
+      if (!person) {
+        remoteCollaborationRef.current.delete(deviceId)
+        collaborationSequenceGateRef.current.remove(deviceId)
+        collaborationEffectGateRef.current.remove(deviceId)
+        if (followDeviceIdRef.current === deviceId) {
+          followDeviceIdRef.current = null
+          setFollowDeviceId(null)
+        }
+        remoteChanged = true
+      } else if (remote.displayName !== person.displayName || remote.color !== person.color) {
+        remoteCollaborationRef.current.set(deviceId, { ...remote, displayName: person.displayName, color: person.color })
+        remoteChanged = true
+      }
+    }
+    if (remoteChanged) publishRemoteCollaboration()
     setPeople(Array.from(active.values()).sort((a, b) => a.displayName.localeCompare(b.displayName)))
     apiRef.current?.updateScene({ collaborators: new Map(collaboratorsRef.current) })
-  }, [])
+  }, [publishRemoteCollaboration])
 
   useEffect(() => {
     if (!api) return
@@ -1087,6 +1439,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (!navigator.onLine) { transition('Offline'); return }
       transition(connectionAttempt ? 'Reconnecting' : 'Connecting')
       collaboratorsRef.current.clear()
+      remoteCollaborationRef.current.clear()
+      collaborationSequenceGateRef.current.clear()
+      collaborationEffectGateRef.current.clear()
+      setRemoteCollaboration([])
+      setCollaborationEffects([])
       setPeople([])
       api.updateScene({ collaborators: new Map() })
       const currentChannel = supabase.channel(`canvas:${config.tableName}:v1`, { config: { presence: { key: identity.deviceId }, broadcast: { self: false } } })
@@ -1106,18 +1463,21 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         .on('broadcast', { event: 'preview' }, message => {
           if (isCurrent()) applyRemotePreview(message.payload)
         })
+        .on('broadcast', { event: 'collab-state' }, message => {
+          if (isCurrent()) applyCollaborationState(message.payload)
+        })
+        .on('broadcast', { event: 'collab-effect' }, message => {
+          if (isCurrent()) applyCollaborationEffect(message.payload)
+        })
         .on('broadcast', { event: 'cursor' }, message => {
           if (!isCurrent()) return
           const payload = message.payload as Partial<CursorPayload>
-          if (!payload.deviceId || payload.deviceId === identityRef.current.deviceId || !payload.pointer) return
-          if (typeof payload.pointer.x !== 'number' || typeof payload.pointer.y !== 'number') return
+          if (!payload.deviceId || payload.deviceId === identityRef.current.deviceId) return
           const socketId = payload.deviceId as SocketId
           const existing = collaboratorsRef.current.get(socketId)
           collaboratorsRef.current.set(socketId, {
             ...existing,
             username: cleanName(payload.displayName ?? 'Guest'),
-            pointer: { x: payload.pointer.x, y: payload.pointer.y, tool: payload.pointer.tool === 'laser' ? 'laser' : 'pointer' },
-            button: payload.button === 'down' ? 'down' : 'up',
             selectedElementIds: payload.selectedElementIds && typeof payload.selectedElementIds === 'object' ? payload.selectedElementIds : {},
           } as Collaborator)
           apiRef.current?.updateScene({ collaborators: new Map(collaboratorsRef.current) })
@@ -1170,7 +1530,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         channelCleanupRef.current = supabase.removeChannel(channel).catch(() => {})
       }
     }
-  }, [api, applyRemotePreview, applyRows, clearRemotePreviews, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, patchSyncRuntime, scheduleFlush, supabase, syncPresence, transition])
+  }, [api, applyCollaborationEffect, applyCollaborationState, applyRemotePreview, applyRows, clearRemotePreviews, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, patchSyncRuntime, scheduleFlush, supabase, syncPresence, transition])
 
   useEffect(() => {
     if (status !== 'Live') return
@@ -1190,8 +1550,16 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => {
     const channel = channelRef.current
     if (!pageActiveRef.current || !channel || (status !== 'Live' && status !== 'Synchronizing')) return
-    void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, onlineAt: new Date().toISOString() }).catch(() => {})
+    void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, sessionId: collaborationSessionIdRef.current, onlineAt: new Date().toISOString() }).catch(() => {})
+    queueCollaborationStateRef.current(true)
   }, [identity, status])
+
+  useEffect(() => {
+    if (status !== 'Live') return
+    queueCollaborationStateRef.current(true)
+    const timer = window.setInterval(() => queueCollaborationStateRef.current(true), COLLABORATION_HEARTBEAT_MS)
+    return () => clearInterval(timer)
+  }, [status])
 
   const syncSelectionUi = useCallback((elements: readonly SceneElement[], appState: AppState) => {
     const selected = elements.filter(element => !element.isDeleted && appState.selectedElementIds[element.id])
@@ -1211,6 +1579,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (signature !== selectionSignatureRef.current) {
       selectionSignatureRef.current = signature
       setSelectionSnapshot({ elements: [...selected], selectedGroupIds, editingGroupId: appState.editingGroupId, objectsSnapModeEnabled: appState.objectsSnapModeEnabled, gridModeEnabled: appState.gridModeEnabled })
+      queueCollaborationStateRef.current()
     }
     const locked = elements.some(element => !element.isDeleted && element.locked)
     setHasLockedElements(previous => previous === locked ? previous : locked)
@@ -1239,6 +1608,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const editor = apiRef.current
     if (!editor) return
     navigationRef.current?.sync(editor.getSceneElementsIncludingDeleted(), editor.getAppState())
+    setViewportRevision(value => value + 1)
+    queueCollaborationStateRef.current()
   }, [])
 
   useEffect(() => {
@@ -1267,6 +1638,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       continuousOperationRef.current = 'text'
       operationTracker.beginText()
       patchSyncRuntime({ localEditing: true })
+      setCollaborationActivity('typing')
       armCheckpointRef.current()
     }
     const observationStarted = performance.now()
@@ -1305,9 +1677,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       }
       const observed = observedSceneRef.current.get(element.id)
       if (isNewerVersion(nextStamp, observed)) {
+        if (!ownUndoBeforeRef.current.has(element.id)) ownUndoBeforeRef.current.set(element.id, localSceneSnapshotRef.current.get(element.id) ?? null)
         operationTracker.record(element, observed !== undefined)
         observedSceneRef.current.set(element.id, nextStamp)
       }
+      localSceneSnapshotRef.current.set(element.id, element)
 
       // Keep intermediate local states in memory so remote echoes cannot
       // clobber an active gesture. Phase 3 changes the durability boundary, not
@@ -1327,19 +1701,18 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       patchSyncRuntime({ localEditing: false })
       clearCheckpointRef.current()
       operationTracker.endText()
+      setCollaborationActivity('idle')
     }
     editingTextRef.current = nextEditingTextId
-  }, [notify, operationTracker, patchSyncRuntime, queuePreview, syncSelectionUi])
+  }, [notify, operationTracker, patchSyncRuntime, queuePreview, setCollaborationActivity, syncSelectionUi])
 
   const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return
+    latestLocalPointerRef.current = { ...payload.pointer, button: payload.button }
     const now = performance.now()
-    if (now - cursorAt.current < 45 && payload.button !== 'down') return
+    if (now - cursorAt.current < COLLABORATION_BROADCAST_INTERVAL_MS && payload.button !== 'down' && payload.pointer.tool !== 'laser') return
     cursorAt.current = now
-    const channel = channelRef.current
-    if (!channel) return
-    const selectedElementIds = apiRef.current?.getAppState().selectedElementIds ?? {}
-    void channel.send({ type: 'broadcast', event: 'cursor', payload: { deviceId: identityRef.current.deviceId, displayName: identityRef.current.displayName, pointer: payload.pointer, button: payload.button, selectedElementIds } satisfies CursorPayload })
+    queueCollaborationStateRef.current(payload.button === 'down' || payload.pointer.tool === 'laser')
   }, [])
 
   const rename = (value: string) => {
@@ -1348,6 +1721,18 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (!saveIdentity(storage, next)) notify('Browser storage is unavailable. This name lasts until the tab closes.')
   }
   const changeTheme = (next: ThemePreference) => { setTheme(next); writePreference(storage, 'canvas.theme.v1', next) }
+  const rememberShowRemoteCursors = (value: boolean) => {
+    setShowRemoteCursors(value)
+    writePreference(storage, 'canvas.show-remote-cursors.v1', String(value))
+  }
+  const rememberShareCursor = (value: boolean) => {
+    shareCursorRef.current = value
+    setShareCursor(value)
+    writePreference(storage, 'canvas.share-cursor.v1', String(value))
+    queueCollaborationStateRef.current(true)
+  }
+  const sendPing = (deviceId: string) => sendCollaborationEffect('ping', null, deviceId)
+  const sendReaction = (emoji: CollaborationReaction) => sendCollaborationEffect('reaction', emoji)
   const recordRichTextDraft = useCallback((element: SceneElement) => {
     if (statusRef.current !== 'Live') return
     const nextStamp = stampOf(element)
@@ -1371,8 +1756,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     continuousOperationRef.current = 'text'
     operationTracker.beginText()
     patchSyncRuntime({ localEditing: true })
+    setCollaborationActivity('typing')
     armCheckpointRef.current()
-  }, [operationTracker, patchSyncRuntime])
+  }, [operationTracker, patchSyncRuntime, setCollaborationActivity])
 
   const endRichTextOperation = useCallback(() => {
     if (continuousOperationRef.current !== 'text') return
@@ -1380,7 +1766,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     patchSyncRuntime({ localEditing: false })
     clearCheckpointRef.current()
     operationTracker.endText()
-  }, [operationTracker, patchSyncRuntime])
+    setCollaborationActivity('idle')
+  }, [operationTracker, patchSyncRuntime, setCollaborationActivity])
 
   const insertCustomShape = useCallback((kind: CanvasShapeKind) => {
     setDrawingMode(null)
@@ -1505,6 +1892,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   const deactivateDrawing = useCallback(() => {
     setDrawingMode(null)
+  }, [])
+
+  const activateLaserPointer = useCallback(() => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    setRichTextMode(false)
+    setDrawingMode(null)
+    editor.setActiveTool({ type: 'laser' })
   }, [])
 
   const activateDrawingMode = useCallback((mode: DrawingMode) => {
@@ -1842,6 +2237,22 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       unlockAll={unlockAllLocked}
       insertCustomShape={insertCustomShape}
       deactivateDrawing={deactivateDrawing}
+      collaborationPanel={<CollaborationPanel
+        collaborators={remoteCollaboration}
+        followDeviceId={followDeviceId}
+        showRemoteCursors={showRemoteCursors}
+        shareCursor={shareCursor}
+        canUndo={undoDepth > 0}
+        disabled={!api || status !== 'Live'}
+        onJump={jumpToCollaborator}
+        onFollow={toggleFollowCollaborator}
+        onPing={sendPing}
+        onShowRemoteCursors={rememberShowRemoteCursors}
+        onShareCursor={rememberShareCursor}
+        onUndo={undoMyLastAction}
+        onLaser={activateLaserPointer}
+        onReaction={sendReaction}
+      />}
       drawingControls={<DrawingControls
         disabled={!api || status !== 'Live'}
         mode={drawingMode}
@@ -1879,6 +2290,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
         </Excalidraw>
         <CanvasShapeLayer ref={shapeLayerRef} />
+        <CollaborationOverlay
+          api={api}
+          collaborators={remoteCollaboration}
+          effects={collaborationEffects}
+          showCursors={showRemoteCursors}
+          followDeviceId={followDeviceId}
+          viewportRevision={viewportRevision}
+          onStopFollowing={stopFollowing}
+        />
         {eraserPreview && <div className="stroke-eraser-preview" style={{ left: eraserPreview.x, top: eraserPreview.y, width: eraserPreview.radius * 2, height: eraserPreview.radius * 2 }} />}
         <RichTextLayer
           ref={richTextLayerRef}
