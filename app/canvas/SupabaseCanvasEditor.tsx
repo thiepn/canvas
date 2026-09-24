@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, convertToExcalidrawElements, newElementWith, reconcileElements, restoreElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import type { AppState, BinaryFileData, BinaryFiles, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
@@ -451,6 +451,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const [undoInFlight, setUndoInFlight] = useState(false)
   const [undoDepth, setUndoDepth] = useState(0)
   const [notice, setNotice] = useState('')
+  const [delightBurst, setDelightBurst] = useState(0)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const shadowRef = useRef(new Map<string, VersionStamp>())
@@ -1874,16 +1875,16 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       Object.entries(selectedGroupIds).filter(([, value]) => value).map(([id]) => id).sort().join(','),
       appState.editingGroupId ?? '',
       appState.objectsSnapModeEnabled ? '1' : '0',
-      appState.gridModeEnabled ? '1' : '0',
+      gridModeEnabled ? '1' : '0',
     ].join('|')
     if (signature !== selectionSignatureRef.current) {
       selectionSignatureRef.current = signature
-      setSelectionSnapshot({ elements: [...selected], selectedGroupIds, editingGroupId: appState.editingGroupId, objectsSnapModeEnabled: appState.objectsSnapModeEnabled, gridModeEnabled: appState.gridModeEnabled })
+      setSelectionSnapshot({ elements: [...selected], selectedGroupIds, editingGroupId: appState.editingGroupId, objectsSnapModeEnabled: appState.objectsSnapModeEnabled, gridModeEnabled })
       queueCollaborationStateRef.current()
     }
     const locked = elements.some(element => !element.isDeleted && element.locked)
     setHasLockedElements(previous => previous === locked ? previous : locked)
-  }, [])
+  }, [gridModeEnabled])
 
   const refreshSelectionUi = useCallback(() => {
     const editor = apiRef.current
@@ -1907,7 +1908,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const refreshNavigationUi = useCallback(() => {
     const editor = apiRef.current
     if (!editor) return
-    navigationRef.current?.sync(editor.getSceneElementsIncludingDeleted(), editor.getAppState())
+    const appState = editor.getAppState()
+    navigationRef.current?.sync(editor.getSceneElementsIncludingDeleted(), appState)
+    backdropRef.current?.sync(appState)
     setViewportRevision(value => value + 1)
     queueCollaborationStateRef.current()
   }, [])
@@ -1930,6 +1933,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     richTextLayerRef.current?.sync(elements, appState)
     shapeLayerRef.current?.sync(elements, appState)
     navigationRef.current?.sync(elements, appState)
+    backdropRef.current?.sync(appState)
     syncSelectionUi(elements, appState)
     if (applyingRemote.current || statusRef.current !== 'Live') return
     const previousEditingTextId = editingTextRef.current
@@ -2021,7 +2025,40 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     setIdentity(next)
     if (!saveIdentity(storage, next)) notify('Browser storage is unavailable. This name lasts until the tab closes.')
   }
-  const changeTheme = (next: ThemePreference) => { setTheme(next); writePreference(storage, 'canvas.theme.v1', next) }
+  const feedback = useCallback((kind: 'tap' | 'soft' | 'success' | 'sparkle') => {
+    const profile = visualProfileRef.current
+    performHaptic(profile.haptics, kind)
+    performTone(profile.sounds, kind)
+  }, [])
+
+  const changeTheme = useCallback((next: ThemePreference) => {
+    setTheme(next)
+    writePreference(storage, 'canvas.theme.v1', next)
+    feedback('soft')
+  }, [feedback, storage])
+
+  const changeVisualProfile = useCallback((next: CanvasVisualProfile) => {
+    const previous = visualProfileRef.current
+    visualProfileRef.current = next
+    setVisualProfile(next)
+    saveVisualProfile(storage, next)
+    if (next.gridPattern !== previous.gridPattern) {
+      const visible = next.gridPattern !== 'none'
+      setGridModeEnabled(visible)
+      writePreference(storage, 'canvas.grid-mode.v1', String(visible))
+    }
+    feedback('soft')
+    requestAnimationFrame(() => {
+      const editor = apiRef.current
+      if (editor) backdropRef.current?.sync(editor.getAppState())
+    })
+  }, [feedback, storage])
+
+  const triggerDelight = useCallback(() => {
+    setDelightBurst(value => value + 1)
+    feedback('sparkle')
+  }, [feedback])
+
   const rememberShowRemoteCursors = (value: boolean) => {
     setShowRemoteCursors(value)
     writePreference(storage, 'canvas.show-remote-cursors.v1', String(value))
@@ -2032,8 +2069,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     writePreference(storage, 'canvas.share-cursor.v1', String(value))
     queueCollaborationStateRef.current(true)
   }
-  const sendPing = (deviceId: string) => sendCollaborationEffect('ping', null, deviceId)
-  const sendReaction = (emoji: CollaborationReaction) => sendCollaborationEffect('reaction', emoji)
+  const sendPing = (deviceId: string) => {
+    feedback('tap')
+    sendCollaborationEffect('ping', null, deviceId)
+  }
+  const sendReaction = (emoji: CollaborationReaction) => {
+    feedback(emoji === '✨' || emoji === '🎉' ? 'sparkle' : 'soft')
+    if (emoji === '✨' || emoji === '🎉') setDelightBurst(value => value + 1)
+    sendCollaborationEffect('reaction', emoji)
+  }
   const recordRichTextDraft = useCallback((element: SceneElement) => {
     if (statusRef.current !== 'Live') return
     const nextStamp = stampOf(element)
@@ -2162,11 +2206,17 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   useEffect(() => {
     if (!api || status !== 'Live') return
     api.updateScene({
-      appState: { objectsSnapModeEnabled, gridModeEnabled },
+      appState: {
+        objectsSnapModeEnabled,
+        gridModeEnabled: gridModeEnabled && visualProfile.gridPattern === 'squares',
+        gridSize: visualProfile.gridSize as AppState['gridSize'],
+        viewBackgroundColor: 'transparent',
+      },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
+    backdropRef.current?.sync(api.getAppState())
     requestAnimationFrame(refreshSelectionUi)
-  }, [api, gridModeEnabled, objectsSnapModeEnabled, refreshSelectionUi, status])
+  }, [api, gridModeEnabled, objectsSnapModeEnabled, refreshSelectionUi, status, visualProfile.gridPattern, visualProfile.gridSize])
 
   const rememberObjectsSnap = useCallback((enabled: boolean) => {
     setObjectsSnapModeEnabled(enabled)
@@ -2335,7 +2385,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     setGridModeEnabled(enabled)
     setSelectionSnapshot(current => ({ ...current, gridModeEnabled: enabled }))
     writePreference(storage, 'canvas.grid-mode.v1', String(enabled))
-  }, [storage])
+    if (enabled && visualProfileRef.current.gridPattern === 'none') {
+      const next = { ...visualProfileRef.current, gridPattern: 'dots' as const }
+      visualProfileRef.current = next
+      setVisualProfile(next)
+      saveVisualProfile(storage, next)
+    }
+    feedback('tap')
+  }, [feedback, storage])
 
   const scenePointFromPointer = (clientX: number, clientY: number, target: HTMLDivElement) => {
     const editor = apiRef.current
@@ -2647,6 +2704,19 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     notify('Drop images or a Canvas/Excalidraw JSON file.')
   }
 
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input,textarea,select,[contenteditable="true"]')) return
+      if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        triggerDelight()
+      }
+    }
+    window.addEventListener('keydown', keydown, true)
+    return () => window.removeEventListener('keydown', keydown, true)
+  }, [triggerDelight])
+
   const unlockAllLocked = useCallback(() => {
     const editor = apiRef.current
     if (!editor || statusRef.current !== 'Live') return
@@ -2657,7 +2727,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
   }, [notify, refreshSelectionUi])
 
-  return <div className="canvas-app live-canvas-app" data-canvas-engine="excalidraw-supabase">
+  return <div
+    className="canvas-app live-canvas-app"
+    data-canvas-engine="excalidraw-supabase"
+    data-canvas-motion={resolvedMotion}
+    data-canvas-grid={gridModeEnabled ? visualProfile.gridPattern : 'none'}
+    style={visualRootStyle(visualProfile, resolvedTheme)}
+  >
     <LiveHeader
       api={api}
       identity={identity}
@@ -2673,6 +2749,16 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       unlockAll={unlockAllLocked}
       insertCustomShape={insertCustomShape}
       deactivateDrawing={deactivateDrawing}
+      visualControls={<VisualControls
+        theme={theme}
+        profile={visualProfile}
+        gridVisible={gridModeEnabled}
+        disabled={!api}
+        onTheme={changeTheme}
+        onProfile={changeVisualProfile}
+        onGridVisible={rememberGridMode}
+        onDelight={triggerDelight}
+      />}
       mediaControls={<MediaControls
         disabled={!api || status !== 'Live'}
         busy={syncRuntime.assetTransfers > 0}
@@ -2705,6 +2791,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       />}
     />
     <main className="canvas-workspace live-canvas-workspace" aria-label="Shared infinite canvas">
+      <CanvasBackdrop ref={backdropRef} profile={backdropProfile} theme={resolvedTheme} />
+      {delightBurst > 0 && <div key={delightBurst} className="canvas-delight-burst" aria-hidden="true">
+        {Array.from({ length: 10 }, (_, index) => <span key={index} style={{ '--delight-index': index } as CSSProperties}>✦</span>)}
+      </div>}
       <div
         className={`live-excalidraw${richTextMode ? ' rich-text-insert-mode' : ''}${drawingMode ? ` drawing-mode drawing-mode--${drawingMode}` : ''}`}
         onPointerDownCapture={handleCanvasPointerDownCapture}
@@ -2725,7 +2815,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           theme={resolvedTheme}
           viewModeEnabled={status !== 'Live'}
           objectsSnapModeEnabled={objectsSnapModeEnabled}
-          gridModeEnabled={gridModeEnabled}
+          gridModeEnabled={gridModeEnabled && visualProfile.gridPattern === 'squares'}
           handleKeyboardGlobally
           isCollaborating={status === 'Live'}
           UIOptions={UI_OPTIONS}
