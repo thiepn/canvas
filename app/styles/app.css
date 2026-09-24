@@ -154,3 +154,34 @@
 .phase3-bend-control output{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
 
 .shape-preview--polygon{width:28px;height:25px;border:0;background:currentColor;clip-path:polygon(50% 0,100% 38%,82% 100%,18% 100%,0 38%)}
+
+
+/* Phase 4 — drawing, stylus and touch controls. */
+.drawing-menu-button.is-active{background:var(--hover)}
+.drawing-controls-popover{position:absolute;z-index:830;right:max(158px,calc(env(safe-area-inset-right) + 150px));top:calc(100% + 7px);width:340px;max-width:calc(100vw - 24px);padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);font-size:12px}
+.drawing-controls-heading{font-size:10px;letter-spacing:.11em;color:var(--muted);font-weight:700;margin:1px 3px 9px}
+.drawing-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
+.drawing-mode-grid button{display:flex;align-items:center;gap:7px;justify-content:flex-start;min-height:42px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.drawing-mode-grid button:hover,.drawing-mode-grid button.is-active,.drawing-width-presets button.is-active,.drawing-toggle-grid button.is-active,.drawing-stylus-toggle.is-active{background:var(--hover);border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
+.drawing-control-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.drawing-control-row label{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted)}
+.drawing-control-row input[type=color]{width:38px;height:31px;padding:2px;border:1px solid var(--line);border-radius:4px;background:var(--panel)}
+.drawing-control-row input[type=number]{width:74px;height:32px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:var(--ink)}
+.drawing-width-presets{display:flex;gap:5px;margin-bottom:9px}
+.drawing-width-presets button{flex:1;min-width:0;min-height:34px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
+.drawing-range-control{display:grid;grid-template-columns:auto 1fr 34px;align-items:center;gap:8px;margin:8px 0;color:var(--muted)}
+.drawing-range-control input[type=range]{width:100%}
+.drawing-range-control output{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+.drawing-toggle-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+.drawing-toggle-grid button{min-height:38px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
+.drawing-stylus-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--panel);margin-top:9px}
+.drawing-stylus-toggle small{font-size:10px;color:var(--muted);font-weight:400}
+.drawing-controls-note{margin:9px 2px 0;color:var(--muted);font-size:10px;line-height:1.45}
+.stroke-eraser-preview{position:absolute;z-index:900;pointer-events:none;transform:translate(-50%,-50%);border:1.5px solid color-mix(in srgb,var(--ink) 76%,transparent);border-radius:50%;background:color-mix(in srgb,var(--panel) 10%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--panel) 65%,transparent)}
+.drawing-mode--partial-eraser .excalidraw canvas{cursor:none!important}
+@media(max-width:700px){
+  .drawing-controls-popover{position:fixed;left:8px;right:8px;top:auto;bottom:max(82px,calc(env(safe-area-inset-bottom) + 70px));width:auto;max-width:none;max-height:62dvh;overflow:auto;overscroll-behavior:contain}
+  .drawing-mode-grid button,.drawing-toggle-grid button,.drawing-stylus-toggle{min-height:44px}
+  .drawing-control-row{grid-template-columns:1fr}
+  .drawing-width-presets button{min-height:42px}
+}
