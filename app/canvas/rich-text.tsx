@@ -14,6 +14,8 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react'
+import { canvasDiagnostics } from '../diagnostics/metrics.ts'
+import { SpatialGridIndex, viewportBounds } from './spatial-index.ts'
 import { CANVAS_BLOCK_COLORS, CANVAS_HIGHLIGHT_COLORS, CANVAS_STROKE_COLORS } from './visual-system.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
@@ -587,6 +589,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
   const snapshotRef = useRef(snapshot)
   const pendingSnapshotRef = useRef<RichTextSnapshot | null>(null)
   const syncFrameRef = useRef<number | null>(null)
+  const spatialIndexRef = useRef(new SpatialGridIndex<SceneElement>(512))
   const [editingId, setEditingId] = useState<string | null>(null)
   const editorRef = useRef<HTMLDivElement | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
@@ -614,7 +617,24 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
   }, [])
 
   const sync = (elements: readonly SceneElement[], appState: AppState) => {
-    const richElements = elements.filter(isRichTextElement)
+    const stats = spatialIndexRef.current.sync(elements, isRichTextElement)
+    const richElements = spatialIndexRef.current.query(viewportBounds(appState, 360))
+    const included = new Set(richElements.map(element => element.id))
+    for (const id of Object.keys(appState.selectedElementIds)) {
+      if (!appState.selectedElementIds[id] || included.has(id)) continue
+      const selected = spatialIndexRef.current.get(id)
+      if (selected) {
+        richElements.push(selected)
+        included.add(id)
+      }
+    }
+    if (editingId && !included.has(editingId)) {
+      const editing = spatialIndexRef.current.get(editingId)
+      if (editing) richElements.push(editing)
+    }
+    canvasDiagnostics.gauge('richTextIndexSize', stats.indexed)
+    canvasDiagnostics.gauge('richTextVisible', richElements.length)
+    canvasDiagnostics.sample('richTextCullRatio', stats.indexed ? richElements.length / stats.indexed : 0)
     const selectedLegacyText = elements.find(element => appState.selectedElementIds[element.id] && isLegacyTextElement(element)) ?? null
     if (richElements.length === 0 && snapshotRef.current.elements.length === 0 && !selectedLegacyText && !snapshotRef.current.selectedLegacyText) return
     pendingSnapshotRef.current = {
@@ -644,8 +664,12 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     api?.updateScene({ appState: { selectedElementIds: { [elementId]: true } } })
     if (api) {
       const appState = api.getAppState()
+      const allElements = api.getSceneElementsIncludingDeleted()
+      spatialIndexRef.current.sync(allElements, isRichTextElement)
+      const immediateElements = spatialIndexRef.current.query(viewportBounds(appState, 360))
+      if (!immediateElements.some(element => element.id === elementId)) immediateElements.push(element)
       const immediate: RichTextSnapshot = {
-        elements: api.getSceneElementsIncludingDeleted().filter(isRichTextElement),
+        elements: immediateElements,
         selectedIds: { [elementId]: true },
         selectedLegacyText: null,
         scrollX: appState.scrollX,
