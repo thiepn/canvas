@@ -1,5 +1,5 @@
 export type CanvasConnectionState = 'Connecting' | 'Synchronizing' | 'Live' | 'Reconnecting' | 'Offline' | 'Error'
-export type SaveIssue = 'none' | 'retrying' | 'unconfirmed'
+export type SaveIssue = 'none' | 'retrying' | 'unconfirmed' | 'asset-error'
 
 export type SyncHealthInput = {
   connection: CanvasConnectionState
@@ -95,6 +95,16 @@ export function deriveSyncHealth(input: SyncHealthInput): SyncHealth {
       label: 'Saving image…',
       detail: 'Uploading or restoring image data before Canvas can claim everything is saved.',
       tone: 'busy',
+      busy: true,
+    }
+  }
+
+  if (input.saveIssue === 'asset-error') {
+    return {
+      key: 'retrying-save',
+      label: 'Image not saved',
+      detail: 'An image is still only in this tab. Retry the image upload before closing or reloading Canvas.',
+      tone: 'error',
       busy: true,
     }
   }
