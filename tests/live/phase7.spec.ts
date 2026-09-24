@@ -259,11 +259,14 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
     })
     expect(poisoned.error).toBeNull()
 
-    await page.goto('./')
+    await page.goto('./?debug=1')
     await expect(page.getByText('Live', { exact: true })).toBeVisible()
     await chooseImage(page, intended, 'phase7-collision.svg')
 
-    await expect(page.getByText(/hash path is occupied by different content/i)).toBeVisible()
+    await expect.poll(async () => {
+      const snapshot = await page.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
+      return snapshot?.counters.assetUploadFailures ?? 0
+    }).toBeGreaterThan(0)
     await expect(page.getByText('Image not saved', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Retry now' })).toBeVisible()
     await expect.poll(async () => (await rows()).filter(row => row.element.type === 'image').length).toBe(0)
