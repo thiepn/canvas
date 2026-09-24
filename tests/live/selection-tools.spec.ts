@@ -136,7 +136,6 @@ test('alignment, distribution and z-order survive reload', async ({ page }) => {
   await toolbar.getByRole('button', { name: 'Left' }).click()
   await expect.poll(async () => new Set((await rows()).map(element => Math.round(Number(element.x)))).size).toBe(1)
 
-  await toolbar.getByText('Align', { exact: true }).click()
   await toolbar.getByRole('button', { name: 'Distribute V' }).click()
   await expect.poll(async () => {
     const ys = (await rows()).map(element => Number(element.y)).sort((a, b) => a - b)
