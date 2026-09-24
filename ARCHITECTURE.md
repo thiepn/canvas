@@ -117,7 +117,7 @@ Production uses the public-read `canvas-assets` bucket and CI uses `canvas-ci-as
 
 An image remains local with Excalidraw `status='pending'` until its binary upload succeeds. Pending/error image versions are excluded from the Postgres durability queue. A successful upload promotes the image to `saved`; only then may its element row persist. Remote saved images lazy-load from Storage and the client verifies the downloaded bytes against `fileId` before calling Excalidraw `addFiles()`.
 
-Static SVG is supported, but script/foreign-object content, inline event handlers, external HTTP references, entities/DOCTYPE, and JavaScript URLs are rejected before hashing/upload.
+Static SVG is supported. Safe SVG is first normalized to the pinned Excalidraw width/height/viewBox/XML namespace contract and that canonical byte representation defines the SHA-256 asset ID. Script/foreign-object content, inline event handlers, external HTTP references, entities/DOCTYPE, and JavaScript URLs are rejected before hashing/upload.
 
 Production assets are intentionally retained after an element tombstone because the same digest may be referenced by another image, a portable backup, or recovery history. Content addressing deduplicates identical bytes. This retention policy is safer than anonymous immediate object deletion.
 
