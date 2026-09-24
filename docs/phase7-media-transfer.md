@@ -57,7 +57,7 @@ The existing settings-menu JSON backup action now uses the same v3 portable expo
 
 ## SVG and link policy
 
-Static SVG artwork is supported. Canvas rejects SVG with scripts, `foreignObject`, iframes/objects/embeds, inline event handlers, external HTTP references, external CSS imports, JavaScript URLs, DOCTYPE or ENTITY declarations.
+Static SVG artwork is supported. Safe SVG is normalized with the same width/height/viewBox/XML namespace contract used by the pinned Excalidraw runtime before its SHA-256 ID is calculated. This keeps the Storage key, Excalidraw file ID, clipboard data and portable backup bytes stable even when an imported SVG omitted render metadata. Canvas rejects SVG with scripts, `foreignObject`, iframes/objects/embeds, inline event handlers, external HTTP references, external CSS imports, JavaScript URLs, DOCTYPE or ENTITY declarations.
 
 Scene links are constrained independently in Postgres and in the client. Empty/null links, HTTP(S) links, and internal `#` anchors are allowed. Other schemes are rejected from shared rows and stripped during JSON import.
 
