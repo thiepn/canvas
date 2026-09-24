@@ -244,7 +244,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     api.updateScene({
       appState: {
         objectsSnapModeEnabled: next,
-        ...(next ? { gridModeEnabled: false } : {}),
+        gridModeEnabled: next ? false : gridEnabled,
       },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
@@ -257,7 +257,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     api.updateScene({
       appState: {
         gridModeEnabled: next,
-        ...(next ? { objectsSnapModeEnabled: false } : {}),
+        objectsSnapModeEnabled: next ? false : objectsSnapEnabled,
       },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
