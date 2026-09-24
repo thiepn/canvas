@@ -73,6 +73,19 @@ test('group, transform, duplicate, lock, unlock, snap and select-same persist th
   await xInput.press('Enter')
   await expect.poll(async () => Math.round(Math.min(...(await rows()).map(element => Number(element.x))))).toBe(200)
 
+  const beforeResize = await rows()
+  const beforeWidth = Math.max(...beforeResize.map(element => Number(element.x) + Number(element.width))) - Math.min(...beforeResize.map(element => Number(element.x)))
+  const beforeHeight = Math.max(...beforeResize.map(element => Number(element.y) + Number(element.height))) - Math.min(...beforeResize.map(element => Number(element.y)))
+  const widthInput = toolbar.getByLabel('Selection width')
+  await widthInput.fill(String(beforeWidth * 1.5))
+  await widthInput.press('Enter')
+  await expect.poll(async () => {
+    const resized = await rows()
+    const nextWidth = Math.max(...resized.map(element => Number(element.x) + Number(element.width))) - Math.min(...resized.map(element => Number(element.x)))
+    const nextHeight = Math.max(...resized.map(element => Number(element.y) + Number(element.height))) - Math.min(...resized.map(element => Number(element.y)))
+    return [Math.round(nextWidth), Math.round(nextHeight)]
+  }).toEqual([Math.round(beforeWidth * 1.5), Math.round(beforeHeight * 1.5)])
+
   await toolbar.getByRole('button', { name: 'Duplicate' }).click()
   await expect.poll(async () => (await rows()).length).toBe(4)
   await expect(toolbar.locator('.selection-count')).toHaveText('2')
@@ -83,6 +96,13 @@ test('group, transform, duplicate, lock, unlock, snap and select-same persist th
   await expect(snap).toHaveAttribute('aria-pressed', 'false')
   await snap.click()
   await expect(snap).toHaveAttribute('aria-pressed', 'true')
+
+  const grid = toolbar.getByRole('button', { name: 'Grid' })
+  await expect(grid).toHaveAttribute('aria-pressed', 'false')
+  await grid.click()
+  await expect(grid).toHaveAttribute('aria-pressed', 'true')
+  await grid.click()
+  await expect(grid).toHaveAttribute('aria-pressed', 'false')
 
   await toolbar.getByRole('button', { name: 'Lock' }).click()
   await expect.poll(async () => (await rows()).filter(element => element.locked === true).length).toBe(2)
@@ -144,6 +164,38 @@ test('alignment, distribution and z-order survive reload', async ({ page }) => {
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
   const restored = await readScene(page)
   expect(restored.at(-1)?.id).toBe(targetId)
+})
+
+test('native Shift constraint and Alt-drag duplication remain available', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Pointer modifier interaction contract needs one browser execution.')
+  await page.goto('./')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+
+  await page.getByTitle(/^Rectangle\b/i).click()
+  const box = await canvasBox(page)
+  await page.keyboard.down('Shift')
+  await page.mouse.move(box.x + 320, box.y + 180)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 440, box.y + 250, { steps: 8 })
+  await page.mouse.up()
+  await page.keyboard.up('Shift')
+  await expect.poll(async () => (await rows()).length).toBe(1)
+  const [square] = await rows()
+  expect(Math.abs(Number(square.width) - Number(square.height))).toBeLessThan(2)
+
+  await selectPoints(page, [[Number(square.x) + Number(square.width) / 2, Number(square.y) + Number(square.height) / 2]])
+  const beforeX = Number(square.x)
+  const beforeY = Number(square.y)
+  await page.keyboard.down('Alt')
+  await page.mouse.move(box.x + beforeX + Number(square.width) / 2, box.y + beforeY + Number(square.height) / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + beforeX + Number(square.width) / 2 + 80, box.y + beforeY + Number(square.height) / 2 + 40, { steps: 8 })
+  await page.mouse.up()
+  await page.keyboard.up('Alt')
+
+  await expect.poll(async () => (await rows()).length).toBe(2)
+  const duplicates = await rows()
+  expect(new Set(duplicates.map(element => String(element.id))).size).toBe(2)
 })
 
 test('native keyboard nudging remains precise with the Phase 2 overlay', async ({ page, browserName }) => {

@@ -12,6 +12,7 @@ import {
   reorderSelection,
   resizeSelection,
   rotateSelection,
+  selectFrameContents,
   selectSame,
   setSelectionPosition,
   toggleLockSelection,
@@ -133,4 +134,15 @@ test('visual style copy and paste transfers drawing properties without geometry'
   assert.equal(next[1].strokeWidth, 4)
   assert.equal(next[1].x, 200)
   assert.equal(next[1].width, 50)
+})
+
+
+test('select frame contents selects unlocked active children only', () => {
+  const input = [
+    element('frame', 0, 0, 100, 100, { type: 'frame' }),
+    element('1', 10, 10, 10, 10, { frameId: 'frame' }),
+    element('2', 20, 20, 10, 10, { frameId: 'frame', locked: true }),
+    element('3', 30, 30, 10, 10, { frameId: 'other' }),
+  ]
+  assert.deepEqual(Object.keys(selectFrameContents(input, 'frame')), ['1'])
 })

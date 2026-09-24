@@ -14,6 +14,7 @@ import {
   resetRotation,
   resizeSelection,
   rotateSelection,
+  selectFrameContents,
   selectSame,
   setSelectionPosition,
   toggleLockSelection,
@@ -208,8 +209,9 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
   const selectFrameContents = () => {
     if (selected.length !== 1 || selected[0].type !== 'frame') return
     const frameId = selected[0].id
-    const selectedElementIds = Object.fromEntries(
-      api.getSceneElements().filter(element => element.frameId === frameId).map(element => [element.id, true]),
+    const selectedElementIds = selectFrameContents(
+      api.getSceneElementsIncludingDeleted() as unknown as CanvasElementLike[],
+      frameId,
     )
     if (!Object.keys(selectedElementIds).length) {
       onNotice('This frame is empty.')
