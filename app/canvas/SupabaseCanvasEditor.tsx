@@ -13,7 +13,7 @@ import { CanvasOperationTracker } from './operation-model.ts'
 import { readRevisionPages } from './revision-sync.ts'
 import { SceneVersionIndex, indexSceneById } from './scene-index.ts'
 import { deriveSyncHealth, recoveryMessage, type CanvasConnectionState, type SaveIssue, type SyncHealth } from './sync-health.ts'
-import { isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
+import { enforceAuthoritativeTombstones, isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 import {
   CANVAS_PREVIEW_TTL_MS,
   PreviewSequenceGate,
@@ -1373,10 +1373,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       ...(durableQueueSize === 0 && !writeInFlightRef.current && syncRuntimeRef.current.saveIssue === 'retrying' ? { saveIssue: 'none' as const } : {}),
     })
     if (!changed) return
-    const reconciled = reconcileElements(
-      localElements as Parameters<typeof reconcileElements>[0],
-      remoteElements as unknown as Parameters<typeof reconcileElements>[1],
-      editor.getAppState(),
+    const reconciled = enforceAuthoritativeTombstones(
+      reconcileElements(
+        localElements as Parameters<typeof reconcileElements>[0],
+        remoteElements as unknown as Parameters<typeof reconcileElements>[1],
+        editor.getAppState(),
+      ) as SceneElement[],
+      remoteElements,
     )
     applyingRemote.current = true
     editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
