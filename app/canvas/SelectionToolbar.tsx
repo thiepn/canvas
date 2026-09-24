@@ -111,10 +111,9 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
 
   if (!api || !selected.length || singleRichText) return null
 
-  const apply = (elements: CanvasElementLike[], appState?: Record<string, unknown>) => {
+  const apply = (elements: CanvasElementLike[]) => {
     api.updateScene({
       elements: elements as unknown as SceneElement[],
-      ...(appState ? { appState } : {}),
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
   }
@@ -128,22 +127,38 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
   const group = () => {
     const result = groupSelection(currentElements(), geometryIds())
     if (!Object.keys(result.selectedGroupIds).length) return
-    apply(result.elements, { selectedElementIds: result.selectedIds, selectedGroupIds: result.selectedGroupIds, editingGroupId: null })
+    api.updateScene({
+      elements: result.elements as unknown as SceneElement[],
+      appState: { selectedElementIds: result.selectedIds, selectedGroupIds: result.selectedGroupIds, editingGroupId: null },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    })
   }
   const ungroup = () => {
     const result = ungroupSelection(currentElements(), ids(), selectedGroupSet(api))
     if (!result.removedGroupIds.length) return
-    apply(result.elements, { selectedGroupIds: {}, editingGroupId: null })
+    api.updateScene({
+      elements: result.elements as unknown as SceneElement[],
+      appState: { selectedGroupIds: {}, editingGroupId: null },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    })
   }
   const lock = () => {
     const result = toggleLockSelection(currentElements(), relatedIds())
-    apply(result.elements, result.locked ? { selectedElementIds: {}, selectedGroupIds: {} } : undefined)
+    api.updateScene({
+      elements: result.elements as unknown as SceneElement[],
+      ...(result.locked ? { appState: { selectedElementIds: {}, selectedGroupIds: {} } } : {}),
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    })
     if (result.locked) onNotice('Locked selection. Use Canvas menu → Unlock all to unlock it.')
   }
   const duplicate = () => {
     const result = duplicateSelection(currentElements(), relatedIds())
     if (!Object.keys(result.duplicatedIds).length) return
-    apply(result.elements, { selectedElementIds: result.duplicatedIds, selectedGroupIds: {}, editingGroupId: null })
+    api.updateScene({
+      elements: result.elements as unknown as SceneElement[],
+      appState: { selectedElementIds: result.duplicatedIds, selectedGroupIds: {}, editingGroupId: null },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    })
   }
   const align = (mode: AlignMode) => apply(alignSelection(currentElements(), geometryIds(), mode))
   const distribute = (axis: 'x' | 'y') => apply(distributeSelection(currentElements(), geometryIds(), axis))
@@ -165,7 +180,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
     apply(pasteVisualStyle(currentElements(), ids(), copiedStyle))
   }
   const useAsDefault = () => {
-    const source = selected[0] as unknown as CanvasElementLike | undefined
+    const source = selected[0]
     if (!source) return
     api.updateScene({
       appState: {
