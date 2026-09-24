@@ -125,15 +125,25 @@ function unitKey(element: CanvasElementLike): string {
 function selectionUnits<T extends CanvasElementLike>(elements: readonly T[]): T[][] {
   const selectedIds = new Set(elements.map(element => element.id))
   const boundToContainer = new Map<string, string>()
+  const containersWithBoundText = new Set<string>()
   for (const element of elements) {
     for (const binding of element.boundElements ?? []) {
-      if (binding.type === 'text' && selectedIds.has(binding.id)) boundToContainer.set(binding.id, element.id)
+      if (binding.type === 'text' && selectedIds.has(binding.id)) {
+        boundToContainer.set(binding.id, element.id)
+        containersWithBoundText.add(element.id)
+      }
     }
   }
   const units = new Map<string, T[]>()
   for (const element of elements) {
-    const containerId = element.containerId && selectedIds.has(element.containerId) ? element.containerId : boundToContainer.get(element.id)
-    const key = containerId ? `container:${containerId}` : boundToContainer.has(element.id) ? `container:${boundToContainer.get(element.id)}` : unitKey(element)
+    const containerId = element.containerId && selectedIds.has(element.containerId)
+      ? element.containerId
+      : boundToContainer.get(element.id)
+    const key = containerId
+      ? `container:${containerId}`
+      : containersWithBoundText.has(element.id)
+        ? `container:${element.id}`
+        : unitKey(element)
     const current = units.get(key)
     if (current) current.push(element)
     else units.set(key, [element])
@@ -524,7 +534,13 @@ export function pasteVisualStyle<T extends CanvasElementLike>(
 ): T[] {
   return elements.map(element => {
     if (!selectedIds.has(element.id) || element.isDeleted) return element
-    const patch = Object.fromEntries(Object.entries(style).filter(([, value]) => value !== undefined)) as Partial<T>
+    const patch = Object.fromEntries(
+      Object.entries(style).filter(([key, value]) => {
+        if (value === undefined) return false
+        if ((key === 'startArrowhead' || key === 'endArrowhead') && element.type !== 'arrow' && element.type !== 'line') return false
+        return true
+      }),
+    ) as Partial<T>
     return bump(element, patch)
   })
 }

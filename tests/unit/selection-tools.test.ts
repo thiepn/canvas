@@ -168,3 +168,22 @@ test('grouping elements from different frames detaches them from frame membershi
   const result = groupSelection(input, new Set(['1', '2']), 'g')
   assert.ok(result.elements.every(element => element.frameId === null))
 })
+
+
+test('alignment keeps a selected bound label with its container', () => {
+  const container = element('box', 30, 20, 60, 40, { boundElements: [{ id: 'label', type: 'text' }] })
+  const label = element('label', 45, 30, 30, 20, { type: 'text', containerId: 'box' })
+  const other = element('other', 200, 100, 40, 40)
+  const next = alignSelection([container, label, other], new Set(['box', 'label', 'other']), 'top')
+  assert.equal(next[0].y, 20)
+  assert.equal(next[1].y, 30)
+  assert.equal(next[2].y, 20)
+})
+
+test('pasting arrow style onto a rectangle does not add arrowheads', () => {
+  const source = element('arrow', 0, 0, 20, 20, { type: 'arrow', startArrowhead: 'dot', endArrowhead: 'arrow' })
+  const target = element('rect', 40, 0)
+  const next = pasteVisualStyle([source, target], new Set(['rect']), copyVisualStyle(source))
+  assert.equal(next[1].startArrowhead, undefined)
+  assert.equal(next[1].endArrowhead, undefined)
+})
