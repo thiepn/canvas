@@ -122,26 +122,29 @@ test('own-action undo refuses a newer server version even when its Realtime upda
   await page.getByTitle(/^Rectangle\b/i).click()
   await dragOnCanvas(page, [360, 230], [480, 310])
 
-  let row: { id: string; version: number; version_nonce: number; element: Record<string, unknown> } | null = null
   await expect.poll(async () => {
     const { data, error } = await retryTransientSupabaseTestOperation(() => supabase
       .from(TABLE)
-      .select('id,version,version_nonce,element,is_deleted')
+      .select('id,element,is_deleted')
       .eq('is_deleted', false)
       .limit(1))
     if (error) throw error
-    const candidate = data?.[0]
-    if (candidate?.element?.type === 'rectangle') {
-      row = {
-        id: candidate.id,
-        version: Number(candidate.version),
-        version_nonce: Number(candidate.version_nonce),
-        element: candidate.element as Record<string, unknown>,
-      }
-    }
-    return row !== null
+    return data?.[0]?.element?.type === 'rectangle'
   }).toBe(true)
-  if (!row) throw new Error('Expected persisted rectangle.')
+
+  const { data: persisted, error: persistedError } = await retryTransientSupabaseTestOperation(() => supabase
+    .from(TABLE)
+    .select('id,version,version_nonce,element')
+    .eq('is_deleted', false)
+    .limit(1)
+    .single())
+  if (persistedError) throw persistedError
+  const row = {
+    id: persisted.id,
+    version: Number(persisted.version),
+    version_nonce: Number(persisted.version_nonce),
+    element: persisted.element as Record<string, unknown>,
+  }
 
   const newerVersion = row.version + 1
   const newerNonce = Math.max(-2_000_000_000, row.version_nonce - 1)
@@ -160,7 +163,7 @@ test('own-action undo refuses a newer server version even when its Realtime upda
       element: newerElement,
       updated_by: 'phase6-conflict-probe',
     })
-    .eq('id', row!.id))
+    .eq('id', row.id))
   if (updateError) throw updateError
 
   await expect.poll(async () => {
@@ -177,7 +180,7 @@ test('own-action undo refuses a newer server version even when its Realtime upda
   const { data: after, error: readError } = await retryTransientSupabaseTestOperation(() => supabase
     .from(TABLE)
     .select('version,version_nonce,is_deleted,element')
-    .eq('id', row!.id)
+    .eq('id', row.id)
     .single())
   if (readError) throw readError
   expect(Number(after.version)).toBe(newerVersion)
