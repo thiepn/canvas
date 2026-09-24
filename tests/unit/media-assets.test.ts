@@ -12,6 +12,7 @@ import {
   referencedAssetIds,
   sha256BlobId,
   validateImageBlob,
+  validateImageContent,
 } from '../../app/canvas/media-assets.ts'
 
 test('content-addressed image IDs are deterministic SHA-256 values', async () => {
@@ -73,4 +74,23 @@ test('duplicate Storage conflicts are treated as successful immutable deduplicat
   assert.equal(isDuplicateStorageError({ statusCode: 409, message: 'Conflict' }), true)
   assert.equal(isDuplicateStorageError({ statusCode: '400', message: 'The resource already exists' }), true)
   assert.equal(isDuplicateStorageError({ statusCode: 500, message: 'Server failure' }), false)
+})
+
+
+test('SVG validation allows static artwork and rejects active or externally loaded content', async () => {
+  await validateImageContent(new Blob([
+    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>',
+  ], { type: 'image/svg+xml' }))
+
+  for (const unsafe of [
+    '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><rect onclick="alert(1)"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://example.com/tracker.png"/></svg>',
+    '<!DOCTYPE svg [<!ENTITY xxe SYSTEM "https://example.com/x">]><svg xmlns="http://www.w3.org/2000/svg"/>',
+  ]) {
+    await assert.rejects(
+      () => validateImageContent(new Blob([unsafe], { type: 'image/svg+xml' })),
+      /active or external content/i,
+    )
+  }
 })
