@@ -114,3 +114,74 @@ test('own-action undo tombstones a creation only while its exact shared version 
 
   await expect.poll(async () => (await activeRows()).filter(element => element.type === 'rectangle').length).toBe(0)
 })
+
+test('own-action undo refuses a newer server version even when its Realtime update was missed', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Delayed-Realtime undo conflict contract needs one browser execution.')
+  await page.goto('./?debug=1&dropRealtime=1')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await page.getByTitle(/^Rectangle\b/i).click()
+  await dragOnCanvas(page, [360, 230], [480, 310])
+
+  let row: { id: string; version: number; version_nonce: number; element: Record<string, unknown> } | null = null
+  await expect.poll(async () => {
+    const { data, error } = await retryTransientSupabaseTestOperation(() => supabase
+      .from(TABLE)
+      .select('id,version,version_nonce,element,is_deleted')
+      .eq('is_deleted', false)
+      .limit(1))
+    if (error) throw error
+    const candidate = data?.[0]
+    if (candidate?.element?.type === 'rectangle') {
+      row = {
+        id: candidate.id,
+        version: Number(candidate.version),
+        version_nonce: Number(candidate.version_nonce),
+        element: candidate.element as Record<string, unknown>,
+      }
+    }
+    return row !== null
+  }).toBe(true)
+  if (!row) throw new Error('Expected persisted rectangle.')
+
+  const newerVersion = row.version + 1
+  const newerNonce = Math.max(-2_000_000_000, row.version_nonce - 1)
+  const newerElement = {
+    ...row.element,
+    x: Number(row.element.x) + 75,
+    version: newerVersion,
+    versionNonce: newerNonce,
+  }
+  const { error: updateError } = await retryTransientSupabaseTestOperation(() => supabase
+    .from(TABLE)
+    .update({
+      version: newerVersion,
+      version_nonce: newerNonce,
+      is_deleted: false,
+      element: newerElement,
+      updated_by: 'phase6-conflict-probe',
+    })
+    .eq('id', row!.id))
+  if (updateError) throw updateError
+
+  await expect.poll(async () => {
+    const snapshot = await page.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
+    return snapshot?.counters.realtimeChangesDroppedForDiagnostics ?? 0
+  }).toBeGreaterThan(0)
+
+  const settings = await openCanvasSettings(page)
+  const undo = settings.getByLabel('Collaboration controls').getByRole('button', { name: 'Undo my last action' })
+  await expect(undo).toBeEnabled()
+  await undo.click()
+  await expect(page.getByText('That action cannot be undone safely because a collaborator changed one of its objects.')).toBeVisible()
+
+  const { data: after, error: readError } = await retryTransientSupabaseTestOperation(() => supabase
+    .from(TABLE)
+    .select('version,version_nonce,is_deleted,element')
+    .eq('id', row!.id)
+    .single())
+  if (readError) throw readError
+  expect(Number(after.version)).toBe(newerVersion)
+  expect(Number(after.version_nonce)).toBe(newerNonce)
+  expect(after.is_deleted).toBe(false)
+  expect(Number((after.element as Record<string, unknown>).x)).toBe(Number(newerElement.x))
+})
