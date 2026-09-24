@@ -622,10 +622,41 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     )
     for (const id of pendingIds) {
       const file = files[id]
-      if (!file || assetReadyRef.current.has(id) || assetUploadPromisesRef.current.has(id) || assetUploadFailuresRef.current.has(id)) continue
+      if (!file || assetReadyRef.current.has(id) || assetUploadPromisesRef.current.has(id)) continue
+      assetUploadFailuresRef.current.delete(id)
       void ensureUploadedAsset(file).catch(() => {})
     }
   }, [ensureUploadedAsset])
+
+  const retryFailedAssets = useCallback(() => {
+    const editor = apiRef.current
+    if (!editor || !navigator.onLine || statusRef.current !== 'Live') return
+    const files = editor.getFiles()
+    const current = editor.getSceneElementsIncludingDeleted()
+    const failedUploads = new Set(assetUploadFailuresRef.current)
+    if (failedUploads.size) {
+      assetUploadFailuresRef.current.clear()
+      const next = current.map(element => element.type === 'image'
+        && !element.isDeleted
+        && element.status === 'error'
+        && element.fileId
+        && failedUploads.has(element.fileId as string)
+        && files[element.fileId as string]
+        ? newElementWith(element, { status: 'pending' })
+        : element)
+      if (next.some((element, index) => element !== current[index])) {
+        editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER })
+      }
+      for (const id of failedUploads) {
+        const file = files[id]
+        if (file) void ensureUploadedAsset(file).catch(() => {})
+      }
+    }
+    if (assetDownloadFailuresRef.current.size) {
+      assetDownloadFailuresRef.current.clear()
+      ensureAssetsForElements(editor.getSceneElementsIncludingDeleted())
+    }
+  }, [ensureAssetsForElements, ensureUploadedAsset])
 
   // Network callbacks must lock writes immediately, before React commits a render.
   const transition = useCallback((next: ConnectionState) => {
@@ -1559,7 +1590,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   useEffect(() => {
     if (status === 'Live' && durablePendingRef.current.size && !continuousOperationRef.current) scheduleFlush()
-  }, [scheduleFlush, status])
+    if (status === 'Live') retryFailedAssets()
+  }, [retryFailedAssets, scheduleFlush, status])
 
   const syncPresence = useCallback((channel: RealtimeChannel) => {
     const state = channel.presenceState() as Record<string, Array<Record<string, unknown>>>
