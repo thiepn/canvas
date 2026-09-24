@@ -71,10 +71,12 @@ import {
 } from './media-assets.ts'
 import {
   createBookmarkCard,
+  createCanvasClipboardText,
   createCanvasImage,
   downloadCanvasAsset,
   exportCanvasScene,
   insertElements,
+  isCanvasClipboardText,
   markImagesErrored,
   markImagesSaved,
   prepareCanvasJsonImport,
@@ -2465,23 +2467,66 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }
 
   useEffect(() => {
+    const editingTarget = (target: EventTarget | null) =>
+      target instanceof HTMLElement && Boolean(target.closest('input,textarea,select,[contenteditable="true"]'))
+
+    const handleDocumentCopy = (event: ClipboardEvent) => {
+      if (editingTarget(event.target)) return
+      const editor = apiRef.current
+      if (!editor || statusRef.current !== 'Live' || !event.clipboardData) return
+      const payload = createCanvasClipboardText(editor)
+      if (!payload) return
+      if (payload.length > 80 * 1024 * 1024) {
+        notify('This selection is too large for the cross-session clipboard. Export JSON instead.')
+        return
+      }
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      event.clipboardData.clearData()
+      event.clipboardData.setData('text/plain', payload)
+      event.clipboardData.setData('application/x-canvas+json', payload)
+    }
+
     const handleDocumentPaste = (event: ClipboardEvent) => {
-      const target = event.target
-      if (target instanceof HTMLElement && target.closest('input,textarea,select,[contenteditable="true"]')) return
+      if (editingTarget(event.target)) return
       if (event.clipboardData?.files.length) return
 
       const text = event.clipboardData?.getData('text/plain').trim()
       const editor = apiRef.current
       if (!text || !editor || statusRef.current !== 'Live') return
+
+      if (isCanvasClipboardText(text)) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        void (async () => {
+          try {
+            const imported = await prepareCanvasJsonImport(text)
+            if (!imported.elements.length) throw new Error('The clipboard contains no supported canvas objects.')
+            insertElements(editor, imported.elements, imported.files)
+            for (const fileData of Object.values(imported.files)) {
+              void ensureUploadedAsset(fileData).catch(() => {})
+            }
+          } catch (error) {
+            notify(`Canvas could not paste that selection: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        })()
+        return
+      }
+
       const card = createBookmarkCard(text, editor)
       if (!card) return
       event.preventDefault()
       event.stopImmediatePropagation()
       insertElements(editor, card)
     }
+
+    document.addEventListener('copy', handleDocumentCopy, true)
     document.addEventListener('paste', handleDocumentPaste, true)
-    return () => document.removeEventListener('paste', handleDocumentPaste, true)
-  }, [])
+    return () => {
+      document.removeEventListener('copy', handleDocumentCopy, true)
+      document.removeEventListener('paste', handleDocumentPaste, true)
+    }
+  }, [ensureUploadedAsset, notify])
 
   const addImageFile = useCallback(async (file: File) => {
     const editor = apiRef.current
