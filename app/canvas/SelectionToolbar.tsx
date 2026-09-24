@@ -178,7 +178,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     const labelId = singleArrow.boundElements?.find(bound => bound.type === 'text')?.id
     const label = labelId ? api.getSceneElementsIncludingDeleted().find(element => element.id === labelId) : null
     setConnectorLabel(label?.type === 'text' ? label.text : '')
-  }, [api, singleArrow?.id, singleArrow?.version])
+  }, [api, singleArrow])
 
   if (!api || !selected.length || singleRichText) return null
 
