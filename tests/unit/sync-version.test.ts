@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { enforceAuthoritativeTombstones, isNewerVersion, shouldKeepPending, type VersionStamp } from '../../app/canvas/sync-version.ts'
+import { enforceAuthoritativeTombstones, isNewerVersion, shouldApplyAuthoritativeChange, shouldKeepPending, type VersionStamp } from '../../app/canvas/sync-version.ts'
 
 function stamp(version: number, versionNonce: number, isDeleted = false): VersionStamp {
   return { version, versionNonce, isDeleted }
@@ -40,4 +40,19 @@ test('accepted authoritative tombstones cannot be lost by partial-scene reconcil
   const newerLocal = { id: 'shape-c', ...stamp(9, 10, false), x: 30 }
   const olderTombstone = { id: 'shape-c', ...stamp(8, 1, true), x: 30 }
   assert.deepEqual(enforceAuthoritativeTombstones([newerLocal], [olderTombstone]), [newerLocal])
+})
+
+
+test('authoritative tombstone can replay when its watermark was seen before the scene rendered it', () => {
+  const live = stamp(8, 40, false)
+  const tombstone = stamp(9, 30, true)
+
+  assert.equal(shouldApplyAuthoritativeChange(tombstone, stamp(8, 40, false), live, false), true)
+  assert.equal(shouldApplyAuthoritativeChange(tombstone, tombstone, live, false), true)
+  assert.equal(shouldApplyAuthoritativeChange(tombstone, tombstone, tombstone, false), false)
+  assert.equal(shouldApplyAuthoritativeChange(tombstone, tombstone, live, true), false)
+  assert.equal(shouldApplyAuthoritativeChange(tombstone, tombstone, stamp(10, 20, false), false), false)
+
+  const ordinary = stamp(9, 30, false)
+  assert.equal(shouldApplyAuthoritativeChange(ordinary, ordinary, live, false), false)
 })
