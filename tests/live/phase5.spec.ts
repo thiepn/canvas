@@ -125,8 +125,9 @@ test('frame selection, rename, auto-fit and content locking persist', async ({ p
   }).toBe(true)
 
   toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
-  await toolbar.getByText('Frame', { exact: true }).click()
   const frameName = toolbar.getByLabel('Frame name')
+  if (!(await frameName.isVisible())) await toolbar.getByText('Frame', { exact: true }).click()
+  await expect(frameName).toBeVisible()
   await frameName.fill('Research Cluster')
   await frameName.press('Enter')
   await toolbar.getByRole('button', { name: 'Auto-fit' }).click()
@@ -155,6 +156,7 @@ test('zoom to selection and frame use spatial navigation without changing scene 
   await page.goto('./')
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
   await drawRectangle(page, [360, 220], [430, 280])
+  await expect.poll(async () => (await rows()).filter(element => element.type === 'rectangle').length).toBe(1)
   const before = await rows()
   const rectangle = before.find(element => element.type === 'rectangle')
   if (!rectangle) throw new Error('Expected rectangle.')

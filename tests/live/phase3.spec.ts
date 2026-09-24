@@ -91,9 +91,14 @@ test('configurable polygon sides persist through reload', async ({ page, browser
   await toolbar.getByText('Shape', { exact: true }).click()
   await toolbar.getByLabel('Polygon sides').fill('8')
   await expect.poll(async () => {
-    const [element] = await rows()
-    const data = (element.customData as Record<string, unknown> | undefined)?.canvasShape as Record<string, unknown> | undefined
-    return Number(data?.sides)
+    const element = (await rows()).find(row => {
+      const customData = row.customData as Record<string, unknown> | undefined
+      const shape = customData?.canvasShape as Record<string, unknown> | undefined
+      return shape?.kind === 'polygon'
+    })
+    if (!element) return 0
+    const data = (element.customData as Record<string, unknown>).canvasShape as Record<string, unknown>
+    return Number(data.sides)
   }).toBe(8)
   await page.reload()
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
