@@ -487,7 +487,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           && element.status === 'saved'
           && rawBefore?.type === 'image'
           && rawBefore.status !== 'saved'
-          ? null
+          ? (() => {
+              const authority = authoritativeElementsRef.current.get(element.id)
+              return authority?.type === 'image' && authority.status === 'saved' ? authority : null
+            })()
           : rawBefore
         return [{ id: element.id, before, after: stampOf(element) }]
       })
@@ -2426,6 +2429,25 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
   }, [addImageFile, ensureUploadedAsset, notify])
 
+  const replaceImageFile = useCallback(async (elementId: string, file: File) => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    const current = editor.getSceneElementsIncludingDeleted()
+    const target = current.find(element => element.id === elementId)
+    if (!target || target.type !== 'image' || target.isDeleted) return
+    try {
+      const prepared = await createCanvasImage(file, editor)
+      editor.addFiles([prepared.file])
+      const next = current.map(element => element.id === elementId
+        ? newElementWith(element, { fileId: prepared.file.id, status: 'pending', crop: null })
+        : element)
+      editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+      await ensureUploadedAsset(prepared.file)
+    } catch (error) {
+      notify(`Image could not be replaced: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [ensureUploadedAsset, notify])
+
   const exportCanvas = useCallback(async (format: CanvasExportFormat) => {
     const editor = apiRef.current
     if (!editor) return
@@ -2583,6 +2605,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onGridPreference={rememberGridMode}
           onSelectionRefresh={refreshSelectionUi}
           onManipulationCommit={captureCurrentScene}
+          onReplaceImage={replaceImageFile}
         />
         <NavigationOverlay ref={navigationRef} api={api} onSelectionRefresh={refreshCanvasSelectionOverlays} />
       </div>
