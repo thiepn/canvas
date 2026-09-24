@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { BinaryFiles } from '@excalidraw/excalidraw/types'
-import { createCanvasBackup, jpegBytesToPdf, parseCanvasImport } from '../../app/canvas/scene-transfer.ts'
+import { createCanvasBackup, createCanvasClipboard, jpegBytesToPdf, parseCanvasImport } from '../../app/canvas/scene-transfer.ts'
 
 const fileId = 'c'.repeat(64)
 const unusedId = 'd'.repeat(64)
@@ -55,4 +55,19 @@ test('JPEG bytes are wrapped into a structurally complete one-page PDF', async (
   assert.match(head, /^%PDF-1\.4/)
   assert.match(tail, /%%EOF/)
   assert.ok(bytes.length > jpeg.length)
+})
+
+
+test('portable Canvas clipboard reuses the same bounded scene/file import contract', () => {
+  const clipboard = createCanvasClipboard([
+    { id: 'image-a', type: 'image', fileId, status: 'saved' },
+    { id: 'shape-a', type: 'rectangle' },
+  ], files)
+  assert.equal(clipboard.type, 'canvas-clipboard')
+  assert.equal(clipboard.version, 1)
+  assert.deepEqual(Object.keys(clipboard.files), [fileId])
+
+  const parsed = parseCanvasImport(JSON.stringify(clipboard))
+  assert.equal(parsed.elements.length, 2)
+  assert.deepEqual(Object.keys(parsed.files), [fileId])
 })
