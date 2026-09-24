@@ -359,20 +359,23 @@ async function dimensionsOfBlob(blob: Blob): Promise<{ width: number; height: nu
 
 export async function exportCanvasScene(api: ExcalidrawImperativeAPI, format: CanvasExportFormat): Promise<void> {
   const elements = api.getSceneElements().filter(element => !element.isDeleted)
-  if (!elements.length) throw new Error('There is nothing to export.')
   const files = api.getFiles()
+
+  // JSON is the recovery/inspection format and must remain available for an
+  // empty canvas. Raster/vector rendering formats need actual scene content.
+  if (format === 'json') {
+    const backup = createCanvasBackup(elements, files)
+    downloadBlob(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }), exportName('json'))
+    return
+  }
+  if (!elements.length) throw new Error('There is nothing to export.')
+
   const appState = {
     ...api.getAppState(),
     exportBackground: true,
     exportWithDarkMode: false,
     exportEmbedScene: false,
   } as AppState
-
-  if (format === 'json') {
-    const backup = createCanvasBackup(elements, files)
-    downloadBlob(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }), exportName('json'))
-    return
-  }
 
   if (format === 'svg') {
     const svg = await exportToSvg({ elements, appState, files })
