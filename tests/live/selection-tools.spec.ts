@@ -54,7 +54,7 @@ test('group, transform, duplicate, lock, unlock, snap and select-same persist th
   await drawRectangle(page, [470, 180], [540, 235])
   await expect.poll(async () => (await rows()).length).toBe(2)
 
-  await selectPoints(page, [[335, 198], [505, 208]])
+  await selectPoints(page, [[301, 198], [471, 208]])
   const toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
   await expect(toolbar.locator('.selection-count')).toHaveText('2')
   await toolbar.getByRole('button', { name: 'Group' }).click()
@@ -130,7 +130,7 @@ test('alignment, distribution and z-order survive reload', async ({ page }) => {
   await drawRectangle(page, [760, 390], [820, 440])
   await expect.poll(async () => (await rows()).length).toBe(3)
 
-  await selectPoints(page, [[330, 165], [530, 275], [790, 415]])
+  await selectPoints(page, [[301, 165], [501, 275], [761, 415]])
   const toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
   await toolbar.getByText('Align', { exact: true }).click()
   await toolbar.getByRole('button', { name: 'Left' }).click()
@@ -150,7 +150,7 @@ test('alignment, distribution and z-order survive reload', async ({ page }) => {
   await page.keyboard.press('Escape')
   const box = await canvasBox(page)
   await page.keyboard.press('v')
-  await page.mouse.click(box.x + alignedX + 30, box.y + Number(before[0].y) + 25)
+  await page.mouse.click(box.x + alignedX + 1, box.y + Number(before[0].y) + 25)
   await expect(toolbar.locator('.selection-count')).toHaveText('1')
   await toolbar.getByText('Arrange', { exact: true }).click()
   await toolbar.getByRole('button', { name: 'Front' }).click()
@@ -179,7 +179,7 @@ test('native Shift constraint and Alt-drag duplication remain available', async 
   const [square] = await rows()
   expect(Math.abs(Number(square.width) - Number(square.height))).toBeLessThan(2)
 
-  await selectPoints(page, [[Number(square.x) + Number(square.width) / 2, Number(square.y) + Number(square.height) / 2]])
+  await selectPoints(page, [[Number(square.x) + 1, Number(square.y) + Number(square.height) / 2]])
   const beforeX = Number(square.x)
   const beforeY = Number(square.y)
   await page.keyboard.down('Alt')
@@ -200,7 +200,7 @@ test('snap and grid preferences survive reload', async ({ page, browserName }) =
   await page.goto('./')
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
   await drawRectangle(page, [350, 180], [420, 240])
-  await selectPoints(page, [[385, 210]])
+  await selectPoints(page, [[351, 210]])
   let toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
   const snap = toolbar.getByRole('button', { name: 'Snap' })
   const grid = toolbar.getByRole('button', { name: 'Grid' })
@@ -229,7 +229,7 @@ test('native keyboard nudging remains precise with the Phase 2 overlay', async (
   const originalX = Number(created.x)
   const originalY = Number(created.y)
 
-  await selectPoints(page, [[375, 240]])
+  await selectPoints(page, [[341, 240]])
   await page.keyboard.press('ArrowRight')
   await page.keyboard.press('Shift+ArrowDown')
 
