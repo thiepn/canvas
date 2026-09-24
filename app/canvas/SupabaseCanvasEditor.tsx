@@ -13,7 +13,7 @@ import { CanvasOperationTracker } from './operation-model.ts'
 import { readRevisionPages } from './revision-sync.ts'
 import { SceneVersionIndex, indexSceneById } from './scene-index.ts'
 import { deriveSyncHealth, recoveryMessage, type CanvasConnectionState, type SaveIssue, type SyncHealth } from './sync-health.ts'
-import { enforceAuthoritativeTombstones, isNewerVersion, shouldKeepPending, type VersionStamp } from './sync-version.ts'
+import { enforceAuthoritativeTombstones, isNewerVersion, shouldApplyAuthoritativeChange, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 import {
   CANVAS_PREVIEW_TTL_MS,
   PreviewSequenceGate,
@@ -1332,7 +1332,17 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (durablePending && !shouldKeepPending(stampOf(durablePending), nextStamp)) durablePendingRef.current.delete(row.id)
       canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
 
-      if (!replace && !isNewerVersion(nextStamp, shadowRef.current.get(row.id))) continue
+      const rendered = localById.get(row.id)
+      if (!replace && !shouldApplyAuthoritativeChange(
+        nextStamp,
+        shadowRef.current.get(row.id),
+        rendered ? stampOf(rendered) : undefined,
+        pendingRef.current.has(row.id),
+      )) continue
+
+      if (!replace && nextStamp.isDeleted && rendered && !rendered.isDeleted) {
+        canvasDiagnostics.increment('authoritativeTombstoneReplays')
+      }
 
       const survivingPreview = remotePreviewRef.current.get(row.id)
       if (!replace && survivingPreview && isNewerVersion(stampOf(survivingPreview.element), nextStamp)) {
