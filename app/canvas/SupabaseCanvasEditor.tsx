@@ -1196,8 +1196,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const syncSelectionUi = useCallback((elements: readonly SceneElement[], appState: AppState) => {
     const selected = elements.filter(element => !element.isDeleted && appState.selectedElementIds[element.id])
     const selectedGroupIds = { ...appState.selectedGroupIds }
+    const selectedFrames = new Set(selected.filter(element => element.type === 'frame').map(element => element.id))
+    const selectedFrameContents = selectedFrames.size
+      ? elements.filter(element => !element.isDeleted && element.frameId && selectedFrames.has(element.frameId))
+      : []
     const signature = [
       selected.map(element => `${element.id}:${element.version}`).join(','),
+      selectedFrameContents.map(element => `${element.id}:${element.version}`).sort().join(','),
       Object.entries(selectedGroupIds).filter(([, value]) => value).map(([id]) => id).sort().join(','),
       appState.editingGroupId ?? '',
       appState.objectsSnapModeEnabled ? '1' : '0',
