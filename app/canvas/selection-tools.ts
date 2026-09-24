@@ -175,7 +175,7 @@ export function groupSelection<T extends CanvasElementLike>(
     return bump(element, {
       groupIds,
       ...(detachFromFrames ? { frameId: null } : {}),
-    } as Partial<T>)
+    } as unknown as Partial<T>)
   })
   const highestSelectedIndex = Math.max(...elements.map((element, index) => selectedMap.has(element.id) ? index : -1))
   const groupedElements = next.filter(element => selectedMap.has(element.id))
@@ -210,7 +210,7 @@ export function ungroupSelection<T extends CanvasElementLike>(
   const next = elements.map(element => {
     const groups = element.groupIds ?? []
     const filtered = groups.filter(groupId => !target.has(groupId))
-    return filtered.length === groups.length ? element : bump(element, { groupIds: filtered } as Partial<T>)
+    return filtered.length === groups.length ? element : bump(element, { groupIds: filtered } as unknown as Partial<T>)
   })
   return { elements: next, removedGroupIds: [...target] }
 }
