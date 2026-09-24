@@ -555,13 +555,36 @@ export function setConnectorRouting<T extends CanvasElementLike>(
 ): T[] {
   return elements.map(element => {
     if (!selectedIds.has(element.id) || element.isDeleted || element.type !== 'arrow') return element
+    const points = element.points ?? []
+    const first = points[0]
+    const last = points.at(-1)
+    const directPoints = first && last ? [first, last] : points
     if (routing === 'elbow') {
-      return bump(element, { elbowed: true, roundness: null, fixedSegments: null } as Partial<T>)
+      return bump(element, { elbowed: true, roundness: null, fixedSegments: null, points: directPoints } as Partial<T>)
+    }
+    if (routing === 'curved' && first && last) {
+      const dx = last[0] - first[0]
+      const dy = last[1] - first[1]
+      const length = Math.max(1, Math.hypot(dx, dy))
+      const bend = Math.min(52, Math.max(18, length * 0.16))
+      const normalX = -dy / length
+      const normalY = dx / length
+      const middle: CanvasPoint = [
+        (first[0] + last[0]) / 2 + normalX * bend,
+        (first[1] + last[1]) / 2 + normalY * bend,
+      ]
+      return bump(element, {
+        elbowed: false,
+        roundness: { type: 2 },
+        fixedSegments: null,
+        points: [first, middle, last],
+      } as Partial<T>)
     }
     return bump(element, {
       elbowed: false,
-      roundness: routing === 'curved' ? { type: 2 } : null,
+      roundness: null,
       fixedSegments: null,
+      points: directPoints,
     } as Partial<T>)
   })
 }
