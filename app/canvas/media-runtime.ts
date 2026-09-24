@@ -20,7 +20,7 @@ import {
   referencedAssetIds,
   sha256BlobId,
 } from './media-assets.ts'
-import { createCanvasBackup, jpegBytesToPdf, parseCanvasImport } from './scene-transfer.ts'
+import { createCanvasBackup, createCanvasClipboard, jpegBytesToPdf, parseCanvasImport } from './scene-transfer.ts'
 import type { CanvasExportFormat } from './MediaControls.tsx'
 
 export type MediaSceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
@@ -210,6 +210,51 @@ function remapImportedElements(rawElements: unknown[], fileMap: Map<string, stri
     }
     return [element]
   })
+}
+
+export function createCanvasClipboardText(api: ExcalidrawImperativeAPI): string | null {
+  const scene = api.getSceneElements().filter(element => !element.isDeleted)
+  const selected = new Set(
+    Object.entries(api.getAppState().selectedElementIds)
+      .filter(([, isSelected]) => isSelected)
+      .map(([id]) => id),
+  )
+  if (!selected.size) return null
+
+  // Preserve bound labels and frame contents so copy/paste remains a spatial
+  // operation rather than a shallow element-only clone.
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const element of scene) {
+      if (!selected.has(element.id)) continue
+      for (const bound of element.boundElements ?? []) {
+        if (!selected.has(bound.id)) {
+          selected.add(bound.id)
+          changed = true
+        }
+      }
+      if (element.type === 'frame') {
+        for (const child of scene) {
+          if (child.frameId === element.id && !selected.has(child.id)) {
+            selected.add(child.id)
+            changed = true
+          }
+        }
+      }
+    }
+  }
+
+  const elements = scene.filter(element => selected.has(element.id))
+  if (!elements.length) return null
+  return JSON.stringify(createCanvasClipboard(elements, api.getFiles()))
+}
+
+export function isCanvasClipboardText(text: string): boolean {
+  const trimmed = text.trim()
+  return trimmed.startsWith('{')
+    && trimmed.includes('"type":"canvas-clipboard"')
+    && trimmed.includes('"version":1')
 }
 
 export async function prepareCanvasJsonImport(text: string): Promise<{
