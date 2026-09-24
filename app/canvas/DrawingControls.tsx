@@ -103,7 +103,7 @@ export function DrawingControls({ disabled, mode, settings, onMode, onSetting }:
             />
           </label>
         </div>
-        <div className="drawing-color-swatches" aria-label={mode === 'highlighter' ? 'Highlighter color presets' : 'Pen color presets'}>
+        <div className="drawing-color-swatches" aria-label={mode === 'highlighter' ? 'Highlighter presets' : 'Pen presets'}>
           {(mode === 'highlighter' ? CANVAS_HIGHLIGHT_COLORS : CANVAS_STROKE_COLORS).slice(0, 10).map(value => <button
             key={value}
             type="button"
