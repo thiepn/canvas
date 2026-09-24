@@ -187,3 +187,38 @@ test('pasting a standalone HTTP URL creates a normal linked canvas card', async 
     return linked ? { type: linked.element.type, link: linked.element.link } : null
   }).toEqual({ type: 'rectangle', link: 'https://example.com/research/path' })
 })
+
+test('image clipboard survives reload and deduplicates the shared asset by content hash', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Cross-session image clipboard contract needs one browser execution.')
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.goto('./?debug=1')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+
+  await chooseImage(page, SVG_A, 'phase7-clipboard.svg')
+  await expect.poll(async () => {
+    const image = (await rows()).find(row => row.element.type === 'image')
+    return image ? { fileId: image.element.fileId, status: image.element.status } : null
+  }).toEqual({ fileId: ID_A, status: 'saved' })
+
+  await expect(page.getByRole('toolbar', { name: 'Selection tools' })).toBeVisible()
+  await page.keyboard.press('Control+C')
+
+  await page.reload()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
+  await page.keyboard.press('Control+V')
+
+  await expect.poll(async () => {
+    const images = (await rows()).filter(row => row.element.type === 'image')
+    return {
+      count: images.length,
+      distinctIds: new Set(images.map(image => image.id)).size,
+      fileIds: [...new Set(images.map(image => String(image.element.fileId)))],
+      saved: images.every(image => image.element.status === 'saved'),
+    }
+  }).toEqual({ count: 2, distinctIds: 2, fileIds: [ID_A], saved: true })
+
+  const stored = await supabase.storage.from(BUCKET).download(PATH_A)
+  expect(stored.error).toBeNull()
+  expect(Buffer.from(await stored.data!.arrayBuffer())).toEqual(SVG_A)
+})
