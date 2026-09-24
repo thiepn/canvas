@@ -45,28 +45,64 @@ test('focus anti-entropy repairs a deliberately dropped Postgres change without 
       return id
     }).not.toBe('')
 
+    // Establish B on the durable creation first. The actual dropped change is
+    // injected only after B is foregrounded, eliminating background-tab
+    // scheduling from the diagnostic precondition this test is meant to prove.
+    await pageB.bringToFront()
+    await pageB.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect.poll(async () => Boolean(await exportElement(pageB, id))).toBe(true)
+
+    const beforeDrop = await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
+    const droppedBaseline = Number(beforeDrop?.counters.realtimeChangesDroppedForDiagnostics ?? 0)
+
+    const { data: currentRow, error: currentError } = await retryTransientSupabaseTestOperation(() =>
+      supabase.from(TABLE)
+        .select('id,version,version_nonce,element,revision')
+        .eq('id', id)
+        .single(),
+    )
+    if (currentError) throw currentError
+    const updatedX = Number(currentRow.element.x) + 90
+    const updatedVersion = Number(currentRow.version) + 1
+    const updatedNonce = Number(currentRow.version_nonce) + 1
+    const updatedElement = {
+      ...currentRow.element,
+      x: updatedX,
+      version: updatedVersion,
+      versionNonce: updatedNonce,
+    }
+    const { data: updatedRow, error: updateError } = await retryTransientSupabaseTestOperation(() =>
+      supabase.from(TABLE)
+        .update({
+          version: updatedVersion,
+          version_nonce: updatedNonce,
+          element: updatedElement,
+          updated_by: 'anti-entropy-dropped-update',
+        })
+        .eq('id', id)
+        .select('revision')
+        .single(),
+    )
+    if (updateError) throw updateError
+    revision = Number(updatedRow.revision)
+
     await expect.poll(async () => {
       const snapshot = await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
-      return snapshot?.counters.realtimeChangesDroppedForDiagnostics ?? 0
-    }).toBeGreaterThan(0)
+      return Number(snapshot?.counters.realtimeChangesDroppedForDiagnostics ?? 0)
+    }).toBeGreaterThan(droppedBaseline)
 
-    // The dropped durable event must leave B's completed anti-entropy cursor
-    // behind the authoritative row. This proves reconciliation is necessary
-    // without using an interactive export read that can foreground the page.
+    // The deliberately dropped update must leave B behind the authoritative
+    // revision until focus reconciliation runs.
     const before = await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
     expect(Number(before?.gauges.reconciliationCursor ?? 0)).toBeLessThan(revision)
 
-    // Returning to the backgrounded client is the product trigger for focus
-    // reconciliation. Bring it forward first so visibility-gated reconciliation
-    // is deterministic in all browser engines.
-    await pageB.bringToFront()
     await pageB.evaluate(() => window.dispatchEvent(new Event('focus')))
 
     await expect.poll(async () => {
       const snapshot = await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
       return Number(snapshot?.gauges.reconciliationCursor ?? 0)
     }).toBeGreaterThanOrEqual(revision)
-    await expect.poll(async () => Boolean(await exportElement(pageB, id))).toBe(true)
+    await expect.poll(async () => Number((await exportElement(pageB, id))?.x)).toBe(updatedX)
     await expect(pageB.getByText('Live', { exact: true })).toBeVisible()
 
     const snapshot = await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
