@@ -52,7 +52,7 @@ Image binaries use public-read Supabase Storage buckets because the canvas itsel
 - object path must be `sha256/<64 lowercase hex>`;
 - the client verifies SHA-256 before upload and after download;
 - production has INSERT but no public UPDATE/DELETE policy, making digest objects immutable;
-- CI has DELETE only for exact fixture cleanup;
+- CI has hash-scoped SELECT + DELETE only for deterministic fixture cleanup;
 - active/external SVG constructs are rejected client-side before upload;
 - persisted links are limited to HTTP(S), internal `#` anchors, or empty/null values, and imports/remote rows are validated against the same rule.
 
