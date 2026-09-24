@@ -42,8 +42,14 @@ test('visual profile persists locally without mutating the shared scene', async 
   await menu.getByRole('button', { name: 'Violet accent' }).click()
   await menu.getByRole('button', { name: 'Warm', exact: true }).click()
   await menu.getByRole('button', { name: 'Lines', exact: true }).click()
-  await menu.getByLabel('Grid spacing').fill('36')
-  await menu.getByLabel('Grid strength').fill('22')
+  await menu.getByLabel('Grid spacing').evaluate((element: HTMLInputElement) => {
+    element.value = '36'
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await menu.getByLabel('Grid strength').evaluate((element: HTMLInputElement) => {
+    element.value = '22'
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
   await menu.getByRole('button', { name: 'Full', exact: true }).click()
 
   const root = page.locator('.live-canvas-app')
@@ -79,7 +85,10 @@ test('background grid is scene-locked and square mode remains compatible with na
 
   let menu = await openVisuals(page)
   await menu.getByRole('button', { name: 'Dots', exact: true }).click()
-  await menu.getByLabel('Grid spacing').fill('24')
+  await menu.getByLabel('Grid spacing').evaluate((element: HTMLInputElement) => {
+    element.value = '24'
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
   const backdrop = page.locator('.canvas-backdrop')
   await expect(backdrop).toHaveAttribute('data-grid-pattern', 'dots')
 
