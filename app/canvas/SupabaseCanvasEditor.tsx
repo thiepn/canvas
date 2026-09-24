@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, convertToExcalidrawElements, newElementWith, reconcileElements, restoreElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import type { AppState, BinaryFileData, BinaryFiles, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
@@ -81,7 +81,6 @@ import {
 } from './media-runtime.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
-type CanvasPasteData = Parameters<NonNullable<ComponentProps<typeof Excalidraw>['onPaste']>>[0]
 type ConnectionState = CanvasConnectionState
 type PresencePerson = { deviceId: string; displayName: string; color: string }
 type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown; revision: number }
@@ -2433,12 +2432,26 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }
 
   const handlePasteCapture = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null
+    if (target?.closest('input,textarea,select,[contenteditable="true"]')) return
+
     const files = Array.from(event.clipboardData.files)
-    if (!files.length) return
-    if (files.every(file => isSupportedImageMime(file.type))) return
+    if (files.length) {
+      if (files.every(file => isSupportedImageMime(file.type))) return
+      event.preventDefault()
+      event.stopPropagation()
+      notify('Canvas paste accepts images and text, but not arbitrary files.')
+      return
+    }
+
+    const text = event.clipboardData.getData('text/plain').trim()
+    const editor = apiRef.current
+    if (!text || !editor || statusRef.current !== 'Live') return
+    const card = createBookmarkCard(text, editor)
+    if (!card) return
     event.preventDefault()
     event.stopPropagation()
-    notify('Canvas paste accepts images and text, but not arbitrary files.')
+    insertElements(editor, card)
   }
 
   const addImageFile = useCallback(async (file: File) => {
@@ -2516,17 +2529,6 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     notify('Drop images or a Canvas/Excalidraw JSON file.')
   }
 
-  const onExcalidrawPaste = useCallback((data: CanvasPasteData) => {
-    if (data.elements?.length || Object.keys(data.files ?? {}).length || data.mixedContent?.length) return false
-    const editor = apiRef.current
-    const text = data.text?.trim()
-    if (!editor || !text || statusRef.current !== 'Live') return false
-    const card = createBookmarkCard(text, editor)
-    if (!card) return false
-    insertElements(editor, card)
-    return true
-  }, [])
-
   const unlockAllLocked = useCallback(() => {
     const editor = apiRef.current
     if (!editor || statusRef.current !== 'Live') return
@@ -2598,7 +2600,6 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         <Excalidraw
           excalidrawAPI={setApi}
           onChange={onChange}
-          onPaste={onExcalidrawPaste}
           generateIdForFile={generateCanvasFileId}
           onPointerUpdate={onPointerUpdate}
           onPointerUp={refreshSelectionAfterInteraction}
