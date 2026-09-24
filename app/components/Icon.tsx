@@ -7,7 +7,7 @@ const paths: Record<string, string> = {
   home: 'M3 11l9-8 9 8M6 9v12h12V9M10 21v-7h4v7', fit: 'M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6',
   undo: 'M8 4L3 9l5 5M3 9h10a7 7 0 010 14', redo: 'M16 4l5 5-5 5M21 9H11a7 7 0 000 14',
   plus: 'M12 5v14M5 12h14', minus: 'M5 12h14',
-  more: 'M4 6h16M4 12h16M4 18h16', close: 'M5 5l14 14M19 5L5 19', download: 'M12 3v12M7 10l5 5 5-5M4 17v4h16v-4',
+  more: 'M4 6h16M4 12h16M4 18h16', close: 'M5 5l14 14M19 5L5 19', download: 'M12 3v12M7 10l5 5 5-5M4 17v4h16v-4', upload: 'M12 21V9M7 14l5-5 5 5M4 7V3h16v4', image: 'M4 5h16v14H4zM7 15l3-3 3 3 2-2 2 2M8 9h.01',
 }
 export function Icon({ name, style }: { name: string; style?: CSSProperties }) {
   return <svg aria-hidden="true" focusable="false" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={style}><path d={paths[name] ?? paths.more} /></svg>
