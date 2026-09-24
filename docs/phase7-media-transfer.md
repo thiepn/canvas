@@ -29,7 +29,7 @@ Canvas supports:
 
 ## Clipboard and links
 
-Excalidraw's native clipboard payload is retained so copied image elements carry their referenced binary data. When pasted into another Canvas session, the same binary is deduplicated into the content-addressed Storage lane.
+Canvas owns object copy/paste at the document boundary for selected canvas objects. `Ctrl/Cmd+C` serializes a compact `canvas-clipboard` v1 payload containing the selected object closure plus referenced image data; `Ctrl/Cmd+V` routes that payload through the same ID-remapping, link-sanitization and content-hash validation path as JSON import. This keeps image/object clipboard behavior reliable across reloads and tabs instead of depending on browser preservation of Excalidraw-specific clipboard MIME types. Identical image bytes deduplicate through the shared SHA-256 Storage key.
 
 Canvas rich-text editing continues to consume `text/html`, sanitize it through the existing rich-text allowlist, and fall back to plain text. A standalone HTTP/HTTPS text paste on the canvas becomes a normal linked rectangle card. Other text keeps the existing Excalidraw/rich-text paste behavior.
 
