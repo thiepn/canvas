@@ -19,7 +19,9 @@ Supported content stays deliberately canvas-native:
 - portable cross-session object/image clipboard plus text clipboard workflows and Canvas/Excalidraw JSON import;
 - JSON, PNG, SVG and PDF export;
 - eraser;
-- realtime collaborator presence and cursors.
+- realtime collaborator presence and cursors;
+- device-local visual profiles with light/dark/system appearance, accents, paper surfaces, dot/line/square backgrounds, motion and optional feedback;
+- lightweight vector stamps that remain ordinary selectable collaborative canvas objects.
 
 Video, audio, PDF-as-canvas-object, arbitrary attachments, iframes/embeds and remote-media objects are not part of the product. Image binaries are content-addressed in Supabase Storage while Postgres independently validates the corresponding image elements.
 
@@ -34,7 +36,7 @@ The application uses:
 - **Supabase Storage** for immutable SHA-256-addressed image assets;
 - **GitHub Pages** for static hosting.
 
-There is no application server and no login system. Phase 8 retired the historical tldraw/Cloudflare Worker runtime, so the source tree, dependency graph, automated release gates and production deployment now describe the same Excalidraw + Supabase architecture.
+There is no application server and no login system. The historical tldraw/Cloudflare Worker runtime has been retired, so the source tree, dependency graph, automated release gates and production deployment describe the same Excalidraw + Supabase architecture.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the data/sync model and [DEPLOYMENT.md](./DEPLOYMENT.md) for release and recovery operations.
 
