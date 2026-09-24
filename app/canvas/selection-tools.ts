@@ -472,9 +472,13 @@ export function selectSame<T extends CanvasElementLike>(
 ): Record<string, true> {
   const source = activeSelected(elements, selectedIds)[0]
   if (!source) return {}
+  const sourceIsRichText = Boolean(source.customData?.canvasRichText)
   return Object.fromEntries(elements.filter(element => {
     if (element.isDeleted || element.locked) return false
-    if (mode === 'type') return element.type === source.type
+    if (mode === 'type') {
+      const candidateIsRichText = Boolean(element.customData?.canvasRichText)
+      return sourceIsRichText ? candidateIsRichText : element.type === source.type && !candidateIsRichText
+    }
     if (mode === 'stroke') return element.strokeColor === source.strokeColor
     return element.backgroundColor === source.backgroundColor
   }).map(element => [element.id, true]))

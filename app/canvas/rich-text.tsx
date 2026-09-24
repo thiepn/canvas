@@ -602,7 +602,8 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
   useEffect(() => {
     snapshotRef.current = snapshot
     const selectedRich = snapshot.elements.find(element => snapshot.selectedIds[element.id])
-    if (selectedRich || snapshot.selectedLegacyText) document.documentElement.dataset.canvasRichTextSelected = 'true'
+    const selectedCount = Object.values(snapshot.selectedIds).filter(Boolean).length
+    if ((selectedRich && selectedCount === 1) || snapshot.selectedLegacyText) document.documentElement.dataset.canvasRichTextSelected = 'true'
     else delete document.documentElement.dataset.canvasRichTextSelected
     return () => { delete document.documentElement.dataset.canvasRichTextSelected }
   }, [snapshot])
@@ -676,6 +677,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
     selectionRef.current = selectionBookmark(editor, range)
   }, [editingId])
 
+  const selectedCount = useMemo(() => Object.values(snapshot.selectedIds).filter(Boolean).length, [snapshot.selectedIds])
   const selectedRich = useMemo(() => snapshot.elements.find(element => snapshot.selectedIds[element.id]) ?? null, [snapshot])
   const selectedData = selectedRich ? richData(selectedRich) : null
 
@@ -1054,7 +1056,7 @@ export const RichTextLayer = forwardRef<RichTextLayerHandle, {
       <button type="button" className="rich-text-done-button" disabled={disabled} onClick={convertLegacyText}>Convert to rich text</button>
     </div>}
 
-    {selectedRich && selectedData && <div ref={toolbarRef} className="rich-text-toolbar" role="toolbar" aria-label="Rich text formatting">
+    {selectedRich && selectedData && selectedCount === 1 && <div ref={toolbarRef} className="rich-text-toolbar" role="toolbar" aria-label="Rich text formatting">
       {!editingId && <button type="button" className="rich-text-edit-button" onClick={() => beginEditing(selectedRich.id)}>Edit text</button>}
       <button type="button" aria-label="Bold" title="Bold (Ctrl/⌘ B)" disabled={!editingId} onMouseDown={event => event.preventDefault()} onClick={() => applyCommand('bold')}><strong>B</strong></button>
       <button type="button" aria-label="Italic" title="Italic (Ctrl/⌘ I)" disabled={!editingId} onMouseDown={event => event.preventDefault()} onClick={() => applyCommand('italic')}><em>I</em></button>

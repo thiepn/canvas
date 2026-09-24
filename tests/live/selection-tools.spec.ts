@@ -174,10 +174,7 @@ test('native Shift constraint and Alt-drag duplication remain available', async 
   await page.getByTitle(/^Rectangle\b/i).click()
   const box = await canvasBox(page)
   await page.keyboard.down('Shift')
-  await page.mouse.move(box.x + 320, box.y + 180)
-  await page.mouse.down()
-  await page.mouse.move(box.x + 440, box.y + 250, { steps: 8 })
-  await page.mouse.up()
+  await dragOnCanvas(page, [320, 180], [440, 250])
   await page.keyboard.up('Shift')
   await expect.poll(async () => (await rows()).length).toBe(1)
   const [square] = await rows()
@@ -187,10 +184,11 @@ test('native Shift constraint and Alt-drag duplication remain available', async 
   const beforeX = Number(square.x)
   const beforeY = Number(square.y)
   await page.keyboard.down('Alt')
-  await page.mouse.move(box.x + beforeX + Number(square.width) / 2, box.y + beforeY + Number(square.height) / 2)
-  await page.mouse.down()
-  await page.mouse.move(box.x + beforeX + Number(square.width) / 2 + 80, box.y + beforeY + Number(square.height) / 2 + 40, { steps: 8 })
-  await page.mouse.up()
+  await dragOnCanvas(
+    page,
+    [beforeX + Number(square.width) / 2, beforeY + Number(square.height) / 2],
+    [beforeX + Number(square.width) / 2 + 80, beforeY + Number(square.height) / 2 + 40],
+  )
   await page.keyboard.up('Alt')
 
   await expect.poll(async () => (await rows()).length).toBe(2)

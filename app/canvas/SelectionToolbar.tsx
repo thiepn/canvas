@@ -86,6 +86,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
   const selected = selection.elements
   const bounds = useMemo(() => commonBounds(selected as unknown as CanvasElementLike[]), [selected])
   const hasRichText = selected.some(isRichTextAnchor)
+  const singleRichText = selected.length === 1 && hasRichText
   const grouped = Object.values(selection.selectedGroupIds).some(Boolean)
 
   useEffect(() => {
@@ -101,7 +102,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
     else setRotation('0')
   }, [bounds?.height, bounds?.minX, bounds?.minY, bounds?.width, selected])
 
-  if (!api || !selected.length || hasRichText) return null
+  if (!api || !selected.length || singleRichText) return null
 
   const apply = (elements: CanvasElementLike[], appState?: Record<string, unknown>) => {
     api.updateScene({
@@ -285,10 +286,10 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
             <button type="button" onClick={() => selectMatching('fill')}>Fill color</button>
           </div>
           <div className="selection-section"><strong>Style</strong>
-            <button type="button" onClick={copyStyle}>Copy style</button>
-            <button type="button" onClick={pasteStyle} disabled={!copiedStyle}>Paste style</button>
-            <button type="button" onClick={useAsDefault}>Set as default</button>
-            <button type="button" onClick={resetStyle}>Reset style</button>
+            <button type="button" onClick={copyStyle} disabled={hasRichText}>Copy style</button>
+            <button type="button" onClick={pasteStyle} disabled={!copiedStyle || hasRichText}>Paste style</button>
+            <button type="button" onClick={useAsDefault} disabled={hasRichText}>Set as default</button>
+            <button type="button" onClick={resetStyle} disabled={hasRichText}>Reset style</button>
           </div>
         </div>
       </details>
