@@ -244,36 +244,48 @@ test('image clipboard survives reload and deduplicates the shared asset by conte
 test('immutable asset collision stays unsaved until Retry now can persist the correct bytes', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Storage collision integrity needs one browser execution.')
 
-  const poisoned = await supabase.storage.from(BUCKET).upload(PATH_A, SVG_B, {
-    contentType: 'image/svg+xml',
-    upsert: false,
-  })
-  expect(poisoned.error).toBeNull()
+  // Use a run-unique intended hash so this integrity test cannot be poisoned by
+  // an object left behind by a prior failed/retried browser run.
+  const nonce = `${Date.now()}-${Math.random()}`
+  const intended = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64"><rect width="96" height="64" fill="#2563eb"/><desc>${nonce}</desc></svg>`)
+  const poison = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64"><rect width="96" height="64" fill="#dc2626"/><desc>poison-${nonce}</desc></svg>`)
+  const collisionId = createHash('sha256').update(intended).digest('hex')
+  const collisionPath = `sha256/${collisionId}`
 
-  await page.goto('./')
-  await expect(page.getByText('Live', { exact: true })).toBeVisible()
-  await chooseImage(page, SVG_A, 'phase7-collision.svg')
+  try {
+    const poisoned = await supabase.storage.from(BUCKET).upload(collisionPath, poison, {
+      contentType: 'image/svg+xml',
+      upsert: false,
+    })
+    expect(poisoned.error).toBeNull()
 
-  await expect(page.getByText(/hash path is occupied by different content/i)).toBeVisible()
-  await expect(page.getByText('Image not saved', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Retry now' })).toBeVisible()
-  await expect.poll(async () => (await rows()).filter(row => row.element.type === 'image').length).toBe(0)
+    await page.goto('./')
+    await expect(page.getByText('Live', { exact: true })).toBeVisible()
+    await chooseImage(page, intended, 'phase7-collision.svg')
 
-  const poisonedStored = await supabase.storage.from(BUCKET).download(PATH_A)
-  expect(poisonedStored.error).toBeNull()
-  expect(Buffer.from(await poisonedStored.data!.arrayBuffer())).toEqual(SVG_B)
+    await expect(page.getByText(/hash path is occupied by different content/i)).toBeVisible()
+    await expect(page.getByText('Image not saved', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Retry now' })).toBeVisible()
+    await expect.poll(async () => (await rows()).filter(row => row.element.type === 'image').length).toBe(0)
 
-  const removed = await supabase.storage.from(BUCKET).remove([PATH_A])
-  expect(removed.error).toBeNull()
-  await page.getByRole('button', { name: 'Retry now' }).click()
+    const poisonedStored = await supabase.storage.from(BUCKET).download(collisionPath)
+    expect(poisonedStored.error).toBeNull()
+    expect(Buffer.from(await poisonedStored.data!.arrayBuffer())).toEqual(poison)
 
-  await expect.poll(async () => {
-    const image = (await rows()).find(row => row.element.type === 'image')
-    return image ? { fileId: image.element.fileId, status: image.element.status } : null
-  }).toEqual({ fileId: ID_A, status: 'saved' })
-  await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
+    const removed = await supabase.storage.from(BUCKET).remove([collisionPath])
+    expect(removed.error).toBeNull()
+    await page.getByRole('button', { name: 'Retry now' }).click()
 
-  const stored = await supabase.storage.from(BUCKET).download(PATH_A)
-  expect(stored.error).toBeNull()
-  expect(Buffer.from(await stored.data!.arrayBuffer())).toEqual(SVG_A)
+    await expect.poll(async () => {
+      const image = (await rows()).find(row => row.element.type === 'image')
+      return image ? { fileId: image.element.fileId, status: image.element.status } : null
+    }).toEqual({ fileId: collisionId, status: 'saved' })
+    await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
+
+    const stored = await supabase.storage.from(BUCKET).download(collisionPath)
+    expect(stored.error).toBeNull()
+    expect(Buffer.from(await stored.data!.arrayBuffer())).toEqual(intended)
+  } finally {
+    await supabase.storage.from(BUCKET).remove([collisionPath])
+  }
 })
