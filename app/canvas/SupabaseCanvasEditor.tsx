@@ -38,6 +38,7 @@ import {
   type ScenePoint,
 } from './drawing-tools.ts'
 import { reorderSelection, type CanvasElementLike } from './selection-tools.ts'
+import { NavigationOverlay, type NavigationOverlayHandle } from './NavigationOverlay.tsx'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = CanvasConnectionState
@@ -304,6 +305,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const richTextLayerRef = useRef<RichTextLayerHandle | null>(null)
   const shapeLayerRef = useRef<CanvasShapeLayerHandle | null>(null)
+  const navigationRef = useRef<NavigationOverlayHandle | null>(null)
   const [richTextMode, setRichTextMode] = useState(false)
   const [drawingMode, setDrawingMode] = useState<DrawingMode | null>(null)
   const drawingModeRef = useRef<DrawingMode | null>(null)
@@ -1219,6 +1221,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     requestAnimationFrame(refreshSelectionUi)
   }, [refreshSelectionUi])
 
+  const refreshNavigationUi = useCallback(() => {
+    const editor = apiRef.current
+    if (!editor) return
+    navigationRef.current?.sync(editor.getSceneElementsIncludingDeleted(), editor.getAppState())
+  }, [])
+
   useEffect(() => {
     const keyup = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -1235,6 +1243,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const onChange = useCallback((elements: readonly SceneElement[], appState: AppState) => {
     richTextLayerRef.current?.sync(elements, appState)
     shapeLayerRef.current?.sync(elements, appState)
+    navigationRef.current?.sync(elements, appState)
     syncSelectionUi(elements, appState)
     if (applyingRemote.current || statusRef.current !== 'Live') return
     const previousEditingTextId = editingTextRef.current
@@ -1841,6 +1850,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onChange={onChange}
           onPointerUpdate={onPointerUpdate}
           onPointerUp={refreshSelectionAfterInteraction}
+          onScrollChange={() => requestAnimationFrame(refreshNavigationUi)}
           theme={resolvedTheme}
           viewModeEnabled={status !== 'Live'}
           objectsSnapModeEnabled={objectsSnapModeEnabled}
@@ -1877,6 +1887,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onSelectionRefresh={refreshSelectionUi}
           onManipulationCommit={captureCurrentScene}
         />
+        <NavigationOverlay ref={navigationRef} api={api} />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}
       {status === 'Live' && (syncHealth.key === 'retrying-save' || syncHealth.key === 'confirming-save') && <div className={`save-health-banner save-health-banner--${syncHealth.tone}`}><span>{syncHealth.detail}</span>{syncHealth.key === 'retrying-save' && <button type="button" onClick={retrySaveNow}>Retry now</button>}</div>}
