@@ -172,7 +172,6 @@ test('native Shift constraint and Alt-drag duplication remain available', async 
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
 
   await page.getByTitle(/^Rectangle\b/i).click()
-  const box = await canvasBox(page)
   await page.keyboard.down('Shift')
   await dragOnCanvas(page, [320, 180], [440, 250])
   await page.keyboard.up('Shift')

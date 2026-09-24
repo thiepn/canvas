@@ -107,7 +107,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
     setHeight(String(Math.round(bounds.height * 10) / 10))
     if (selected.length === 1) setRotation(String(Math.round((selected[0].angle * 180 / Math.PI) * 10) / 10))
     else setRotation('0')
-  }, [bounds?.height, bounds?.minX, bounds?.minY, bounds?.width, selected])
+  }, [bounds, selected])
 
   if (!api || !selected.length || singleRichText) return null
 
@@ -238,7 +238,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
     })
     onGridPreference(next)
   }
-  const selectFrameContents = () => {
+  const selectContentsOfFrame = () => {
     if (selected.length !== 1 || selected[0].type !== 'frame') return
     const frameId = selected[0].id
     const selectedElementIds = selectFrameContents(
@@ -310,7 +310,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
         <summary>More</summary>
         <div className="selection-popover-panel selection-more-panel">
           <div className="selection-section"><strong>Selection</strong>
-            <button type="button" onClick={selectFrameContents} disabled={selected.length !== 1 || selected[0].type !== 'frame'}>Frame contents</button>
+            <button type="button" onClick={selectContentsOfFrame} disabled={selected.length !== 1 || selected[0].type !== 'frame'}>Frame contents</button>
             <strong>Select same</strong>
             <button type="button" onClick={() => selectMatching('type')}>Type</button>
             <button type="button" onClick={() => selectMatching('stroke')}>Stroke color</button>
