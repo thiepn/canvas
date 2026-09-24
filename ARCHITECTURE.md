@@ -9,6 +9,7 @@ GitHub Pages
   └─ React / Vite application
        └─ Excalidraw editor
             ├─ PostgREST upserts/reads ──> public.canvas_elements (Postgres)
+            ├─ Storage upload/download ──> canvas-assets / canvas-ci-assets
             └─ Supabase Realtime
                  ├─ postgres_changes
                  ├─ presence
@@ -49,7 +50,7 @@ Important columns:
 | `revision` | monotonic anti-entropy cursor |
 | `updated_at` | authoritative server timestamp |
 
-The production table permits only `rectangle`, `diamond`, `ellipse`, `line`, `arrow`, `freedraw`, `text`, and `frame`. Element IDs, updater strings, version ranges, JSON shape and serialized size are constrained in Postgres. `element.id`, `element.version`, `element.versionNonce`, and `element.isDeleted` must agree with their relational columns.
+The production table permits only `rectangle`, `diamond`, `ellipse`, `line`, `arrow`, `freedraw`, `text`, `frame`, and `image`. Image rows are accepted only when `status='saved'`, `fileId` is a 64-character SHA-256 hex digest, and the Excalidraw image scale contract is present. Element IDs, updater strings, version ranges, JSON shape and serialized size are constrained in Postgres. `element.id`, `element.version`, `element.versionNonce`, and `element.isDeleted` must agree with their relational columns.
 
 Public clients can SELECT/INSERT/UPDATE. They cannot physically DELETE production rows; deleting on the canvas is a normal versioned update with `is_deleted=true`.
 
@@ -95,7 +96,7 @@ Scene application keeps direct ID lookup and immutable element stamps. Unchanged
 
 Transport and durability are separate concepts. The UI can report Connecting, Synchronizing, Saved, Editing, Saving, Waiting to save, Retrying save, Confirming save, Reconnecting, Offline or Sync problem while separately exposing whether Realtime transport is `Live`.
 
-`Saved` is strict: the client must be Live with no active local operation, no durable-ready work, no request in flight and no unresolved retry/confirmation state. Failed writes preserve exact pending versions and expose manual retry. The editor is not left writable when persistence cannot be trusted. Canvas deliberately does not advertise offline collaborative editing.
+`Saved` is strict: the client must be Live with no active local operation, no durable-ready work, no request in flight, no active image upload/download and no unresolved retry/confirmation state. Failed writes preserve exact pending versions and expose manual retry. The editor is not left writable when persistence cannot be trusted. Canvas deliberately does not advertise offline collaborative editing.
 
 ## Presence and cursors
 
@@ -103,14 +104,24 @@ Presence is Supabase Realtime channel state, not Postgres data. It contains anon
 
 Closing a client removes its presence according to Realtime channel lifecycle. No collaborator history table exists.
 
-## Media exclusion
+## Image asset architecture
 
-Media exclusion is enforced at two layers:
+Phase 7 adds images without turning Canvas into an attachment manager. Postgres still stores only the Excalidraw image element; the binary is stored separately under an immutable content-addressed key:
 
-1. browser paste/drop handlers block files and image payloads and filter unsupported Excalidraw elements;
-2. Postgres `CHECK` constraints reject every element type outside the vector allowlist and cap JSON size.
+```text
+fileId = SHA-256(image bytes)
+Storage path = sha256/<fileId>
+```
 
-There is no object-storage bucket or upload API in this product.
+Production uses the public-read `canvas-assets` bucket and CI uses `canvas-ci-assets`. Both buckets enforce a 12 MB object ceiling and allow only PNG, JPEG, WebP, GIF and SVG MIME types. Anonymous clients may INSERT a hash-named object, but production clients have no UPDATE or DELETE policy, so an existing digest cannot be overwritten. CI additionally permits DELETE for deterministic fixture cleanup.
+
+An image remains local with Excalidraw `status='pending'` until its binary upload succeeds. Pending/error image versions are excluded from the Postgres durability queue. A successful upload promotes the image to `saved`; only then may its element row persist. Remote saved images lazy-load from Storage and the client verifies the downloaded bytes against `fileId` before calling Excalidraw `addFiles()`.
+
+Static SVG is supported, but script/foreign-object content, inline event handlers, external HTTP references, entities/DOCTYPE, and JavaScript URLs are rejected before hashing/upload.
+
+Production assets are intentionally retained after an element tombstone because the same digest may be referenced by another image, a portable backup, or recovery history. Content addressing deduplicates identical bytes. This retention policy is safer than anonymous immediate object deletion.
+
+Arbitrary files, video, audio, PDF objects, iframes and embeddable remote media remain unsupported.
 
 ## Recovery architecture
 
