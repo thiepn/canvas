@@ -33,6 +33,8 @@ export type CanvasElementLike = {
   roundness?: unknown
   startArrowhead?: unknown
   endArrowhead?: unknown
+  elbowed?: boolean
+  fixedSegments?: unknown
   containerId?: string | null
   boundElements?: readonly CanvasBoundElement[] | null
   startBinding?: CanvasBinding | null
@@ -56,6 +58,17 @@ export type AlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bott
 export type DistributeAxis = 'x' | 'y'
 export type ZOrderAction = 'backward' | 'forward' | 'back' | 'front'
 export type SameSelectionMode = 'type' | 'stroke' | 'fill'
+export type ConnectorRouting = 'straight' | 'curved' | 'elbow'
+export type ConnectorArrowhead =
+  | 'arrow'
+  | 'bar'
+  | 'circle'
+  | 'circle_outline'
+  | 'triangle'
+  | 'triangle_outline'
+  | 'diamond'
+  | 'diamond_outline'
+  | null
 
 export type VisualStyle = Pick<CanvasElementLike,
   'strokeColor' | 'backgroundColor' | 'fillStyle' | 'strokeWidth' | 'strokeStyle' |
@@ -519,15 +532,113 @@ export function selectSame<T extends CanvasElementLike>(
   const source = activeSelected(elements, selectedIds)[0]
   if (!source) return {}
   const sourceIsRichText = Boolean(source.customData?.canvasRichText)
+  const sourceCanvasShape = source.customData?.canvasShape as Record<string, unknown> | undefined
+  const sourceShapeKind = typeof sourceCanvasShape?.kind === 'string' ? sourceCanvasShape.kind : null
   return Object.fromEntries(elements.filter(element => {
     if (element.isDeleted || element.locked) return false
     if (mode === 'type') {
       const candidateIsRichText = Boolean(element.customData?.canvasRichText)
-      return sourceIsRichText ? candidateIsRichText : element.type === source.type && !candidateIsRichText
+      const candidateShape = element.customData?.canvasShape as Record<string, unknown> | undefined
+      const candidateKind = typeof candidateShape?.kind === 'string' ? candidateShape.kind : null
+      if (sourceShapeKind) return candidateKind === sourceShapeKind
+      return sourceIsRichText ? candidateIsRichText : element.type === source.type && !candidateIsRichText && !candidateKind
     }
     if (mode === 'stroke') return element.strokeColor === source.strokeColor
     return element.backgroundColor === source.backgroundColor
   }).map(element => [element.id, true]))
+}
+
+export function setConnectorRouting<T extends CanvasElementLike>(
+  elements: readonly T[],
+  selectedIds: ReadonlySet<string>,
+  routing: ConnectorRouting,
+): T[] {
+  return elements.map(element => {
+    if (!selectedIds.has(element.id) || element.isDeleted || element.type !== 'arrow') return element
+    if (routing === 'elbow') {
+      return bump(element, { elbowed: true, roundness: null, fixedSegments: null } as Partial<T>)
+    }
+    return bump(element, {
+      elbowed: false,
+      roundness: routing === 'curved' ? { type: 2 } : null,
+      fixedSegments: null,
+    } as Partial<T>)
+  })
+}
+
+export function setConnectorArrowheads<T extends CanvasElementLike>(
+  elements: readonly T[],
+  selectedIds: ReadonlySet<string>,
+  startArrowhead: ConnectorArrowhead,
+  endArrowhead: ConnectorArrowhead,
+): T[] {
+  return elements.map(element => selectedIds.has(element.id) && !element.isDeleted && element.type === 'arrow'
+    ? bump(element, { startArrowhead, endArrowhead } as Partial<T>)
+    : element)
+}
+
+function removeBoundConnector<T extends CanvasElementLike>(element: T, connectorId: string): T {
+  if (!element.boundElements?.some(bound => bound.id === connectorId)) return element
+  return bump(element, {
+    boundElements: element.boundElements.filter(bound => bound.id !== connectorId),
+  } as Partial<T>)
+}
+
+export function bindConnectorEndpoint<T extends CanvasElementLike>(
+  elements: readonly T[],
+  connectorId: string,
+  targetId: string,
+  endpoint: 'start' | 'end',
+): T[] {
+  const connector = elements.find(element => element.id === connectorId)
+  const target = elements.find(element => element.id === targetId)
+  if (!connector || !target || connector.type !== 'arrow' || connector.isDeleted || target.isDeleted || connector.id === target.id) return [...elements]
+  const previous = endpoint === 'start' ? connector.startBinding : connector.endBinding
+  const binding: CanvasBinding = { elementId: target.id, fixedPoint: [0.5, 0.5], mode: 'orbit' }
+  return elements.map(element => {
+    if (previous?.elementId === element.id && element.id !== target.id) return removeBoundConnector(element, connector.id)
+    if (element.id === target.id) {
+      const boundElements = [...(element.boundElements ?? []).filter(bound => bound.id !== connector.id), { id: connector.id, type: 'arrow' }]
+      return bump(element, { boundElements } as Partial<T>)
+    }
+    if (element.id === connector.id) {
+      return bump(element, (endpoint === 'start'
+        ? { startBinding: binding }
+        : { endBinding: binding }) as Partial<T>)
+    }
+    return element
+  })
+}
+
+export function detachConnectorEndpoint<T extends CanvasElementLike>(
+  elements: readonly T[],
+  connectorId: string,
+  endpoint: 'start' | 'end',
+): T[] {
+  const connector = elements.find(element => element.id === connectorId)
+  if (!connector || connector.type !== 'arrow') return [...elements]
+  const binding = endpoint === 'start' ? connector.startBinding : connector.endBinding
+  return elements.map(element => {
+    if (binding?.elementId === element.id) return removeBoundConnector(element, connector.id)
+    if (element.id !== connector.id) return element
+    return bump(element, (endpoint === 'start'
+      ? { startBinding: null }
+      : { endBinding: null }) as Partial<T>)
+  })
+}
+
+export function reverseConnector<T extends CanvasElementLike>(
+  elements: readonly T[],
+  connectorId: string,
+): T[] {
+  return elements.map(element => element.id === connectorId && element.type === 'arrow' && !element.isDeleted
+    ? bump(element, {
+        startArrowhead: element.endArrowhead ?? null,
+        endArrowhead: element.startArrowhead ?? null,
+        startBinding: element.endBinding ?? null,
+        endBinding: element.startBinding ?? null,
+      } as Partial<T>)
+    : element)
 }
 
 export function copyVisualStyle(element: CanvasElementLike): VisualStyle {

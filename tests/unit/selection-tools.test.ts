@@ -2,18 +2,23 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   alignSelection,
+  bindConnectorEndpoint,
   commonBounds,
   copyVisualStyle,
+  detachConnectorEndpoint,
   distributeSelection,
   duplicateSelection,
   flipSelection,
   groupSelection,
   pasteVisualStyle,
   reorderSelection,
+  reverseConnector,
   resizeSelection,
   rotateSelection,
   selectFrameContents,
   selectSame,
+  setConnectorArrowheads,
+  setConnectorRouting,
   setSelectionPosition,
   toggleLockSelection,
   ungroupSelection,
@@ -208,4 +213,60 @@ test('resizing uses element centers so rotated selections do not drift from scal
   const after = commonBounds(next)!
   assert.ok(Math.abs(after.midX - before.midX * 2 + before.minX) < after.width)
   assert.ok(after.width > before.width)
+})
+
+
+test('custom Canvas shape logical type does not collapse into rectangles', () => {
+  const triangle = element('triangle', 0, 0, 20, 20, { customData: { canvasShape: { version: 1, kind: 'triangle' } } })
+  const triangle2 = element('triangle2', 30, 0, 20, 20, { customData: { canvasShape: { version: 1, kind: 'triangle' } } })
+  const star = element('star', 60, 0, 20, 20, { customData: { canvasShape: { version: 1, kind: 'star' } } })
+  const rect = element('rect', 90, 0)
+  assert.deepEqual(Object.keys(selectSame([triangle, triangle2, star, rect], new Set(['triangle']), 'type')), ['triangle', 'triangle2'])
+})
+
+test('connector routing and arrowhead presets update only arrows', () => {
+  const arrow = element('arrow', 0, 0, 100, 0, { type: 'arrow', startArrowhead: null, endArrowhead: 'arrow', elbowed: false })
+  const rect = element('rect', 120, 0)
+  const curved = setConnectorRouting([arrow, rect], new Set(['arrow']), 'curved')
+  assert.deepEqual(curved[0].roundness, { type: 2 })
+  assert.equal(curved[0].elbowed, false)
+  const elbow = setConnectorRouting(curved, new Set(['arrow']), 'elbow')
+  assert.equal(elbow[0].elbowed, true)
+  const heads = setConnectorArrowheads(elbow, new Set(['arrow']), 'circle', 'triangle')
+  assert.equal(heads[0].startArrowhead, 'circle')
+  assert.equal(heads[0].endArrowhead, 'triangle')
+  assert.equal(heads[1].startArrowhead, undefined)
+})
+
+test('connector binding updates reciprocal bound-element records and detach removes them', () => {
+  const arrow = element('arrow', 0, 0, 100, 0, { type: 'arrow', startBinding: null, endBinding: null, boundElements: null })
+  const left = element('left', -40, -20, 30, 30)
+  const right = element('right', 120, -20, 30, 30)
+  const boundStart = bindConnectorEndpoint([arrow, left, right], 'arrow', 'left', 'start')
+  const boundBoth = bindConnectorEndpoint(boundStart, 'arrow', 'right', 'end')
+  const connector = boundBoth.find(item => item.id === 'arrow')!
+  assert.equal(connector.startBinding?.elementId, 'left')
+  assert.equal(connector.endBinding?.elementId, 'right')
+  assert.deepEqual(boundBoth.find(item => item.id === 'left')!.boundElements, [{ id: 'arrow', type: 'arrow' }])
+  assert.deepEqual(boundBoth.find(item => item.id === 'right')!.boundElements, [{ id: 'arrow', type: 'arrow' }])
+  const detached = detachConnectorEndpoint(boundBoth, 'arrow', 'start')
+  assert.equal(detached.find(item => item.id === 'arrow')!.startBinding, null)
+  assert.deepEqual(detached.find(item => item.id === 'left')!.boundElements, [])
+})
+
+test('reverse connector swaps endpoints and bindings without moving geometry', () => {
+  const arrow = element('arrow', 10, 10, 100, 30, {
+    type: 'arrow',
+    startArrowhead: null,
+    endArrowhead: 'triangle',
+    startBinding: { elementId: 'a' },
+    endBinding: { elementId: 'b' },
+  })
+  const [next] = reverseConnector([arrow], 'arrow')
+  assert.equal(next.startArrowhead, 'triangle')
+  assert.equal(next.endArrowhead, null)
+  assert.equal(next.startBinding?.elementId, 'b')
+  assert.equal(next.endBinding?.elementId, 'a')
+  assert.equal(next.x, 10)
+  assert.equal(next.y, 10)
 })
