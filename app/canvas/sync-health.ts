@@ -5,6 +5,7 @@ export type SyncHealthInput = {
   connection: CanvasConnectionState
   queuedChanges: number
   writeInFlight: boolean
+  assetTransfers: number
   localEditing: boolean
   saveIssue: SaveIssue
 }
@@ -83,6 +84,16 @@ export function deriveSyncHealth(input: SyncHealthInput): SyncHealth {
       key: 'saving',
       label: 'Saving…',
       detail: 'Saving your completed change to the shared canvas.',
+      tone: 'busy',
+      busy: true,
+    }
+  }
+
+  if (Math.max(0, Math.floor(input.assetTransfers)) > 0) {
+    return {
+      key: 'saving',
+      label: 'Saving image…',
+      detail: 'Uploading or restoring image data before Canvas can claim everything is saved.',
       tone: 'busy',
       busy: true,
     }
