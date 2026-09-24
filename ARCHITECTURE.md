@@ -17,7 +17,7 @@ GitHub Pages
                  └─ active-operation preview broadcast
 ```
 
-There is no application backend, room service or account service. Supabase is the authoritative persistence/realtime service. Phase 8 removed the previous tldraw + Cloudflare Worker implementation so the active source tree and dependency graph now match this production boundary.
+There is no application backend, room service or account service. Supabase is the authoritative persistence/realtime service. The previous tldraw + Cloudflare Worker implementation has been removed, so the active source tree and dependency graph match this production boundary.
 
 ## Identity
 
@@ -122,6 +122,25 @@ Static SVG is supported. Safe SVG is first normalized to the pinned Excalidraw w
 Production assets are intentionally retained after an element tombstone because the same digest may be referenced by another image, a portable backup, or recovery history. Content addressing deduplicates identical bytes. This retention policy is safer than anonymous immediate object deletion.
 
 Arbitrary files, video, audio, PDF objects, iframes and embeddable remote media remain unsupported.
+
+
+## Visual profile and background architecture
+
+Phase 8 introduces a Canvas-owned visual profile that is intentionally **device-local**. Theme, accent, paper surface, background pattern, grid spacing/strength, motion preference, ambient glow, UI sounds and haptics live in browser storage and never create Postgres rows or Realtime canvas mutations.
+
+Light, dark and system appearance are first-class. Canvas supplies the shell/paper/accent tokens while the pinned Excalidraw editor receives the resolved light/dark theme. The drawing surface itself is transparent so a Canvas backdrop can render paper and optional scene-locked backgrounds below the editor.
+
+Background behavior has one compatibility rule:
+
+- square grid uses Excalidraw's native grid so existing grid snapping remains exact;
+- dot and line backgrounds are rendered by Canvas from the same scene scroll/zoom transform;
+- the existing Grid control remains the visibility switch for every pattern.
+
+Color choices for native/custom shapes, drawing and rich text use one shared curated palette while retaining custom color inputs.
+
+Phase 8 stamps (heart, check, sparkle, pin, flag and bolt) are not a new persistence subsystem. They use the existing custom-shape metadata on ordinary rectangle elements, so selection, transforms, locking, undo, collaboration, export and Postgres durability remain unchanged.
+
+Optional sound/haptic feedback is best-effort browser feedback only. It never gates an action and is disabled by default for sound. Reduced-motion mode suppresses Canvas-owned transitions and delight animation, including the small local sparkle Easter egg.
 
 ## Recovery architecture
 
