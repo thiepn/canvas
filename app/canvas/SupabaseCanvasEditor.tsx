@@ -2057,7 +2057,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       setGridModeEnabled(visible)
       writePreference(storage, 'canvas.grid-mode.v1', String(visible))
     }
-    feedback('soft')
+    const discreteChanged =
+      next.accent !== previous.accent
+      || next.paper !== previous.paper
+      || next.gridPattern !== previous.gridPattern
+      || next.motion !== previous.motion
+      || next.sounds !== previous.sounds
+      || next.haptics !== previous.haptics
+      || next.ambientGlow !== previous.ambientGlow
+    if (discreteChanged) feedback('soft')
     requestAnimationFrame(() => {
       const editor = apiRef.current
       if (editor) backdropRef.current?.sync(editor.getAppState())
