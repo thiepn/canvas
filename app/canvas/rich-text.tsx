@@ -14,6 +14,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react'
+import { CANVAS_BLOCK_COLORS, CANVAS_HIGHLIGHT_COLORS, CANVAS_STROKE_COLORS } from './visual-system.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 
@@ -146,9 +147,9 @@ export const RICH_TEXT_FONTS = [
 
 export const RICH_TEXT_FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 44, 48, 56, 64, 72, 80, 96, 120, 144] as const
 
-const TEXT_COLORS = ['#111827', '#374151', '#6b7280', '#ffffff', '#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777'] as const
-const HIGHLIGHT_COLORS = ['#fff3bf', '#ffec99', '#ffd8a8', '#ffc9c9', '#d0bfff', '#bac8ff', '#a5d8ff', '#c3fae8', '#b2f2bb', '#e9ecef'] as const
-const BLOCK_BACKGROUND_COLORS = ['transparent', '#ffffff', '#fff9db', '#fff0f6', '#f3f0ff', '#e7f5ff', '#ebfbee', '#f8f9fa', '#212529'] as const
+const TEXT_COLORS = CANVAS_STROKE_COLORS
+const HIGHLIGHT_COLORS = CANVAS_HIGHLIGHT_COLORS
+const BLOCK_BACKGROUND_COLORS = CANVAS_BLOCK_COLORS
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
