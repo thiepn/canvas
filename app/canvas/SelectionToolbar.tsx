@@ -45,6 +45,7 @@ type Props = {
   onObjectsSnapPreference: (enabled: boolean) => void
   onGridPreference: (enabled: boolean) => void
   onSelectionRefresh: () => void
+  onManipulationCommit: () => void
 }
 
 function isRichTextAnchor(element: SceneElement): boolean {
@@ -82,7 +83,7 @@ function numeric(value: string): number | null {
   return Number.isFinite(next) ? next : null
 }
 
-export function SelectionToolbar({ api, selection, disabled, onNotice, onObjectsSnapPreference, onGridPreference, onSelectionRefresh }: Props) {
+export function SelectionToolbar({ api, selection, disabled, onNotice, onObjectsSnapPreference, onGridPreference, onSelectionRefresh, onManipulationCommit }: Props) {
   const [copiedStyle, setCopiedStyle] = useState<VisualStyle | null>(null)
   const [x, setX] = useState('')
   const [y, setY] = useState('')
@@ -113,11 +114,13 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
 
   if (!api || !selected.length || singleRichText) return null
 
+  const commitManipulation = () => requestAnimationFrame(onManipulationCommit)
   const apply = (elements: CanvasElementLike[]) => {
     api.updateScene({
       elements: elements as unknown as SceneElement[],
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
+    commitManipulation()
   }
 
   const currentElements = () => api.getSceneElementsIncludingDeleted() as unknown as CanvasElementLike[]
@@ -136,6 +139,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
     refreshSelection()
+    commitManipulation()
   }
   const ungroup = () => {
     const result = ungroupSelection(currentElements(), ids(), selectedGroupSet(api))
@@ -146,6 +150,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
     refreshSelection()
+    commitManipulation()
   }
   const lock = () => {
     const result = toggleLockSelection(currentElements(), relatedIds())
@@ -155,6 +160,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
     refreshSelection()
+    commitManipulation()
     if (result.locked) onNotice('Locked selection. Use Canvas menu → Unlock all to unlock it.')
   }
   const duplicate = () => {
@@ -166,6 +172,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
     refreshSelection()
+    commitManipulation()
   }
   const align = (mode: AlignMode) => apply(alignSelection(currentElements(), geometryIds(), mode))
   const distribute = (axis: 'x' | 'y') => apply(distributeSelection(currentElements(), geometryIds(), axis))

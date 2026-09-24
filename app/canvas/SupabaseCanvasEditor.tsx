@@ -228,7 +228,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const richTextLayerRef = useRef<RichTextLayerHandle | null>(null)
   const [richTextMode, setRichTextMode] = useState(false)
-  const [selectionSnapshot, setSelectionSnapshot] = useState<CanvasSelectionSnapshot>({ elements: [], selectedGroupIds: {}, editingGroupId: null, objectsSnapModeEnabled: true, gridModeEnabled: false })
+  const [objectsSnapModeEnabled, setObjectsSnapModeEnabled] = useState(() => readPreference(storage, 'canvas.objects-snap.v1') !== 'false')
+  const [gridModeEnabled, setGridModeEnabled] = useState(() => readPreference(storage, 'canvas.grid-mode.v1') === 'true')
+  const [selectionSnapshot, setSelectionSnapshot] = useState<CanvasSelectionSnapshot>({
+    elements: [],
+    selectedGroupIds: {},
+    editingGroupId: null,
+    objectsSnapModeEnabled,
+    gridModeEnabled,
+  })
   const selectionSignatureRef = useRef('')
   const [hasLockedElements, setHasLockedElements] = useState(false)
   const [status, setStatus] = useState<ConnectionState>('Connecting')
@@ -1109,11 +1117,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const keyup = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       if (target?.closest('input,textarea,select,[contenteditable="true"]')) return
-      requestAnimationFrame(refreshSelectionUi)
+      requestAnimationFrame(() => {
+        refreshSelectionUi()
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) captureCurrentScene()
+      })
     }
     document.addEventListener('keyup', keyup, true)
     return () => document.removeEventListener('keyup', keyup, true)
-  }, [refreshSelectionUi])
+  }, [captureCurrentScene, refreshSelectionUi])
 
   const onChange = useCallback((elements: readonly SceneElement[], appState: AppState) => {
     richTextLayerRef.current?.sync(elements, appState)
@@ -1288,18 +1299,20 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   useEffect(() => {
     if (!api) return
-    const objectsSnapModeEnabled = readPreference(storage, 'canvas.objects-snap.v1') !== 'false'
-    const gridModeEnabled = readPreference(storage, 'canvas.grid-mode.v1') === 'true'
     api.updateScene({
       appState: { objectsSnapModeEnabled, gridModeEnabled },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
-  }, [api, storage])
+  }, [api, gridModeEnabled, objectsSnapModeEnabled])
 
   const rememberObjectsSnap = useCallback((enabled: boolean) => {
+    setObjectsSnapModeEnabled(enabled)
+    setSelectionSnapshot(current => ({ ...current, objectsSnapModeEnabled: enabled }))
     writePreference(storage, 'canvas.objects-snap.v1', String(enabled))
   }, [storage])
   const rememberGridMode = useCallback((enabled: boolean) => {
+    setGridModeEnabled(enabled)
+    setSelectionSnapshot(current => ({ ...current, gridModeEnabled: enabled }))
     writePreference(storage, 'canvas.grid-mode.v1', String(enabled))
   }, [storage])
 
@@ -1371,6 +1384,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onPointerUp={refreshSelectionAfterInteraction}
           theme={resolvedTheme}
           viewModeEnabled={status !== 'Live'}
+          objectsSnapModeEnabled={objectsSnapModeEnabled}
+          gridModeEnabled={gridModeEnabled}
+          handleKeyboardGlobally
           isCollaborating={status === 'Live'}
           UIOptions={UI_OPTIONS}
           aiEnabled={false}
@@ -1396,6 +1412,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onObjectsSnapPreference={rememberObjectsSnap}
           onGridPreference={rememberGridMode}
           onSelectionRefresh={refreshSelectionUi}
+          onManipulationCommit={captureCurrentScene}
         />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}

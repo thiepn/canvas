@@ -158,6 +158,7 @@ test('alignment, distribution and z-order survive reload', async ({ page }) => {
     const scene = await readScene(page)
     return scene.at(-1)?.id
   }).toBe(targetId)
+  await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
 
   await page.reload()
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
@@ -236,4 +237,5 @@ test('native keyboard nudging remains precise with the Phase 2 overlay', async (
     const [element] = await rows()
     return [Number(element.x) - originalX, Number(element.y) - originalY]
   }).toEqual([1, 10])
+  await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
 })
