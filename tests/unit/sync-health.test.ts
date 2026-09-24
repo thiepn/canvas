@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveSyncHealth, recoveryMessage, type SyncHealthInput } from '../../app/canvas/sync-health.ts'
+import { deriveSyncHealth, recoveryMessage, saveIssueAfterDurableAttempt, type SyncHealthInput } from '../../app/canvas/sync-health.ts'
 
 const live = (patch: Partial<SyncHealthInput> = {}): SyncHealthInput => ({
   connection: 'Live',
@@ -69,4 +69,13 @@ test('failed image upload remains an explicit unsaved state until retry succeeds
   assert.equal(health.label, 'Image not saved')
   assert.equal(health.tone, 'error')
   assert.match(health.detail, /only in this tab/i)
+})
+
+
+test('durable element results cannot erase an outstanding image save failure', () => {
+  assert.equal(saveIssueAfterDurableAttempt(1, 'none'), 'asset-error')
+  assert.equal(saveIssueAfterDurableAttempt(2, 'unconfirmed'), 'asset-error')
+  assert.equal(saveIssueAfterDurableAttempt(1, 'retrying'), 'asset-error')
+  assert.equal(saveIssueAfterDurableAttempt(0, 'none'), 'none')
+  assert.equal(saveIssueAfterDurableAttempt(0, 'retrying'), 'retrying')
 })
