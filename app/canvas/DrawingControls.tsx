@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Icon } from '../components/Icon.tsx'
 import type { DrawingMode } from './drawing-tools.ts'
+import { CANVAS_HIGHLIGHT_COLORS, CANVAS_STROKE_COLORS } from './visual-system.ts'
 
 export type DrawingControlSettings = {
   penColor: string
@@ -101,6 +102,16 @@ export function DrawingControls({ disabled, mode, settings, onMode, onSetting }:
               onChange={event => onSetting(mode === 'highlighter' ? 'highlighterWidth' : 'penWidth', Number(event.target.value))}
             />
           </label>
+        </div>
+        <div className="drawing-color-swatches" aria-label={mode === 'highlighter' ? 'Highlighter color presets' : 'Pen color presets'}>
+          {(mode === 'highlighter' ? CANVAS_HIGHLIGHT_COLORS : CANVAS_STROKE_COLORS).slice(0, 10).map(value => <button
+            key={value}
+            type="button"
+            className={color.toLowerCase() === value.toLowerCase() ? 'is-active' : ''}
+            aria-label={`Color ${value}`}
+            style={{ '--drawing-swatch': value } as CSSProperties}
+            onClick={() => onSetting(mode === 'highlighter' ? 'highlighterColor' : 'penColor', value)}
+          />)}
         </div>
         <div className="drawing-width-presets" aria-label="Width presets">
           {presets.map(value => <button key={value} type="button" className={width === value ? 'is-active' : ''} onClick={() => onSetting(mode === 'highlighter' ? 'highlighterWidth' : 'penWidth', value)}>{value}</button>)}
