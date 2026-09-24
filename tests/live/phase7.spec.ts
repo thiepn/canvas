@@ -38,6 +38,20 @@ async function rows() {
   }))
 }
 
+
+async function removeStorageFixtureAndWait(path: string) {
+  await expect.poll(async () => {
+    const removed = await supabase.storage.from(BUCKET).remove([path])
+    if (removed.error) throw removed.error
+    const probe = await supabase.storage.from(BUCKET).download(path)
+    return probe.error ? 'missing' : 'present'
+  }, {
+    message: `Storage object ${path} must be observably deleted before the next immutable insert.`,
+    timeout: 15_000,
+    intervals: [100, 200, 400, 800, 1200],
+  }).toBe('missing')
+}
+
 async function openMediaMenu(page: Page) {
   const trigger = page.getByRole('button', { name: 'Images and transfer' })
   await trigger.click()
@@ -279,8 +293,7 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
 
     const { error: probeDeleteError } = await supabase.from(TABLE).delete().eq('id', probeElementId)
     expect(probeDeleteError).toBeNull()
-    const removedCanonical = await supabase.storage.from(BUCKET).remove([collisionPath])
-    expect(removedCanonical.error).toBeNull()
+    await removeStorageFixtureAndWait(collisionPath)
 
     await page.reload()
     await expect(page.getByText('Live', { exact: true })).toBeVisible()
@@ -306,8 +319,7 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
     expect(poisonedStored.error).toBeNull()
     expect(Buffer.from(await poisonedStored.data!.arrayBuffer())).toEqual(poison)
 
-    const removed = await supabase.storage.from(BUCKET).remove([collisionPath])
-    expect(removed.error).toBeNull()
+    await removeStorageFixtureAndWait(collisionPath)
     await page.getByRole('button', { name: 'Retry now' }).click()
 
     await expect.poll(async () => {
@@ -321,6 +333,6 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
     const storedBytes = Buffer.from(await stored.data!.arrayBuffer())
     expect(createHash('sha256').update(storedBytes).digest('hex')).toBe(collisionId)
   } finally {
-    if (collisionPath) await supabase.storage.from(BUCKET).remove([collisionPath])
+    if (collisionPath) await Promise.allSettled([removeStorageFixtureAndWait(collisionPath)])
   }
 })
