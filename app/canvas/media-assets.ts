@@ -40,16 +40,29 @@ export function validateImageBlob(blob: Blob): void {
 
 export async function validateImageContent(blob: Blob): Promise<void> {
   validateImageBlob(blob)
-  if (blob.type.toLowerCase() !== 'image/svg+xml') return
-  const svg = await blob.text()
-  if (!/<svg(?:\s|>)/i.test(svg)) throw new Error('SVG import does not contain an SVG root element.')
-  if (/<(?:script|foreignObject|iframe|object|embed)(?:\s|>)/i.test(svg)
-    || /\son[a-z]+\s*=/i.test(svg)
-    || /(?:href|xlink:href)\s*=\s*["']\s*(?:javascript:|https?:|\/\/)/i.test(svg)
-    || /(?:@import|url\(\s*["']?\s*(?:https?:|\/\/|javascript:))/i.test(svg)
-    || /<!DOCTYPE|<!ENTITY/i.test(svg)) {
-    throw new Error('SVG contains active or external content that Canvas does not allow.')
+  const mime = blob.type.toLowerCase()
+  if (mime === 'image/svg+xml') {
+    const svg = await blob.text()
+    if (!/<svg(?:\s|>)/i.test(svg)) throw new Error('SVG import does not contain an SVG root element.')
+    if (/<(?:script|foreignObject|iframe|object|embed)(?:\s|>)/i.test(svg)
+      || /\son[a-z]+\s*=/i.test(svg)
+      || /(?:href|xlink:href)\s*=\s*["']\s*(?:javascript:|https?:|\/\/)/i.test(svg)
+      || /(?:@import|url\(\s*["']?\s*(?:https?:|\/\/|javascript:))/i.test(svg)
+      || /<!DOCTYPE|<!ENTITY/i.test(svg)) {
+      throw new Error('SVG contains active or external content that Canvas does not allow.')
+    }
+    return
   }
+
+  const bytes = new Uint8Array(await blob.slice(0, 16).arrayBuffer())
+  const starts = (...expected: number[]) => expected.every((value, index) => bytes[index] === value)
+  const ascii = (start: number, value: string) => Array.from(value).every((character, index) => bytes[start + index] === character.charCodeAt(0))
+  const valid =
+    (mime === 'image/png' && starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
+    || (mime === 'image/jpeg' && starts(0xff, 0xd8, 0xff))
+    || (mime === 'image/gif' && (ascii(0, 'GIF87a') || ascii(0, 'GIF89a')))
+    || (mime === 'image/webp' && ascii(0, 'RIFF') && ascii(8, 'WEBP'))
+  if (!valid) throw new Error('Image bytes do not match the declared image format.')
 }
 
 export async function sha256BlobId(blob: Blob): Promise<string> {
