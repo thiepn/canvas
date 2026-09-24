@@ -31,7 +31,7 @@ Canvas supports:
 
 Excalidraw's native clipboard payload is retained so copied image elements carry their referenced binary data. When pasted into another Canvas session, the same binary is deduplicated into the content-addressed Storage lane.
 
-A standalone HTTP/HTTPS text paste becomes a normal linked rectangle card. Non-URL text keeps Excalidraw's normal paste behavior.
+Canvas rich-text editing continues to consume `text/html`, sanitize it through the existing rich-text allowlist, and fall back to plain text. A standalone HTTP/HTTPS text paste on the canvas becomes a normal linked rectangle card. Other text keeps the existing Excalidraw/rich-text paste behavior.
 
 ## Import
 
