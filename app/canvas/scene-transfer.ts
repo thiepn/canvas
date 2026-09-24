@@ -10,6 +10,14 @@ export type CanvasBackupV3 = {
   files: BinaryFiles
 }
 
+export type CanvasClipboardV1 = {
+  type: 'canvas-clipboard'
+  version: 1
+  engine: 'excalidraw'
+  elements: unknown[]
+  files: BinaryFiles
+}
+
 export type ImportedCanvasData = {
   elements: unknown[]
   files: BinaryFiles
@@ -21,6 +29,16 @@ export function createCanvasBackup(elements: readonly ImageElementLike[], files:
     version: 3,
     engine: 'excalidraw',
     exportedAt,
+    elements: [...elements],
+    files: referencedFiles(files, elements),
+  }
+}
+
+export function createCanvasClipboard(elements: readonly ImageElementLike[], files: BinaryFiles): CanvasClipboardV1 {
+  return {
+    type: 'canvas-clipboard',
+    version: 1,
+    engine: 'excalidraw',
     elements: [...elements],
     files: referencedFiles(files, elements),
   }
@@ -53,7 +71,12 @@ export function parseCanvasImport(text: string): ImportedCanvasData {
     return { elements: raw.elements, files: objectFiles(raw.files) }
   }
 
-  throw new Error('This JSON file is neither a Canvas backup nor an Excalidraw scene.')
+  if (raw.type === 'canvas-clipboard') {
+    if (Number(raw.version) !== 1) throw new Error('This Canvas clipboard version is not supported.')
+    return { elements: raw.elements, files: objectFiles(raw.files) }
+  }
+
+  throw new Error('This JSON file is neither a Canvas backup, Canvas clipboard, nor an Excalidraw scene.')
 }
 
 function ascii(value: string): Uint8Array {
