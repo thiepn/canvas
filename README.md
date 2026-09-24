@@ -8,17 +8,20 @@ A small, persistent, realtime infinite canvas for trusted friends. Open the same
 
 Canvas is intentionally one shared world named `main`. Identity is anonymous and local to each browser (`Guest ####`, a stable device ID, and a deterministic color). Anyone who can open the public URL can read and edit the canvas; the URL is the access boundary.
 
-Supported content is deliberately vector-only:
+Supported content stays deliberately canvas-native:
 
 - selection, move, resize, rotate, duplicate, copy/paste, undo/redo;
 - freehand drawing;
 - rectangle, ellipse, diamond, line and arrow;
 - text;
 - frames;
+- bounded PNG/JPEG/WebP/GIF/static-SVG images with crop/resize/rotate/opacity and replacement;
+- image/text clipboard workflows plus Canvas/Excalidraw JSON import;
+- JSON, PNG, SVG and PDF export;
 - eraser;
 - realtime collaborator presence and cursors.
 
-Images, screenshots, uploaded files, video, audio, PDFs and remote media are not part of the product. Client input is filtered and the database independently rejects unsupported element types and oversized records.
+Video, audio, PDF-as-canvas-object, arbitrary attachments, iframes/embeds and remote-media objects are not part of the product. Image binaries are content-addressed in Supabase Storage while Postgres independently validates the corresponding image elements.
 
 ## Production architecture
 
@@ -28,6 +31,7 @@ The application uses:
 - **Excalidraw 0.18.1** for the canvas/editor interaction model;
 - **Supabase Postgres** as the authoritative persistent store;
 - **Supabase Realtime** for Postgres changes, presence, cursors and ephemeral in-progress element previews;
+- **Supabase Storage** for immutable SHA-256-addressed image assets;
 - **GitHub Pages** for static hosting.
 
 There is no application server and no login system. Phase 8 retired the historical tldraw/Cloudflare Worker runtime, so the source tree, dependency graph, automated release gates and production deployment now describe the same Excalidraw + Supabase architecture.
@@ -59,7 +63,7 @@ Production elements live in `public.canvas_elements`. Each row is one Excalidraw
 - monotonic `revision` used for anti-entropy;
 - server `updated_at` timestamp.
 
-Postgres constraints allow only the product's vector types and cap each serialized element at 256 KiB. RLS grants anonymous clients only the operations the open-canvas model needs. Physical DELETE is not granted in production; normal deletion is a versioned tombstone so peers converge.
+Postgres constraints allow the product's vector types plus validated saved image elements and cap each serialized element at 256 KiB. Image binaries never enter the element JSON; they live in bounded image-only Storage buckets. RLS grants anonymous clients only the operations the open-canvas model needs. Physical DELETE is not granted in production; normal deletion is a versioned tombstone so peers converge.
 
 `public.canvas_ci_elements` mirrors the production contract but additionally permits DELETE so automated tests can clean their isolated world deterministically.
 
@@ -71,7 +75,7 @@ Presence, cursors and active-operation previews are ephemeral Realtime channel s
 
 A monotonic database revision cursor lets the client repair missed Realtime events after reconnect/focus without replacing newer local work. Large scenes hydrate in pages and use indexed element stamps so unchanged elements do not repeatedly traverse the full validation/application path.
 
-If the connection is not `Live`, editing is disabled rather than pretending an unsafe offline edit has been saved. The header separately reports transport health and save health; `Saved` is shown only when no active operation, queued durable change, in-flight write or unresolved retry/confirmation remains.
+If the connection is not `Live`, editing is disabled rather than pretending an unsafe offline edit has been saved. The header separately reports transport health and save health; `Saved` is shown only when no active operation, queued durable change, in-flight write, image transfer or unresolved retry/confirmation remains.
 
 ## Recovery
 
@@ -113,13 +117,14 @@ See [TESTING.md](./TESTING.md).
 
 Canvas is intentionally open-write. There are no passwords, accounts or permissions to bypass. Anyone with the URL can read and edit. The security goal is therefore containment and integrity, not private authorization:
 
-- allowlisted vector types only;
+- allowlisted canvas element types only;
 - per-record size/shape checks in Postgres;
+- image-only 12 MB Storage buckets with SHA-256 object names and immutable production uploads;
 - stale-write rejection;
 - no production physical DELETE privilege for public clients;
 - private recovery schema and restore function;
 - no service-role credential in the frontend;
-- no file/media storage path.
+- arbitrary attachments and active/external SVG content rejected.
 
 Do not use the public canvas for secrets or sensitive personal information. See [SECURITY.md](./SECURITY.md).
 
