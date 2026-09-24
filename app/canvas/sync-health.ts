@@ -170,3 +170,8 @@ export function recoveryMessage(health: SyncHealth): string | null {
       return null
   }
 }
+
+
+export function saveIssueAfterDurableAttempt(assetFailureCount: number, durableIssue: Exclude<SaveIssue, 'asset-error'>): SaveIssue {
+  return Math.max(0, Math.floor(assetFailureCount)) > 0 ? 'asset-error' : durableIssue
+}
