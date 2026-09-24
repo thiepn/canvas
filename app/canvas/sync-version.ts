@@ -53,3 +53,30 @@ export function enforceAuthoritativeTombstones<T extends VersionedSceneElement>(
   for (const tombstone of tombstones.values()) if (!seen.has(tombstone.id)) next.push(tombstone)
   return next
 }
+
+
+/**
+ * Revision anti-entropy must be able to replay an authoritative tombstone even
+ * after its version watermark was already observed through Realtime/preview
+ * coordination. Otherwise a transient render deferral can make the shadow map
+ * say "up to date" while the visible scene still contains the live element.
+ */
+export function shouldApplyAuthoritativeChange(
+  authoritative: VersionStamp,
+  shadow: VersionStamp | undefined,
+  rendered: VersionStamp | undefined,
+  hasPendingLocal: boolean,
+): boolean {
+  if (isNewerVersion(authoritative, shadow)) return true
+  if (!authoritative.isDeleted || hasPendingLocal || !shadow || !rendered || rendered.isDeleted) return false
+
+  const shadowMatchesAuthoritativeOrder =
+    shadow.version === authoritative.version
+    && shadow.versionNonce === authoritative.versionNonce
+  if (!shadowMatchesAuthoritativeOrder) return false
+
+  // Do not overwrite a genuinely newer rendered local version. Equal/older
+  // visible state, including an equal stamp with a different deletion flag,
+  // must yield to the accepted server tombstone.
+  return !isNewerVersion(rendered, authoritative)
+}
