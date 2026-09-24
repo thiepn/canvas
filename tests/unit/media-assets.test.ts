@@ -16,9 +16,10 @@ import {
 } from '../../app/canvas/media-assets.ts'
 
 test('content-addressed image IDs are deterministic SHA-256 values', async () => {
-  const first = new File([new Uint8Array([1, 2, 3, 4])], 'a.png', { type: 'image/png' })
-  const second = new File([new Uint8Array([1, 2, 3, 4])], 'b.png', { type: 'image/png' })
-  const changed = new File([new Uint8Array([1, 2, 3, 5])], 'c.png', { type: 'image/png' })
+  const pngPrefix = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  const first = new File([new Uint8Array([...pngPrefix, 1, 2, 3, 4])], 'a.png', { type: 'image/png' })
+  const second = new File([new Uint8Array([...pngPrefix, 1, 2, 3, 4])], 'b.png', { type: 'image/png' })
+  const changed = new File([new Uint8Array([...pngPrefix, 1, 2, 3, 5])], 'c.png', { type: 'image/png' })
   const firstId = await generateCanvasFileId(first)
   assert.match(firstId, CANVAS_ASSET_ID)
   assert.equal(firstId, await generateCanvasFileId(second))
