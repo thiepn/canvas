@@ -81,6 +81,7 @@ const GRID_PATTERNS = new Set<CanvasGridPattern>(['none', 'dots', 'lines', 'squa
 const MOTIONS = new Set<CanvasMotion>(['system', 'full', 'reduced'])
 
 function clamp(value: unknown, fallback: number, min: number, max: number): number {
+  if (value === null || value === undefined || value === '') return fallback
   const parsed = Number(value)
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback
 }
