@@ -96,7 +96,9 @@ test('image upload, native manipulation, replacement, Storage reload and portabl
   await expect(page.getByRole('button', { name: 'Crop image' })).toBeVisible()
   const opacity = page.getByTestId('opacity')
   await expect(opacity).toBeVisible()
-  await opacity.fill('60')
+  await opacity.focus()
+  await page.keyboard.press('Home')
+  for (let step = 0; step < 6; step++) await page.keyboard.press('ArrowRight')
 
   let manipulatedVersion = versionA
   await expect.poll(async () => {
