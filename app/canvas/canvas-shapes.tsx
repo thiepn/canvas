@@ -1,6 +1,8 @@
 import { convertToExcalidrawElements } from '@excalidraw/excalidraw'
 import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from 'react'
+import { canvasDiagnostics } from '../diagnostics/metrics.ts'
+import { SpatialGridIndex, viewportBounds } from './spatial-index.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 
@@ -278,13 +280,18 @@ export const CanvasShapeLayer = forwardRef<CanvasShapeLayerHandle>(function Canv
   const snapshotRef = useRef(snapshot)
   const pendingRef = useRef<ShapeSnapshot | null>(null)
   const frameRef = useRef<number | null>(null)
+  const spatialIndexRef = useRef(new SpatialGridIndex<SceneElement>(512))
 
   useEffect(() => { snapshotRef.current = snapshot }, [snapshot])
   useEffect(() => () => { if (frameRef.current !== null) cancelAnimationFrame(frameRef.current) }, [])
 
   useImperativeHandle(ref, () => ({
     sync(elements, appState) {
-      const custom = elements.filter(isCanvasShapeElement)
+      const stats = spatialIndexRef.current.sync(elements, isCanvasShapeElement)
+      const custom = spatialIndexRef.current.query(viewportBounds(appState, 320))
+      canvasDiagnostics.gauge('customShapeIndexSize', stats.indexed)
+      canvasDiagnostics.gauge('customShapeVisible', custom.length)
+      canvasDiagnostics.sample('customShapeCullRatio', stats.indexed ? custom.length / stats.indexed : 0)
       if (!custom.length && !snapshotRef.current.elements.length) return
       pendingRef.current = {
         elements: custom,
