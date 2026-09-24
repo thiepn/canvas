@@ -38,10 +38,11 @@ test('one pointer gesture becomes one logical mutation and one final durable wri
 
   await page.getByTitle(/^Rectangle\b/i).click()
   await expect(page.getByRole('radio', { name: /^Rectangle\b/i })).toBeChecked()
-  // Eight frame-paced moves still span well beyond the old 120 ms save timer,
-  // while remaining below the intentional 1.5 s long-operation checkpoint on
-  // slower browser engines. The separate long-operation test covers checkpoints.
-  await dragOnCanvas(page, [300, 250], [530, 390], 8)
+  // Three frame-paced moves still span beyond the retired 120 ms timer while
+  // keeping this test's gesture intentionally below the 1.5 s safety-checkpoint
+  // boundary even on slower WebKit CI. The separate long-operation test covers
+  // checkpoint behavior explicitly.
+  await dragOnCanvas(page, [300, 250], [530, 390], 3)
 
   await expect.poll(async () => (await operationSnapshot(page)).counters.logicalMutations ?? 0).toBe(1)
   await expect.poll(async () => (await operationSnapshot(page)).counters.dbWriteBatches ?? 0).toBe(1)
