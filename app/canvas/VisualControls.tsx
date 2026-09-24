@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Icon } from '../components/Icon.tsx'
 import type { ThemePreference } from '../storage/preferences.ts'
 import {
@@ -102,7 +102,7 @@ export function VisualControls({ theme, profile, disabled = false, onTheme, onPr
             className={`visual-accent-swatch${profile.accent === value ? ' is-active' : ''}`}
             aria-label={`${preset.label} accent`}
             aria-pressed={profile.accent === value}
-            style={{ '--visual-swatch': preset.light } as React.CSSProperties}
+            style={{ '--visual-swatch': preset.light } as CSSProperties}
             onClick={() => patch('accent', value)}
           />)}
         </div>
