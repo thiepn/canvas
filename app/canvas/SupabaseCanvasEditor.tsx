@@ -236,6 +236,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
         <button type="button" onClick={() => activateNativeShape('diamond')}><span className="shape-preview shape-preview--diamond" />Diamond</button>
         <button type="button" onClick={() => addCustomShape('rounded-rectangle')}><span className="shape-preview shape-preview--rounded" />Rounded</button>
         <button type="button" onClick={() => addCustomShape('triangle')}><span className="shape-preview shape-preview--triangle" />Triangle</button>
+        <button type="button" onClick={() => addCustomShape('polygon')}><span className="shape-preview shape-preview--polygon" />Polygon</button>
         <button type="button" onClick={() => addCustomShape('hexagon')}><span className="shape-preview shape-preview--hexagon" />Hexagon</button>
         <button type="button" onClick={() => addCustomShape('star')}><span className="shape-preview shape-preview--star">★</span>Star</button>
         <button type="button" onClick={() => addCustomShape('speech-bubble')}><span className="shape-preview shape-preview--bubble" />Speech</button>

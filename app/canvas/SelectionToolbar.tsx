@@ -343,6 +343,17 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     commitManipulation()
   }
 
+  const applyPolygonSides = (sides: number) => {
+    const selectedIds = ids()
+    const next = api.getSceneElementsIncludingDeleted().map(element => {
+      if (!selectedIds.has(element.id) || !isCanvasShapeElement(element)) return element
+      const data = canvasShapeData(element)
+      return data?.kind === 'polygon' ? updateCanvasShapeElement(element, { sides }) : element
+    })
+    api.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+    commitManipulation()
+  }
+
   const applyConnectorRouting = (routing: ConnectorRouting) => apply(setConnectorRouting(currentElements(), ids(), routing))
   const applyConnectorBend = (amount: number) => apply(setConnectorBend(currentElements(), ids(), amount))
   const applyConnectorHeads = (start: ConnectorArrowhead, end: ConnectorArrowhead) => apply(setConnectorArrowheads(currentElements(), ids(), start, end))
@@ -487,6 +498,10 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     ? Number((firstShape.roundness as { value?: number }).value ?? 32)
     : 0
   const shapeCornerRadius = firstCanvasShape?.style.cornerRadius ?? nativeRoundness
+  const polygonSides = firstCanvasShape?.kind === 'polygon' ? firstCanvasShape.sides : 5
+  const supportsRadius = firstShape?.type === 'rectangle'
+    || firstCanvasShape?.kind === 'rounded-rectangle'
+    || firstCanvasShape?.kind === 'speech-bubble'
   const routing = singleArrow ? connectorRouting(singleArrow) : 'straight'
   const connectorMeta = singleArrow?.customData?.canvasConnector as Record<string, unknown> | undefined
   const bendAmount = Number.isFinite(Number(connectorMeta?.bend)) ? Number(connectorMeta?.bend) : 34
@@ -567,7 +582,8 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
             </label>
             <label>Width <input aria-label="Shape stroke width" type="number" min="0.5" max="20" step="0.5" value={shapeStrokeWidth} onChange={event => applyShapeStyle({ strokeWidth: Number(event.target.value) })} /></label>
             <label>Opacity <input aria-label="Shape opacity" type="number" min="5" max="100" step="5" value={shapeOpacity} onChange={event => applyShapeStyle({ opacity: Number(event.target.value) })} /></label>
-            <label>Radius <input aria-label="Shape corner radius" type="number" min="0" max="64" step="1" value={shapeCornerRadius} disabled={!shapeSelection.some(element => isCanvasShapeElement(element) || element.type === 'rectangle')} onChange={event => applyShapeStyle({ cornerRadius: Number(event.target.value) })} /></label>
+            <label>Radius <input aria-label="Shape corner radius" type="number" min="0" max="64" step="1" value={shapeCornerRadius} disabled={!supportsRadius} onChange={event => applyShapeStyle({ cornerRadius: Number(event.target.value) })} /></label>
+            {firstCanvasShape?.kind === 'polygon' && <label>Sides <input aria-label="Polygon sides" type="number" min="3" max="12" step="1" value={polygonSides} onChange={event => applyPolygonSides(Number(event.target.value))} /></label>}
           </div>
         </div>
       </details>}

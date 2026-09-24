@@ -152,3 +152,5 @@
 .phase3-bend-control{display:grid;grid-template-columns:auto 1fr 34px;align-items:center;gap:8px;color:var(--muted);font-size:11px}
 .phase3-bend-control input[type=range]{width:100%;min-height:24px}
 .phase3-bend-control output{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+
+.shape-preview--polygon{width:28px;height:25px;border:0;background:currentColor;clip-path:polygon(50% 0,100% 38%,82% 100%,18% 100%,0 38%)}

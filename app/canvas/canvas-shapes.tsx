@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSP
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 
-export type CanvasShapeKind = 'rounded-rectangle' | 'triangle' | 'hexagon' | 'star' | 'speech-bubble' | 'cloud'
+export type CanvasShapeKind = 'rounded-rectangle' | 'triangle' | 'polygon' | 'hexagon' | 'star' | 'speech-bubble' | 'cloud'
 export type CanvasShapeStrokeStyle = 'solid' | 'dashed' | 'dotted'
 export type CanvasShapeFillStyle = 'transparent' | 'solid' | 'hachure'
 
@@ -21,6 +21,7 @@ export type CanvasShapeStyle = {
 export type CanvasShapeData = {
   version: 1
   kind: CanvasShapeKind
+  sides: number
   style: CanvasShapeStyle
 }
 
@@ -36,7 +37,7 @@ type ShapeSnapshot = {
 }
 
 const SHAPE_KEY = 'canvasShape'
-const SHAPE_KINDS = new Set<CanvasShapeKind>(['rounded-rectangle', 'triangle', 'hexagon', 'star', 'speech-bubble', 'cloud'])
+const SHAPE_KINDS = new Set<CanvasShapeKind>(['rounded-rectangle', 'triangle', 'polygon', 'hexagon', 'star', 'speech-bubble', 'cloud'])
 const DEFAULT_STYLE: CanvasShapeStyle = {
   strokeColor: '#1f2937',
   fillColor: '#e7f5ff',
@@ -75,7 +76,12 @@ export function canvasShapeData(element: SceneElement): CanvasShapeData | null {
   if (!value || typeof value !== 'object') return null
   const input = value as Record<string, unknown>
   if (input.version !== 1 || typeof input.kind !== 'string' || !SHAPE_KINDS.has(input.kind as CanvasShapeKind)) return null
-  return { version: 1, kind: input.kind as CanvasShapeKind, style: normalizeCanvasShapeStyle(input.style) }
+  return {
+    version: 1,
+    kind: input.kind as CanvasShapeKind,
+    sides: Math.round(clamp(input.sides, input.kind === 'hexagon' ? 6 : 5, 3, 12)),
+    style: normalizeCanvasShapeStyle(input.style),
+  }
 }
 
 export function isCanvasShapeElement(element: SceneElement): boolean {
@@ -89,6 +95,7 @@ export function createCanvasShapeElement(options: {
   width?: number
   height?: number
   style?: Partial<CanvasShapeStyle>
+  sides?: number
 }): SceneElement {
   const width = Math.max(48, options.width ?? 180)
   const height = Math.max(48, options.height ?? 120)
@@ -115,6 +122,7 @@ export function createCanvasShapeElement(options: {
       [SHAPE_KEY]: {
         version: 1,
         kind: options.kind,
+        sides: Math.round(clamp(options.sides, options.kind === 'hexagon' ? 6 : 5, 3, 12)),
         style: normalizeCanvasShapeStyle({ ...DEFAULT_STYLE, ...options.style }),
       } satisfies CanvasShapeData,
     },
@@ -123,7 +131,7 @@ export function createCanvasShapeElement(options: {
 
 export function updateCanvasShapeElement(
   element: SceneElement,
-  patch: { kind?: CanvasShapeKind; style?: Partial<CanvasShapeStyle> },
+  patch: { kind?: CanvasShapeKind; sides?: number; style?: Partial<CanvasShapeStyle> },
 ): SceneElement {
   const data = canvasShapeData(element)
   if (!data) return element
@@ -140,6 +148,7 @@ export function updateCanvasShapeElement(
       [SHAPE_KEY]: {
         version: 1,
         kind: patch.kind ?? data.kind,
+        sides: Math.round(clamp(patch.sides, data.sides, 3, 12)),
         style: normalizeCanvasShapeStyle({ ...data.style, ...patch.style }),
       } satisfies CanvasShapeData,
     },
@@ -178,6 +187,18 @@ function starPoints(width: number, height: number): string {
     points.push(`${cx + Math.cos(angle) * radius},${cy + Math.sin(angle) * radius}`)
   }
   return points.join(' ')
+}
+
+function polygonPoints(width: number, height: number, sides: number): string {
+  const count = Math.max(3, Math.min(12, Math.round(sides)))
+  const cx = width / 2
+  const cy = height / 2
+  const rx = Math.max(1, width / 2 - 2)
+  const ry = Math.max(1, height / 2 - 2)
+  return Array.from({ length: count }, (_, index) => {
+    const angle = -Math.PI / 2 + index * Math.PI * 2 / count
+    return `${cx + Math.cos(angle) * rx},${cy + Math.sin(angle) * ry}`
+  }).join(' ')
 }
 
 function ShapeGraphic({ element, data }: { element: SceneElement; data: CanvasShapeData }) {
@@ -223,6 +244,7 @@ function ShapeGraphic({ element, data }: { element: SceneElement; data: CanvasSh
     </defs>}
     {data.kind === 'rounded-rectangle' && <rect x={style.strokeWidth / 2} y={style.strokeWidth / 2} width={Math.max(1, width - style.strokeWidth)} height={Math.max(1, height - style.strokeWidth)} rx={Math.min(style.cornerRadius, width / 2, height / 2)} {...shared} />}
     {data.kind === 'triangle' && <polygon points={`${width / 2},2 ${width - 2},${height - 2} 2,${height - 2}`} {...shared} />}
+    {data.kind === 'polygon' && <polygon points={polygonPoints(width, height, data.sides)} {...shared} />}
     {data.kind === 'hexagon' && <polygon points={`${width * .25},2 ${width * .75},2 ${width - 2},${height / 2} ${width * .75},${height - 2} ${width * .25},${height - 2} 2,${height / 2}`} {...shared} />}
     {data.kind === 'star' && <polygon points={starPoints(width, height)} {...shared} />}
     {data.kind === 'speech-bubble' && <path d={bubble} {...shared} />}

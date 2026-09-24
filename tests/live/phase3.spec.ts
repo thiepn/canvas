@@ -81,6 +81,25 @@ test('custom Canvas shapes persist kind and advanced style through reload', asyn
   await expect(page.locator('.canvas-custom-shape')).toHaveCount(1)
 })
 
+test('configurable polygon sides persist through reload', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Polygon editor contract needs one browser execution.')
+  await page.goto('./')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Shape library' }).click()
+  await page.getByRole('button', { name: 'Polygon' }).click()
+  const toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
+  await toolbar.getByText('Shape', { exact: true }).click()
+  await toolbar.getByLabel('Polygon sides').fill('8')
+  await expect.poll(async () => {
+    const [element] = await rows()
+    const data = (element.customData as Record<string, unknown> | undefined)?.canvasShape as Record<string, unknown> | undefined
+    return Number(data?.sides)
+  }).toBe(8)
+  await page.reload()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await expect(page.locator('.canvas-custom-shape')).toHaveCount(1)
+})
+
 test('connector routing, heads and label survive the live persistence path', async ({ page }) => {
   await page.goto('./')
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
