@@ -551,6 +551,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           editor.updateScene({ elements: promoted, captureUpdate: CaptureUpdateAction.IMMEDIATELY })
         }
       }
+      assetUploadFailuresRef.current.delete(id)
+      if (assetUploadFailuresRef.current.size === 0 && syncRuntimeRef.current.saveIssue === 'asset-error') {
+        patchSyncRuntime({ saveIssue: 'none' })
+      }
       return Promise.resolve()
     }
     const existing = assetUploadPromisesRef.current.get(id)
@@ -564,6 +568,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         await uploadCanvasAsset(supabase, assetBucket, file)
         assetReadyRef.current.add(id)
         assetUploadFailuresRef.current.delete(id)
+        if (assetUploadFailuresRef.current.size === 0 && syncRuntimeRef.current.saveIssue === 'asset-error') {
+          patchSyncRuntime({ saveIssue: 'none' })
+        }
         canvasDiagnostics.increment('assetUploadsCompleted')
         const editor = apiRef.current
         if (!editor) return
@@ -574,6 +581,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         }
       } catch (error) {
         assetUploadFailuresRef.current.add(id)
+        patchSyncRuntime({ saveIssue: 'asset-error' })
         canvasDiagnostics.increment('assetUploadFailures')
         const editor = apiRef.current
         if (editor) {
@@ -592,7 +600,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     })()
     assetUploadPromisesRef.current.set(id, promise)
     return promise
-  }, [adjustAssetTransfers, assetBucket, notify, supabase])
+  }, [adjustAssetTransfers, assetBucket, notify, patchSyncRuntime, supabase])
 
   const ensureAssetsForElements = useCallback((elements: readonly SceneElement[]) => {
     const editor = apiRef.current
@@ -624,6 +632,18 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [adjustAssetTransfers, assetBucket, notify, supabase])
 
   const observeLocalFiles = useCallback((files: BinaryFiles, elements: readonly SceneElement[]) => {
+    const activeImageIds = new Set(
+      elements.flatMap(element => element.type === 'image' && !element.isDeleted && element.fileId
+        ? [element.fileId as string]
+        : []),
+    )
+    for (const id of [...assetUploadFailuresRef.current]) {
+      if (!activeImageIds.has(id)) assetUploadFailuresRef.current.delete(id)
+    }
+    if (assetUploadFailuresRef.current.size === 0 && syncRuntimeRef.current.saveIssue === 'asset-error') {
+      patchSyncRuntime({ saveIssue: 'none' })
+    }
+
     const pendingIds = new Set(
       elements.flatMap(element => element.type === 'image' && !element.isDeleted && element.status === 'pending' && element.fileId
         ? [element.fileId as string]
@@ -635,7 +655,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       assetUploadFailuresRef.current.delete(id)
       void ensureUploadedAsset(file).catch(() => {})
     }
-  }, [ensureUploadedAsset])
+  }, [ensureUploadedAsset, patchSyncRuntime])
 
   const retryFailedAssets = useCallback(() => {
     const editor = apiRef.current
@@ -1538,10 +1558,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [transition])
 
   const retrySaveNow = useCallback(() => {
-    if (!navigator.onLine || statusRef.current !== 'Live' || writeInFlightRef.current || durablePendingRef.current.size === 0) return
+    if (!navigator.onLine || statusRef.current !== 'Live' || writeInFlightRef.current) return
+    retryFailedAssets()
+    if (durablePendingRef.current.size === 0) return
     if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null }
     void flushDurablePending()
-  }, [flushDurablePending])
+  }, [flushDurablePending, retryFailedAssets])
 
   const clearLongOperationCheckpoint = useCallback(() => {
     if (!checkpointTimer.current) return
