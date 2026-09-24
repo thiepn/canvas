@@ -9,6 +9,7 @@ import {
   generateCanvasFileId,
   isDuplicateStorageError,
   isPersistableCanvasElement,
+  isSafeCanvasLink,
   referencedAssetIds,
   sha256BlobId,
   validateImageBlob,
@@ -111,4 +112,17 @@ test('raster validation rejects MIME-spoofed bytes and accepts supported signatu
     () => validateImageContent(new Blob(['<html>not png</html>'], { type: 'image/png' })),
     /bytes do not match/i,
   )
+})
+
+
+test('Canvas links allow only HTTP(S), internal anchors, or empty values', () => {
+  assert.equal(isSafeCanvasLink(null), true)
+  assert.equal(isSafeCanvasLink(''), true)
+  assert.equal(isSafeCanvasLink('https://example.com/path'), true)
+  assert.equal(isSafeCanvasLink('HTTP://example.com'), true)
+  assert.equal(isSafeCanvasLink('#element=abc'), true)
+  assert.equal(isSafeCanvasLink('javascript:alert(1)'), false)
+  assert.equal(isSafeCanvasLink('data:text/html,unsafe'), false)
+  assert.equal(isSafeCanvasLink('mailto:test@example.com'), false)
+  assert.equal(isSafeCanvasLink('x'.repeat(4097)), false)
 })
