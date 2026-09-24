@@ -2153,7 +2153,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       refreshSelectionUi()
       captureCurrentScene()
     })
-  }, [captureCurrentScene, refreshSelectionUi])
+  }, [captureCurrentScene, refreshSelectionUi, resolvedTheme])
 
   const createRichTextAt = useCallback((sceneX: number, sceneY: number) => {
     const editor = apiRef.current
