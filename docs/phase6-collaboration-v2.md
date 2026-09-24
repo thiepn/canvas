@@ -48,7 +48,7 @@ Undo is available only after the original mutation is fully saved. The client fi
 - `canvas_apply_own_undo` for production
 - `canvas_ci_apply_own_undo` for live tests
 
-The database transaction locks all affected rows, verifies every expected stamp, and applies every inverse row or none. If a collaborator has already produced a newer authoritative version—even if the requesting tab missed that Realtime event—the RPC raises a serialization conflict and the undo is refused. This prevents own-action undo from overwriting unseen collaborator work.
+The database transaction locks all affected rows, verifies every expected stamp, and applies every inverse row or none. If a collaborator has already produced a newer authoritative version—even if the requesting tab missed that Realtime event—the RPC returns a non-retryable PostgREST `PT409` conflict and the undo is refused. This prevents own-action undo from overwriting unseen collaborator work. `PT409` is intentional: PostgREST 14 retries SQLSTATE `40001`, which can otherwise leave a conflict RPC looping until the request is aborted.
 
 The functions are `SECURITY INVOKER`, use the existing RLS/update policies, cap transactions at 100 unique elements, and are explicitly executable only by `anon` and `authenticated`.
 
