@@ -42,6 +42,8 @@ type Props = {
   selection: CanvasSelectionSnapshot
   disabled: boolean
   onNotice: (message: string) => void
+  onObjectsSnapPreference: (enabled: boolean) => void
+  onGridPreference: (enabled: boolean) => void
 }
 
 function isRichTextAnchor(element: SceneElement): boolean {
@@ -79,7 +81,7 @@ function numeric(value: string): number | null {
   return Number.isFinite(next) ? next : null
 }
 
-export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) {
+export function SelectionToolbar({ api, selection, disabled, onNotice, onObjectsSnapPreference, onGridPreference }: Props) {
   const [copiedStyle, setCopiedStyle] = useState<VisualStyle | null>(null)
   const [x, setX] = useState('')
   const [y, setY] = useState('')
@@ -205,14 +207,22 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
   }
   const commitRotation = () => apply(rotateSelection(currentElements(), geometryIds(), numeric(rotation) ?? 0, true))
 
-  const toggleSnap = () => api.updateScene({
-    appState: { objectsSnapModeEnabled: !selection.objectsSnapModeEnabled },
-    captureUpdate: CaptureUpdateAction.NEVER,
-  })
-  const toggleGrid = () => api.updateScene({
-    appState: { gridModeEnabled: !selection.gridModeEnabled },
-    captureUpdate: CaptureUpdateAction.NEVER,
-  })
+  const toggleSnap = () => {
+    const next = !selection.objectsSnapModeEnabled
+    api.updateScene({
+      appState: { objectsSnapModeEnabled: next },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    })
+    onObjectsSnapPreference(next)
+  }
+  const toggleGrid = () => {
+    const next = !selection.gridModeEnabled
+    api.updateScene({
+      appState: { gridModeEnabled: next },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    })
+    onGridPreference(next)
+  }
   const selectFrameContents = () => {
     if (selected.length !== 1 || selected[0].type !== 'frame') return
     const frameId = selected[0].id

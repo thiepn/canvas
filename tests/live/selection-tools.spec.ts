@@ -196,6 +196,30 @@ test('native Shift constraint and Alt-drag duplication remain available', async 
   expect(new Set(duplicates.map(element => String(element.id))).size).toBe(2)
 })
 
+test('snap and grid preferences survive reload', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Device preference persistence needs one browser execution.')
+  await page.goto('./')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await drawRectangle(page, [350, 180], [420, 240])
+  await selectPoints(page, [[385, 210]])
+  let toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
+  const snap = toolbar.getByRole('button', { name: 'Snap' })
+  const grid = toolbar.getByRole('button', { name: 'Grid' })
+  await expect(snap).toHaveAttribute('aria-pressed', 'true')
+  await expect(grid).toHaveAttribute('aria-pressed', 'false')
+  await snap.click()
+  await grid.click()
+  await expect(snap).toHaveAttribute('aria-pressed', 'false')
+  await expect(grid).toHaveAttribute('aria-pressed', 'true')
+
+  await page.reload()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await selectPoints(page, [[385, 210]])
+  toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
+  await expect(toolbar.getByRole('button', { name: 'Snap' })).toHaveAttribute('aria-pressed', 'false')
+  await expect(toolbar.getByRole('button', { name: 'Grid' })).toHaveAttribute('aria-pressed', 'true')
+})
+
 test('native keyboard nudging remains precise with the Phase 2 overlay', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Keyboard interaction contract needs one browser execution.')
   await page.goto('./')

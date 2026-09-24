@@ -5,7 +5,7 @@ import type { AppState, Collaborator, ExcalidrawImperativeAPI, SocketId } from '
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
 import { Icon } from '../components/Icon.tsx'
 import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity } from '../presence/identity.ts'
-import { loadTheme, writePreference, type ThemePreference } from '../storage/preferences.ts'
+import { loadTheme, readPreference, writePreference, type ThemePreference } from '../storage/preferences.ts'
 import type { LiveConfig } from '../config/public-config.ts'
 import { recordMutationDiagnostics } from '../diagnostics/operations.ts'
 import { canvasDiagnostics } from '../diagnostics/metrics.ts'
@@ -1268,11 +1268,20 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   useEffect(() => {
     if (!api) return
-    const state = api.getAppState()
-    if (!state.objectsSnapModeEnabled) {
-      api.updateScene({ appState: { objectsSnapModeEnabled: true }, captureUpdate: CaptureUpdateAction.NEVER })
-    }
-  }, [api])
+    const objectsSnapModeEnabled = readPreference(storage, 'canvas.objects-snap.v1') !== 'false'
+    const gridModeEnabled = readPreference(storage, 'canvas.grid-mode.v1') === 'true'
+    api.updateScene({
+      appState: { objectsSnapModeEnabled, gridModeEnabled },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    })
+  }, [api, storage])
+
+  const rememberObjectsSnap = useCallback((enabled: boolean) => {
+    writePreference(storage, 'canvas.objects-snap.v1', String(enabled))
+  }, [storage])
+  const rememberGridMode = useCallback((enabled: boolean) => {
+    writePreference(storage, 'canvas.grid-mode.v1', String(enabled))
+  }, [storage])
 
   const scenePointFromPointer = (clientX: number, clientY: number, target: HTMLDivElement) => {
     const editor = apiRef.current
@@ -1355,7 +1364,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onEditEnd={endRichTextOperation}
           onDraft={recordRichTextDraft}
         />
-        <SelectionToolbar api={api} selection={selectionSnapshot} disabled={status !== 'Live'} onNotice={notify} />
+        <SelectionToolbar
+          api={api}
+          selection={selectionSnapshot}
+          disabled={status !== 'Live'}
+          onNotice={notify}
+          onObjectsSnapPreference={rememberObjectsSnap}
+          onGridPreference={rememberGridMode}
+        />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}
       {status === 'Live' && (syncHealth.key === 'retrying-save' || syncHealth.key === 'confirming-save') && <div className={`save-health-banner save-health-banner--${syncHealth.tone}`}><span>{syncHealth.detail}</span>{syncHealth.key === 'retrying-save' && <button type="button" onClick={retrySaveNow}>Retry now</button>}</div>}
