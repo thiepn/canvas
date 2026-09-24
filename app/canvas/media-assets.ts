@@ -71,9 +71,41 @@ export async function validateImageContent(blob: Blob): Promise<void> {
   if (!valid) throw new Error('Image bytes do not match the declared image format.')
 }
 
+export function normalizeCanvasSvg(svgText: string): string {
+  if (typeof DOMParser === 'undefined') throw new Error('SVG canonicalization requires a browser DOM parser.')
+  const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml')
+  const svg = doc.querySelector('svg')
+  const parserError = doc.querySelector('parsererror')
+  if (parserError || !svg || svg.nodeName.toLowerCase() !== 'svg') throw new Error('Invalid SVG.')
+
+  if (!svg.hasAttribute('xmlns')) svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+
+  let width = svg.getAttribute('width')
+  let height = svg.getAttribute('height')
+  if (width?.includes('%') || width === 'auto') width = null
+  if (height?.includes('%') || height === 'auto') height = null
+
+  const viewBox = svg.getAttribute('viewBox')
+  if (!width || !height) {
+    width = width || '50'
+    height = height || '50'
+    if (viewBox) {
+      const match = viewBox.match(/\\d+ +\\d+ +(\\d+(?:\\.\\d+)?) +(\\d+(?:\\.\\d+)?)/)
+      if (match) [, width, height] = match
+    }
+    svg.setAttribute('width', width)
+    svg.setAttribute('height', height)
+  }
+  if (!viewBox) svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+  return svg.outerHTML
+}
+
 export async function sha256BlobId(blob: Blob): Promise<string> {
   await validateImageContent(blob)
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
+  const bytes = blob.type.toLowerCase() === 'image/svg+xml'
+    ? new TextEncoder().encode(normalizeCanvasSvg(await blob.text()))
+    : new Uint8Array(await blob.arrayBuffer())
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
