@@ -57,14 +57,19 @@ function selectedGroupSet(api: ExcalidrawImperativeAPI): Set<string> {
   return new Set(Object.entries(api.getAppState().selectedGroupIds).filter(([, selected]) => selected).map(([id]) => id))
 }
 
-function relatedSelectionIds(elements: readonly SceneElement[], selected: Set<string>): Set<string> {
+function boundSelectionIds(elements: readonly SceneElement[], selected: Set<string>): Set<string> {
   const expanded = new Set(selected)
-  const selectedFrames = new Set(elements.filter(element => selected.has(element.id) && element.type === 'frame').map(element => element.id))
   for (const element of elements) {
-    if (element.frameId && selectedFrames.has(element.frameId)) expanded.add(element.id)
     if (!selected.has(element.id)) continue
     for (const bound of element.boundElements ?? []) if (bound.type === 'text') expanded.add(bound.id)
   }
+  return expanded
+}
+
+function relatedSelectionIds(elements: readonly SceneElement[], selected: Set<string>): Set<string> {
+  const expanded = boundSelectionIds(elements, selected)
+  const selectedFrames = new Set(elements.filter(element => selected.has(element.id) && element.type === 'frame').map(element => element.id))
+  for (const element of elements) if (element.frameId && selectedFrames.has(element.frameId)) expanded.add(element.id)
   return expanded
 }
 
@@ -115,10 +120,11 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
   const currentElements = () => api.getSceneElementsIncludingDeleted() as unknown as CanvasElementLike[]
 
   const ids = () => selectedSet(api)
+  const geometryIds = () => boundSelectionIds(api.getSceneElementsIncludingDeleted(), ids())
   const relatedIds = () => relatedSelectionIds(api.getSceneElementsIncludingDeleted(), ids())
 
   const group = () => {
-    const result = groupSelection(currentElements(), ids())
+    const result = groupSelection(currentElements(), geometryIds())
     if (!Object.keys(result.selectedGroupIds).length) return
     apply(result.elements, { selectedElementIds: result.selectedIds, selectedGroupIds: result.selectedGroupIds, editingGroupId: null })
   }
@@ -137,11 +143,11 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
     if (!Object.keys(result.duplicatedIds).length) return
     apply(result.elements, { selectedElementIds: result.duplicatedIds, selectedGroupIds: {}, editingGroupId: null })
   }
-  const align = (mode: AlignMode) => apply(alignSelection(currentElements(), ids(), mode))
-  const distribute = (axis: 'x' | 'y') => apply(distributeSelection(currentElements(), ids(), axis))
+  const align = (mode: AlignMode) => apply(alignSelection(currentElements(), geometryIds(), mode))
+  const distribute = (axis: 'x' | 'y') => apply(distributeSelection(currentElements(), geometryIds(), axis))
   const arrange = (action: ZOrderAction) => apply(reorderSelection(currentElements(), relatedIds(), action))
-  const flip = (axis: 'x' | 'y') => apply(flipSelection(currentElements(), ids(), axis))
-  const resetAngle = () => apply(resetRotation(currentElements(), ids()))
+  const flip = (axis: 'x' | 'y') => apply(flipSelection(currentElements(), geometryIds(), axis))
+  const resetAngle = () => apply(resetRotation(currentElements(), geometryIds()))
   const selectMatching = (mode: SameSelectionMode) => {
     const selectedElementIds = selectSame(currentElements(), ids(), mode)
     api.updateScene({ appState: { selectedElementIds, selectedGroupIds: {}, editingGroupId: null }, captureUpdate: CaptureUpdateAction.NEVER })
@@ -184,20 +190,20 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
     roundness: null,
   }))
 
-  const commitPosition = () => apply(setSelectionPosition(currentElements(), ids(), numeric(x), numeric(y)))
+  const commitPosition = () => apply(setSelectionPosition(currentElements(), geometryIds(), numeric(x), numeric(y)))
   const commitWidth = () => {
     const nextWidth = numeric(width)
     if (nextWidth === null) return
     const nextHeight = aspectLocked && bounds && bounds.width > 0 ? nextWidth * bounds.height / bounds.width : numeric(height)
-    apply(resizeSelection(currentElements(), ids(), nextWidth, nextHeight))
+    apply(resizeSelection(currentElements(), geometryIds(), nextWidth, nextHeight))
   }
   const commitHeight = () => {
     const nextHeight = numeric(height)
     if (nextHeight === null) return
     const nextWidth = aspectLocked && bounds && bounds.height > 0 ? nextHeight * bounds.width / bounds.height : numeric(width)
-    apply(resizeSelection(currentElements(), ids(), nextWidth, nextHeight))
+    apply(resizeSelection(currentElements(), geometryIds(), nextWidth, nextHeight))
   }
-  const commitRotation = () => apply(rotateSelection(currentElements(), ids(), numeric(rotation) ?? 0, true))
+  const commitRotation = () => apply(rotateSelection(currentElements(), geometryIds(), numeric(rotation) ?? 0, true))
 
   const toggleSnap = () => api.updateScene({
     appState: { objectsSnapModeEnabled: !selection.objectsSnapModeEnabled },
@@ -230,7 +236,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
       <button type="button" onClick={duplicate} disabled={disabled} title="Duplicate selection (Ctrl/⌘ D)">Duplicate</button>
       {grouped
         ? <button type="button" onClick={ungroup} disabled={disabled}>Ungroup</button>
-        : <button type="button" onClick={group} disabled={disabled || selected.length < 2}>Group</button>}
+        : <button type="button" onClick={group} disabled={disabled || selected.length < 2 || selected.some(element => element.type === 'frame')}>Group</button>}
       <button type="button" onClick={lock} disabled={disabled}>Lock</button>
 
       <details className="selection-popover">

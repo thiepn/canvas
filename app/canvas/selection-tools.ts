@@ -123,9 +123,17 @@ function unitKey(element: CanvasElementLike): string {
 }
 
 function selectionUnits<T extends CanvasElementLike>(elements: readonly T[]): T[][] {
+  const selectedIds = new Set(elements.map(element => element.id))
+  const boundToContainer = new Map<string, string>()
+  for (const element of elements) {
+    for (const binding of element.boundElements ?? []) {
+      if (binding.type === 'text' && selectedIds.has(binding.id)) boundToContainer.set(binding.id, element.id)
+    }
+  }
   const units = new Map<string, T[]>()
   for (const element of elements) {
-    const key = unitKey(element)
+    const containerId = element.containerId && selectedIds.has(element.containerId) ? element.containerId : boundToContainer.get(element.id)
+    const key = containerId ? `container:${containerId}` : boundToContainer.has(element.id) ? `container:${boundToContainer.get(element.id)}` : unitKey(element)
     const current = units.get(key)
     if (current) current.push(element)
     else units.set(key, [element])
@@ -148,14 +156,24 @@ export function groupSelection<T extends CanvasElementLike>(
   const selected = activeSelected(elements, selectedIds)
   if (selected.length < 2) return { elements: [...elements], groupId, selectedIds: Object.fromEntries(selected.map(e => [e.id, true])), selectedGroupIds: {} }
   const selectedMap = new Set(selected.map(element => element.id))
+  const frameIds = new Set(selected.map(element => element.frameId ?? null))
+  const detachFromFrames = frameIds.size > 1
   const next = elements.map(element => {
     if (!selectedMap.has(element.id)) return element
     const groupIds = [...(element.groupIds ?? [])]
     if (!groupIds.includes(groupId)) groupIds.push(groupId)
-    return bump(element, { groupIds } as Partial<T>)
+    return bump(element, {
+      groupIds,
+      ...(detachFromFrames ? { frameId: null } : {}),
+    } as Partial<T>)
   })
+  const highestSelectedIndex = Math.max(...elements.map((element, index) => selectedMap.has(element.id) ? index : -1))
+  const groupedElements = next.filter(element => selectedMap.has(element.id))
+  const before = next.slice(0, highestSelectedIndex + 1).filter(element => !selectedMap.has(element.id))
+  const after = next.slice(highestSelectedIndex + 1).filter(element => !selectedMap.has(element.id))
+  const contiguous = reindexMoved([...before, ...groupedElements, ...after], selectedMap)
   return {
-    elements: next,
+    elements: contiguous,
     groupId,
     selectedIds: Object.fromEntries(selected.map(element => [element.id, true])),
     selectedGroupIds: { [groupId]: true },

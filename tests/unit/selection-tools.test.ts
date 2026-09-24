@@ -146,3 +146,25 @@ test('select frame contents selects unlocked active children only', () => {
   ]
   assert.deepEqual(Object.keys(selectFrameContents(input, 'frame')), ['1'])
 })
+
+
+test('grouping non-contiguous layers makes the group contiguous at the highest selected layer', () => {
+  const input = [
+    element('1', 0, 0),
+    element('2', 20, 0),
+    element('3', 40, 0),
+    element('4', 60, 0),
+  ]
+  const result = groupSelection(input, new Set(['1', '3']), 'g')
+  assert.deepEqual(result.elements.map(element => element.id), ['2', '1', '3', '4'])
+  assert.deepEqual(result.elements.filter(element => element.groupIds?.includes('g')).map(element => element.id), ['1', '3'])
+})
+
+test('grouping elements from different frames detaches them from frame membership', () => {
+  const input = [
+    element('1', 0, 0, 10, 10, { frameId: 'frame-a' }),
+    element('2', 20, 0, 10, 10, { frameId: 'frame-b' }),
+  ]
+  const result = groupSelection(input, new Set(['1', '2']), 'g')
+  assert.ok(result.elements.every(element => element.frameId === null))
+})
