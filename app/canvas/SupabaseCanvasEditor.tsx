@@ -26,6 +26,7 @@ import {
 } from './preview-lane.ts'
 import { createRichTextElement, RichTextLayer, type RichTextLayerHandle } from './rich-text.tsx'
 import { SelectionToolbar, unlockAllElements, type CanvasSelectionSnapshot } from './SelectionToolbar.tsx'
+import { CanvasShapeLayer, createCanvasShapeElement, type CanvasShapeKind, type CanvasShapeLayerHandle } from './canvas-shapes.tsx'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = CanvasConnectionState
@@ -152,7 +153,7 @@ function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   URL.revokeObjectURL(url)
 }
 
-function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll }: {
+function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape }: {
   api: ExcalidrawImperativeAPI | null
   identity: Identity
   people: PresencePerson[]
@@ -165,11 +166,15 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   toggleRichText: () => void
   hasLockedElements: boolean
   unlockAll: () => void
+  insertCustomShape: (kind: CanvasShapeKind) => void
 }) {
   const [menu, setMenu] = useState(false)
+  const [shapeMenu, setShapeMenu] = useState(false)
   const [name, setName] = useState(identity.displayName)
   const menuRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const shapeMenuRef = useRef<HTMLDivElement>(null)
+  const shapeTriggerRef = useRef<HTMLButtonElement>(null)
   useEffect(() => setName(identity.displayName), [identity.displayName])
   useEffect(() => {
     if (!menu) return
@@ -183,6 +188,21 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
     document.addEventListener('pointerdown', pointerdown)
     return () => { document.removeEventListener('keydown', keydown, true); document.removeEventListener('pointerdown', pointerdown) }
   }, [menu])
+  useEffect(() => {
+    if (!shapeMenu) return
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setShapeMenu(false); shapeTriggerRef.current?.focus() }
+    }
+    const pointerdown = (event: PointerEvent) => {
+      if (!shapeMenuRef.current?.contains(event.target as Node) && !shapeTriggerRef.current?.contains(event.target as Node)) setShapeMenu(false)
+    }
+    document.addEventListener('keydown', keydown, true)
+    document.addEventListener('pointerdown', pointerdown)
+    return () => {
+      document.removeEventListener('keydown', keydown, true)
+      document.removeEventListener('pointerdown', pointerdown)
+    }
+  }, [shapeMenu])
   const submit = (event: FormEvent) => { event.preventDefault(); rename(name); setMenu(false); triggerRef.current?.focus() }
   const fit = () => {
     const elements = api?.getSceneElements() ?? []
@@ -193,11 +213,35 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
     api.setActiveTool({ type: 'frame' })
     setMenu(false)
   }
+  const activateNativeShape = (type: 'rectangle' | 'ellipse' | 'diamond') => {
+    if (!api || status !== 'Live') return
+    api.setActiveTool({ type })
+    setShapeMenu(false)
+  }
+  const addCustomShape = (kind: CanvasShapeKind) => {
+    insertCustomShape(kind)
+    setShapeMenu(false)
+  }
   return <header className="canvas-header live-canvas-header">
     <h1>Canvas<span className="brand-period" aria-hidden="true">.</span></h1>
     <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{status === 'Live' && <span className="connection-transport">Live</span>}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
+    <button ref={shapeTriggerRef} type="button" className={`icon-button shape-library-button${shapeMenu ? ' is-active' : ''}`} aria-label="Shape library" aria-expanded={shapeMenu} title="Shape library" disabled={!api || status !== 'Live'} onClick={() => setShapeMenu(value => !value)}><Icon name="rectangle" /></button>
+    {shapeMenu && <div ref={shapeMenuRef} className="shape-library-popover" aria-label="Shape library menu">
+      <div className="shape-library-heading">SHAPES</div>
+      <div className="shape-library-grid">
+        <button type="button" onClick={() => activateNativeShape('rectangle')}><span className="shape-preview shape-preview--rectangle" />Rectangle</button>
+        <button type="button" onClick={() => activateNativeShape('ellipse')}><span className="shape-preview shape-preview--ellipse" />Ellipse</button>
+        <button type="button" onClick={() => activateNativeShape('diamond')}><span className="shape-preview shape-preview--diamond" />Diamond</button>
+        <button type="button" onClick={() => addCustomShape('rounded-rectangle')}><span className="shape-preview shape-preview--rounded" />Rounded</button>
+        <button type="button" onClick={() => addCustomShape('triangle')}><span className="shape-preview shape-preview--triangle" />Triangle</button>
+        <button type="button" onClick={() => addCustomShape('hexagon')}><span className="shape-preview shape-preview--hexagon" />Hexagon</button>
+        <button type="button" onClick={() => addCustomShape('star')}><span className="shape-preview shape-preview--star">★</span>Star</button>
+        <button type="button" onClick={() => addCustomShape('speech-bubble')}><span className="shape-preview shape-preview--bubble" />Speech</button>
+        <button type="button" onClick={() => addCustomShape('cloud')}><span className="shape-preview shape-preview--cloud">☁</span>Cloud</button>
+      </div>
+    </div>}
     <button type="button" className={`icon-button rich-text-button${richTextMode ? ' is-active' : ''}`} aria-label="Rich text" aria-pressed={richTextMode} title="Rich text (T)" disabled={!api || status !== 'Live'} onClick={toggleRichText}><Icon name="text" /></button>
     <button type="button" className="icon-button frame-button" aria-label="Frame tool" title="Frame tool" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" /></button>
     <button type="button" className="icon-button fit-button" aria-label="Fit content" title="Fit all content" disabled={!api} onClick={fit}><Icon name="fit" /></button>
@@ -227,6 +271,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null)
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const richTextLayerRef = useRef<RichTextLayerHandle | null>(null)
+  const shapeLayerRef = useRef<CanvasShapeLayerHandle | null>(null)
   const [richTextMode, setRichTextMode] = useState(false)
   const [objectsSnapModeEnabled, setObjectsSnapModeEnabled] = useState(() => readPreference(storage, 'canvas.objects-snap.v1') !== 'false')
   const [gridModeEnabled, setGridModeEnabled] = useState(() => readPreference(storage, 'canvas.grid-mode.v1') === 'true')
@@ -1128,6 +1173,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   const onChange = useCallback((elements: readonly SceneElement[], appState: AppState) => {
     richTextLayerRef.current?.sync(elements, appState)
+    shapeLayerRef.current?.sync(elements, appState)
     syncSelectionUi(elements, appState)
     if (applyingRemote.current || statusRef.current !== 'Live') return
     const previousEditingTextId = editingTextRef.current
@@ -1252,6 +1298,28 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     operationTracker.endText()
   }, [operationTracker, patchSyncRuntime])
 
+  const insertCustomShape = useCallback((kind: CanvasShapeKind) => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    const appState = editor.getAppState()
+    const zoom = Math.max(0.01, appState.zoom.value)
+    const width = kind === 'star' ? 140 : 180
+    const height = kind === 'star' ? 140 : kind === 'cloud' ? 115 : 120
+    const centerX = appState.width / (2 * zoom) - appState.scrollX
+    const centerY = appState.height / (2 * zoom) - appState.scrollY
+    const shape = createCanvasShapeElement({ kind, x: centerX - width / 2, y: centerY - height / 2, width, height })
+    editor.updateScene({
+      elements: [...editor.getSceneElementsIncludingDeleted(), shape],
+      appState: { selectedElementIds: { [shape.id]: true }, selectedGroupIds: {}, editingGroupId: null },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    })
+    editor.setActiveTool({ type: 'selection' })
+    requestAnimationFrame(() => {
+      refreshSelectionUi()
+      captureCurrentScene()
+    })
+  }, [captureCurrentScene, refreshSelectionUi])
+
   const createRichTextAt = useCallback((sceneX: number, sceneY: number) => {
     const editor = apiRef.current
     if (!editor || statusRef.current !== 'Live') return
@@ -1375,7 +1443,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [notify, refreshSelectionUi])
 
   return <div className="canvas-app live-canvas-app" data-canvas-engine="excalidraw-supabase">
-    <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} richTextMode={richTextMode} toggleRichText={toggleRichTextMode} hasLockedElements={hasLockedElements} unlockAll={unlockAllLocked} />
+    <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} richTextMode={richTextMode} toggleRichText={toggleRichTextMode} hasLockedElements={hasLockedElements} unlockAll={unlockAllLocked} insertCustomShape={insertCustomShape} />
     <main className="canvas-workspace live-canvas-workspace" aria-label="Shared infinite canvas">
       <div className={`live-excalidraw${richTextMode ? ' rich-text-insert-mode' : ''}`} onPointerDownCapture={handleRichTextPlacement} onDoubleClickCapture={handleCanvasDoubleClick} onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
         <Excalidraw
@@ -1397,6 +1465,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           <MainMenu />
           <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
         </Excalidraw>
+        <CanvasShapeLayer ref={shapeLayerRef} />
         <RichTextLayer
           ref={richTextLayerRef}
           api={api}

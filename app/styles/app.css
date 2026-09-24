@@ -110,3 +110,22 @@
 .selection-section{display:flex;flex-direction:column;gap:5px;padding:6px;border:1px solid var(--line);border-radius:5px}
 .selection-section strong{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 @media(max-width:700px){.selection-toolbar{left:8px;right:8px;transform:none;bottom:max(78px,calc(env(safe-area-inset-bottom) + 66px));max-width:none}.selection-toolbar-primary{justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain}.selection-popover-panel{position:fixed;left:12px;right:12px;bottom:max(126px,calc(env(safe-area-inset-bottom) + 112px));transform:none;max-height:45dvh;overflow:auto}.selection-more-panel{min-width:0;grid-template-columns:1fr}.selection-toolbar .selection-count{flex:none}}
+
+
+/* Phase 3 — custom bindable vector shapes. */
+.canvas-shape-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+.canvas-custom-shape{position:absolute;pointer-events:none;box-sizing:border-box}
+.canvas-shape-svg{display:block;overflow:visible;width:100%;height:100%}
+.shape-library-button.is-active{background:var(--hover)}
+.shape-library-popover{position:absolute;z-index:820;right:max(116px,calc(env(safe-area-inset-right) + 108px));top:calc(100% + 7px);width:330px;max-width:calc(100vw - 24px);padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow)}
+.shape-library-heading{font-size:10px;letter-spacing:.11em;color:var(--muted);font-weight:700;margin:1px 3px 9px}
+.shape-library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.shape-library-grid button{min-height:64px;padding:7px 5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;background:var(--panel);border:1px solid var(--line);border-radius:6px;font-size:11px}
+.shape-library-grid button:hover{background:var(--hover)}
+.shape-preview{display:block;width:28px;height:22px;border:1.8px solid currentColor}
+.shape-preview--rounded{border-radius:7px}.shape-preview--ellipse{border-radius:50%}.shape-preview--diamond{width:20px;height:20px;transform:rotate(45deg)}
+.shape-preview--triangle{width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-bottom:24px solid currentColor;border-top:0}
+.shape-preview--hexagon{width:28px;height:24px;border:0;background:currentColor;clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)}
+.shape-preview--star,.shape-preview--cloud{border:0;width:30px;height:24px;font-size:24px;line-height:24px;text-align:center}
+.shape-preview--bubble{border-radius:7px;position:relative}.shape-preview--bubble::after{content:'';position:absolute;left:5px;bottom:-7px;border-style:solid;border-width:7px 7px 0 0;border-color:currentColor transparent transparent transparent}
+@media(max-width:700px){.shape-library-popover{position:fixed;left:10px;right:10px;top:62px;width:auto}.shape-library-grid{grid-template-columns:repeat(3,1fr)}}
