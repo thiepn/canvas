@@ -15,6 +15,7 @@ import {
   dataUrlToBlob,
   generateCanvasFileId,
   isDuplicateStorageError,
+  isSafeCanvasLink,
   isSupportedImageMime,
   referencedAssetIds,
   sha256BlobId,
@@ -175,6 +176,7 @@ function remapImportedElements(rawElements: unknown[], fileMap: Map<string, stri
     element.updated = Date.now()
     element.isDeleted = false
     element.index = null
+    if (!isSafeCanvasLink(element.link)) element.link = null
     element.groupIds = Array.isArray(element.groupIds)
       ? element.groupIds.flatMap(groupId => typeof groupId === 'string' && groupMap.has(groupId) ? [groupMap.get(groupId)!] : [])
       : []
