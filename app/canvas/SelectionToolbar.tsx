@@ -40,6 +40,7 @@ import {
   updateCanvasShapeElement,
   type CanvasShapeFillStyle,
   type CanvasShapeStrokeStyle,
+  type CanvasShapeStyle,
 } from './canvas-shapes.tsx'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
@@ -303,7 +304,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     const next = api.getSceneElementsIncludingDeleted().map(element => {
       if (!selectedIds.has(element.id) || element.isDeleted) return element
       if (isCanvasShapeElement(element)) {
-        const style: Record<string, unknown> = {}
+        const style: Partial<CanvasShapeStyle> = {}
         if (patch.strokeColor !== undefined) style.strokeColor = patch.strokeColor
         if (patch.fillColor !== undefined) style.fillColor = patch.fillColor
         if (patch.fillMode !== undefined) style.fillStyle = patch.fillMode
@@ -318,7 +319,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
       if (patch.strokeColor !== undefined) updated = newElementWith(updated, { strokeColor: patch.strokeColor })
       if (patch.fillColor !== undefined) updated = newElementWith(updated, { backgroundColor: patch.fillColor })
       if (patch.strokeStyle !== undefined) updated = newElementWith(updated, { strokeStyle: patch.strokeStyle })
-      if (patch.strokeWidth !== undefined) updated = newElementWith(updated, { strokeWidth: patch.strokeWidth })
+      if (patch.strokeWidth !== undefined) updated = newElementWith(updated, { strokeWidth: patch.strokeWidth as SceneElement['strokeWidth'] })
       if (patch.opacity !== undefined) updated = newElementWith(updated, { opacity: patch.opacity })
       if (patch.fillMode !== undefined) {
         updated = newElementWith(updated, {
@@ -542,8 +543,8 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
         <summary>Shape</summary>
         <div className="selection-popover-panel phase3-style-panel">
           <div className="phase3-field-row">
-            <label>Stroke <input type="color" value={shapeStrokeColor} onChange={event => applyShapeStyle({ strokeColor: event.target.value })} /></label>
-            <label>Fill <input type="color" value={shapeFillColor} onChange={event => applyShapeStyle({ fillColor: event.target.value })} /></label>
+            <label>Stroke <input type="color" aria-label="Shape stroke color" value={shapeStrokeColor} onChange={event => applyShapeStyle({ strokeColor: event.target.value })} /></label>
+            <label>Fill <input type="color" aria-label="Shape fill color" value={shapeFillColor} onChange={event => applyShapeStyle({ fillColor: event.target.value })} /></label>
           </div>
           <div className="phase3-swatches" aria-label="Shape stroke colors">
             {SHAPE_COLORS.map(color => <button key={color} type="button" className="phase3-swatch" style={{ '--swatch': color } as CSSProperties} aria-label={`Stroke ${color}`} onClick={() => applyShapeStyle({ strokeColor: color })} />)}
@@ -553,18 +554,18 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
           </div>
           <div className="phase3-field-grid">
             <label>Fill
-              <select value={shapeFillMode} onChange={event => applyShapeStyle({ fillMode: event.target.value as CanvasShapeFillStyle })}>
+              <select aria-label="Shape fill mode" value={shapeFillMode} onChange={event => applyShapeStyle({ fillMode: event.target.value as CanvasShapeFillStyle })}>
                 <option value="transparent">Transparent</option><option value="solid">Solid</option><option value="hachure">Hatch</option>
               </select>
             </label>
             <label>Stroke
-              <select value={shapeStrokeStyle} onChange={event => applyShapeStyle({ strokeStyle: event.target.value as CanvasShapeStrokeStyle })}>
+              <select aria-label="Shape stroke style" value={shapeStrokeStyle} onChange={event => applyShapeStyle({ strokeStyle: event.target.value as CanvasShapeStrokeStyle })}>
                 <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
               </select>
             </label>
-            <label>Width <input type="number" min="0.5" max="20" step="0.5" value={shapeStrokeWidth} onChange={event => applyShapeStyle({ strokeWidth: Number(event.target.value) })} /></label>
-            <label>Opacity <input type="number" min="5" max="100" step="5" value={shapeOpacity} onChange={event => applyShapeStyle({ opacity: Number(event.target.value) })} /></label>
-            <label>Radius <input type="number" min="0" max="64" step="1" value={shapeCornerRadius} disabled={!shapeSelection.some(element => isCanvasShapeElement(element) || element.type === 'rectangle')} onChange={event => applyShapeStyle({ cornerRadius: Number(event.target.value) })} /></label>
+            <label>Width <input aria-label="Shape stroke width" type="number" min="0.5" max="20" step="0.5" value={shapeStrokeWidth} onChange={event => applyShapeStyle({ strokeWidth: Number(event.target.value) })} /></label>
+            <label>Opacity <input aria-label="Shape opacity" type="number" min="5" max="100" step="5" value={shapeOpacity} onChange={event => applyShapeStyle({ opacity: Number(event.target.value) })} /></label>
+            <label>Radius <input aria-label="Shape corner radius" type="number" min="0" max="64" step="1" value={shapeCornerRadius} disabled={!shapeSelection.some(element => isCanvasShapeElement(element) || element.type === 'rectangle')} onChange={event => applyShapeStyle({ cornerRadius: Number(event.target.value) })} /></label>
           </div>
         </div>
       </details>}

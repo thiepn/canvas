@@ -47,12 +47,12 @@ test('custom Canvas shapes persist kind and advanced style through reload', asyn
   await toolbar.getByText('Shape', { exact: true }).click()
 
   const shapePanel = toolbar.locator('.phase3-style-panel')
-  await shapePanel.getByLabel('Stroke').fill('#2563eb')
-  await shapePanel.getByLabel('Fill').fill('#fff3bf')
-  await shapePanel.getByText('Fill', { exact: true }).locator('..').getByRole('combobox').selectOption('hachure')
-  await shapePanel.getByText('Stroke', { exact: true }).locator('..').getByRole('combobox').selectOption('dashed')
-  await shapePanel.getByLabel('Width').fill('4')
-  await shapePanel.getByLabel('Opacity').fill('65')
+  await shapePanel.getByLabel('Shape stroke color').fill('#2563eb')
+  await shapePanel.getByLabel('Shape fill color').fill('#fff3bf')
+  await shapePanel.getByLabel('Shape fill mode').selectOption('hachure')
+  await shapePanel.getByLabel('Shape stroke style').selectOption('dashed')
+  await shapePanel.getByLabel('Shape stroke width').fill('4')
+  await shapePanel.getByLabel('Shape opacity').fill('65')
 
   let shapeId = ''
   await expect.poll(async () => {
