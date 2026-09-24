@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, reconcileElements, restoreElements } from '@excalidraw/excalidraw'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, convertToExcalidrawElements, newElementWith, reconcileElements, restoreElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import type { AppState, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
 import { Icon } from '../components/Icon.tsx'
-import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity } from '../presence/identity.ts'
+import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity, type LocalStorageLike } from '../presence/identity.ts'
 import { loadTheme, readPreference, writePreference, type ThemePreference } from '../storage/preferences.ts'
 import type { LiveConfig } from '../config/public-config.ts'
 import { recordMutationDiagnostics } from '../diagnostics/operations.ts'
@@ -27,6 +27,17 @@ import {
 import { createRichTextElement, RichTextLayer, type RichTextLayerHandle } from './rich-text.tsx'
 import { SelectionToolbar, unlockAllElements, type CanvasSelectionSnapshot } from './SelectionToolbar.tsx'
 import { CanvasShapeLayer, createCanvasShapeElement, type CanvasShapeKind, type CanvasShapeLayerHandle } from './canvas-shapes.tsx'
+import { DrawingControls, type DrawingControlSettings } from './DrawingControls.tsx'
+import {
+  eraseFreeDrawWithPath,
+  finalizeFreeDrawElement,
+  isAccidentalTinyStroke,
+  recognizeHeldStroke,
+  type DrawingElementLike,
+  type DrawingMode,
+  type ScenePoint,
+} from './drawing-tools.ts'
+import { reorderSelection, type CanvasElementLike } from './selection-tools.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = CanvasConnectionState
@@ -139,6 +150,21 @@ function safeColor(value: string): string {
   return /^#[0-9a-f]{6}$/i.test(value) ? value : '#666666'
 }
 
+function drawingNumberPreference(storage: LocalStorageLike | null, key: string, fallback: number, min: number, max: number): number {
+  const value = Number(readPreference(storage, key))
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+}
+
+function drawingBooleanPreference(storage: LocalStorageLike | null, key: string, fallback: boolean): boolean {
+  const value = readPreference(storage, key)
+  return value === null ? fallback : value === 'true'
+}
+
+function drawingColorPreference(storage: LocalStorageLike | null, key: string, fallback: string): string {
+  const value = readPreference(storage, key)
+  return value && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback
+}
+
 function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   if (!api) return
   const active = api.getSceneElements().filter(isAllowedElement)
@@ -153,7 +179,7 @@ function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   URL.revokeObjectURL(url)
 }
 
-function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape }: {
+function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape, drawingControls, deactivateDrawing }: {
   api: ExcalidrawImperativeAPI | null
   identity: Identity
   people: PresencePerson[]
@@ -167,6 +193,8 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   hasLockedElements: boolean
   unlockAll: () => void
   insertCustomShape: (kind: CanvasShapeKind) => void
+  drawingControls: ReactNode
+  deactivateDrawing: () => void
 }) {
   const [menu, setMenu] = useState(false)
   const [shapeMenu, setShapeMenu] = useState(false)
@@ -210,11 +238,13 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   }
   const activateFrame = () => {
     if (!api || status !== 'Live') return
+    deactivateDrawing()
     api.setActiveTool({ type: 'frame' })
     setMenu(false)
   }
   const activateNativeShape = (type: 'rectangle' | 'ellipse' | 'diamond') => {
     if (!api || status !== 'Live') return
+    deactivateDrawing()
     api.setActiveTool({ type })
     setShapeMenu(false)
   }
@@ -227,6 +257,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
     <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{status === 'Live' && <span className="connection-transport">Live</span>}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
+    {drawingControls}
     <button ref={shapeTriggerRef} type="button" className={`icon-button shape-library-button${shapeMenu ? ' is-active' : ''}`} aria-label="Shape library" aria-expanded={shapeMenu} title="Shape library" disabled={!api || status !== 'Live'} onClick={() => setShapeMenu(value => !value)}><Icon name="rectangle" /></button>
     {shapeMenu && <div ref={shapeMenuRef} className="shape-library-popover" aria-label="Shape library menu">
       <div className="shape-library-heading">SHAPES</div>
@@ -258,7 +289,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
       <button type="button" className="menu-action" disabled={!api} onClick={() => { fit(); setMenu(false) }}><Icon name="fit" />Fit all content</button>
       <button type="button" className="menu-action" disabled={!api || status !== 'Live' || !hasLockedElements} onClick={() => { unlockAll(); setMenu(false) }}><Icon name="select" />Unlock all locked objects</button>
       <p className="privacy-note">One shared canvas. Anyone with the link can read and change everything. Names are not verified identities.</p>
-      <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Draw · T Text · E Eraser · F Frame · Space Pan · Ctrl/⌘ Z Undo</p>
+      <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Pen · Shift+E Stroke eraser · E Object eraser · T Text · F Frame · Space Pan</p>
     </div>}
   </header>
 }
@@ -274,6 +305,32 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const richTextLayerRef = useRef<RichTextLayerHandle | null>(null)
   const shapeLayerRef = useRef<CanvasShapeLayerHandle | null>(null)
   const [richTextMode, setRichTextMode] = useState(false)
+  const [drawingMode, setDrawingMode] = useState<DrawingMode | null>(null)
+  const drawingModeRef = useRef<DrawingMode | null>(null)
+  const [drawingSettings, setDrawingSettings] = useState<DrawingControlSettings>(() => ({
+    penColor: drawingColorPreference(storage, 'canvas.pen-color.v1', '#1f2937'),
+    penWidth: drawingNumberPreference(storage, 'canvas.pen-width.v1', 2, 0.5, 32),
+    smoothing: drawingNumberPreference(storage, 'canvas.pen-smoothing.v1', 55, 0, 100),
+    pressure: drawingBooleanPreference(storage, 'canvas.pen-pressure.v1', true),
+    highlighterColor: drawingColorPreference(storage, 'canvas.highlighter-color.v1', '#ffd43b'),
+    highlighterWidth: drawingNumberPreference(storage, 'canvas.highlighter-width.v1', 16, 2, 32),
+    eraserRadius: drawingNumberPreference(storage, 'canvas.stroke-eraser-radius.v1', 10, 4, 48),
+    holdToClean: drawingBooleanPreference(storage, 'canvas.hold-clean.v1', true),
+    stylusMode: drawingBooleanPreference(storage, 'canvas.stylus-mode.v1', true),
+  }))
+  const drawingSettingsRef = useRef(drawingSettings)
+  const drawingGestureRef = useRef<{
+    pointerId: number
+    mode: 'pen' | 'highlighter'
+    beforeIds: Set<string>
+    lastMoveAt: number
+    lastClientX: number
+    lastClientY: number
+  } | null>(null)
+  const partialEraserRef = useRef<{ pointerId: number; path: ScenePoint[] } | null>(null)
+  const touchPointersRef = useRef(new Set<number>())
+  const penPointersRef = useRef(new Set<number>())
+  const [eraserPreview, setEraserPreview] = useState<{ x: number; y: number; radius: number } | null>(null)
   const [objectsSnapModeEnabled, setObjectsSnapModeEnabled] = useState(() => readPreference(storage, 'canvas.objects-snap.v1') !== 'false')
   const [gridModeEnabled, setGridModeEnabled] = useState(() => readPreference(storage, 'canvas.grid-mode.v1') === 'true')
   const [selectionSnapshot, setSelectionSnapshot] = useState<CanvasSelectionSnapshot>({
@@ -287,6 +344,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const [hasLockedElements, setHasLockedElements] = useState(false)
   const [status, setStatus] = useState<ConnectionState>('Connecting')
   const statusRef = useRef<ConnectionState>('Connecting')
+  useEffect(() => { drawingModeRef.current = drawingMode }, [drawingMode])
+  useEffect(() => { drawingSettingsRef.current = drawingSettings }, [drawingSettings])
   const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeState>({ queuedChanges: 0, writeInFlight: false, localEditing: false, saveIssue: 'none' })
   const syncRuntimeRef = useRef(syncRuntime)
   const [connectionAttempt, setConnectionAttempt] = useState(0)
@@ -1300,6 +1359,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [operationTracker, patchSyncRuntime])
 
   const insertCustomShape = useCallback((kind: CanvasShapeKind) => {
+    setDrawingMode(null)
     const editor = apiRef.current
     if (!editor || statusRef.current !== 'Live') return
     const appState = editor.getAppState()
@@ -1339,6 +1399,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   const toggleRichTextMode = useCallback(() => {
     if (!apiRef.current || statusRef.current !== 'Live') return
+    setDrawingMode(null)
     apiRef.current.setActiveTool({ type: 'selection' })
     setRichTextMode(value => !value)
   }, [])
@@ -1353,18 +1414,36 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         setRichTextMode(false)
         return
       }
-      if (event.altKey || event.ctrlKey || event.metaKey || event.key.toLowerCase() !== 't') return
-      event.preventDefault()
-      event.stopPropagation()
-      toggleRichTextMode()
+      if (event.altKey || event.ctrlKey || event.metaKey) return
+      const key = event.key.toLowerCase()
+      if (key === 't') {
+        event.preventDefault()
+        event.stopPropagation()
+        toggleRichTextMode()
+        return
+      }
+      if (key === 'p' || key === 'x') {
+        event.preventDefault()
+        event.stopPropagation()
+        activateDrawingMode('pen')
+        return
+      }
+      if (key === 'e' && event.shiftKey) {
+        event.preventDefault()
+        event.stopPropagation()
+        activateDrawingMode('partial-eraser')
+      }
     }
     window.addEventListener('keydown', keydown, true)
     return () => window.removeEventListener('keydown', keydown, true)
-  }, [richTextMode, toggleRichTextMode])
+  }, [activateDrawingMode, richTextMode, toggleRichTextMode])
 
   useEffect(() => {
-    if (status !== 'Live' && richTextMode) setRichTextMode(false)
-  }, [richTextMode, status])
+    if (status !== 'Live') {
+      if (richTextMode) setRichTextMode(false)
+      if (drawingMode) setDrawingMode(null)
+    }
+  }, [drawingMode, richTextMode, status])
 
   useEffect(() => {
     if (!api || status !== 'Live') return
@@ -1380,6 +1459,157 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     setSelectionSnapshot(current => ({ ...current, objectsSnapModeEnabled: enabled }))
     writePreference(storage, 'canvas.objects-snap.v1', String(enabled))
   }, [storage])
+
+  const rememberDrawingSetting = useCallback((key: keyof DrawingControlSettings, value: DrawingControlSettings[keyof DrawingControlSettings]) => {
+    const prefKeys: Record<keyof DrawingControlSettings, string> = {
+      penColor: 'canvas.pen-color.v1',
+      penWidth: 'canvas.pen-width.v1',
+      smoothing: 'canvas.pen-smoothing.v1',
+      pressure: 'canvas.pen-pressure.v1',
+      highlighterColor: 'canvas.highlighter-color.v1',
+      highlighterWidth: 'canvas.highlighter-width.v1',
+      eraserRadius: 'canvas.stroke-eraser-radius.v1',
+      holdToClean: 'canvas.hold-clean.v1',
+      stylusMode: 'canvas.stylus-mode.v1',
+    }
+    setDrawingSettings(current => ({ ...current, [key]: value } as DrawingControlSettings))
+    writePreference(storage, prefKeys[key], String(value))
+  }, [storage])
+
+  const deactivateDrawing = useCallback(() => {
+    setDrawingMode(null)
+  }, [])
+
+  const activateDrawingMode = useCallback((mode: DrawingMode) => {
+    if (!apiRef.current || statusRef.current !== 'Live') return
+    setRichTextMode(false)
+    setDrawingMode(mode)
+  }, [])
+
+  useEffect(() => {
+    const editor = apiRef.current
+    if (!editor || status !== 'Live' || !drawingMode) return
+    const current = editor.getAppState()
+    if (drawingMode === 'pen' || drawingMode === 'highlighter') {
+      const width = drawingMode === 'pen' ? drawingSettings.penWidth : drawingSettings.highlighterWidth
+      const widthKey = width <= 0.75 ? 'thin' : width <= 1.5 ? 'medium' : 'bold'
+      editor.setActiveTool({ type: 'freedraw', locked: true })
+      editor.updateScene({
+        appState: {
+          currentItemStrokeColor: drawingMode === 'pen' ? drawingSettings.penColor : drawingSettings.highlighterColor,
+          currentItemBackgroundColor: 'transparent',
+          currentItemFillStyle: 'solid',
+          currentItemStrokeWidthKey: widthKey,
+          currentItemStrokeStyle: 'solid',
+          currentItemRoughness: 0,
+          currentItemOpacity: drawingMode === 'pen' ? 100 : 32,
+          currentItemStrokeVariability: drawingMode === 'pen' && drawingSettings.pressure ? 'variable' : 'constant',
+          penMode: drawingSettings.stylusMode,
+          penDetected: drawingSettings.stylusMode || current.penDetected,
+        },
+        captureUpdate: CaptureUpdateAction.NEVER,
+      })
+      return
+    }
+    editor.updateScene({
+      appState: {
+        penMode: drawingSettings.stylusMode,
+        penDetected: drawingSettings.stylusMode || current.penDetected,
+      },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    })
+    editor.setActiveTool({ type: drawingMode === 'partial-eraser' ? 'hand' : 'eraser', locked: true })
+  }, [drawingMode, drawingSettings, status])
+
+  const cleanRecognitionElement = useCallback((stroke: SceneElement, recognition: ReturnType<typeof recognizeHeldStroke>) => {
+    if (!recognition) return null
+    const shared = {
+      strokeColor: stroke.strokeColor,
+      strokeWidth: stroke.strokeWidth,
+      strokeStyle: 'solid' as const,
+      roughness: 0,
+      opacity: stroke.opacity,
+    }
+    let cleaned: SceneElement | undefined
+    if (recognition.kind === 'line') {
+      const dx = recognition.end[0] - recognition.start[0]
+      const dy = recognition.end[1] - recognition.start[1]
+      ;[cleaned] = convertToExcalidrawElements([{
+        type: 'line',
+        x: recognition.start[0],
+        y: recognition.start[1],
+        points: [[0, 0], [dx, dy]],
+        ...shared,
+      }]) as unknown as SceneElement[]
+    } else {
+      ;[cleaned] = convertToExcalidrawElements([{
+        type: recognition.kind,
+        x: recognition.x,
+        y: recognition.y,
+        width: recognition.width,
+        height: recognition.height,
+        backgroundColor: 'transparent',
+        fillStyle: 'solid',
+        ...shared,
+      }]) as unknown as SceneElement[]
+    }
+    if (!cleaned) return null
+    const strokeData = (stroke as SceneElement & { customData?: Record<string, unknown> }).customData ?? {}
+    return {
+      ...cleaned,
+      index: stroke.index,
+      frameId: stroke.frameId,
+      groupIds: stroke.groupIds,
+      customData: {
+        ...cleaned.customData,
+        ...strokeData,
+        canvasDrawing: {
+          ...(strokeData.canvasDrawing as Record<string, unknown> | undefined),
+          cleaned: true,
+          cleanedFrom: stroke.id,
+        },
+      },
+    } as SceneElement
+  }, [])
+
+  const finishDrawingGesture = useCallback((gesture: NonNullable<typeof drawingGestureRef.current>, heldForMs: number) => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    const scene = editor.getSceneElementsIncludingDeleted()
+    const created = [...scene]
+      .reverse()
+      .find(element => element.type === 'freedraw' && !element.isDeleted && !gesture.beforeIds.has(element.id))
+    if (!created || created.type !== 'freedraw') return
+    const settings = drawingSettingsRef.current
+    const styled = finalizeFreeDrawElement(created as unknown as DrawingElementLike, {
+      mode: gesture.mode,
+      color: gesture.mode === 'pen' ? settings.penColor : settings.highlighterColor,
+      width: gesture.mode === 'pen' ? settings.penWidth : settings.highlighterWidth,
+      smoothing: settings.smoothing,
+      pressure: gesture.mode === 'pen' ? settings.pressure : false,
+      opacity: gesture.mode === 'pen' ? 100 : 32,
+    }) as unknown as SceneElement
+
+    let next = scene.map(element => element.id === styled.id ? styled : element)
+    if (isAccidentalTinyStroke(styled as unknown as DrawingElementLike)) {
+      const tombstone = newElementWith(styled, { isDeleted: true })
+      next = next.map(element => element.id === styled.id ? tombstone : element)
+    } else if (gesture.mode === 'pen' && settings.holdToClean && heldForMs >= 380) {
+      const recognition = recognizeHeldStroke(styled as unknown as DrawingElementLike)
+      const cleaned = cleanRecognitionElement(styled, recognition)
+      if (cleaned) {
+        const tombstone = newElementWith(styled, { isDeleted: true })
+        next = next.map(element => element.id === styled.id ? tombstone : element)
+        next.push(cleaned)
+      }
+    } else if (gesture.mode === 'highlighter') {
+      next = reorderSelection(next as unknown as CanvasElementLike[], new Set([styled.id]), 'back') as unknown as SceneElement[]
+    }
+
+    editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+    requestAnimationFrame(captureCurrentScene)
+  }, [captureCurrentScene, cleanRecognitionElement])
+
   const rememberGridMode = useCallback((enabled: boolean) => {
     setGridModeEnabled(enabled)
     setSelectionSnapshot(current => ({ ...current, gridModeEnabled: enabled }))
@@ -1405,6 +1635,134 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     event.preventDefault()
     event.stopPropagation()
     createRichTextAt(point.x, point.y)
+  }
+
+  const handleDrawingPointerDown = (event: React.PointerEvent<HTMLDivElement>): boolean => {
+    const editor = apiRef.current
+    const mode = drawingModeRef.current
+    if (!editor || !mode || statusRef.current !== 'Live') return false
+
+    if (event.pointerType === 'pen') penPointersRef.current.add(event.pointerId)
+    if (event.pointerType === 'touch') {
+      touchPointersRef.current.add(event.pointerId)
+      if (drawingSettingsRef.current.stylusMode && touchPointersRef.current.size >= 2 && penPointersRef.current.size === 0) {
+        editor.updateScene({ appState: { penMode: false }, captureUpdate: CaptureUpdateAction.NEVER })
+      }
+    }
+
+    if (mode === 'partial-eraser') {
+      if (drawingSettingsRef.current.stylusMode && event.pointerType === 'touch') return false
+      if (event.button !== 0) return false
+      const point = scenePointFromPointer(event.clientX, event.clientY, event.currentTarget)
+      if (!point) return false
+      const rect = event.currentTarget.getBoundingClientRect()
+      const zoom = Math.max(0.01, editor.getAppState().zoom.value)
+      partialEraserRef.current = { pointerId: event.pointerId, path: [[point.x, point.y]] }
+      setEraserPreview({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        radius: drawingSettingsRef.current.eraserRadius * zoom,
+      })
+      event.preventDefault()
+      event.stopPropagation()
+      return true
+    }
+
+    if ((mode === 'pen' || mode === 'highlighter') && event.button === 0) {
+      if (drawingSettingsRef.current.stylusMode && event.pointerType === 'touch') return false
+      drawingGestureRef.current = {
+        pointerId: event.pointerId,
+        mode,
+        beforeIds: new Set(editor.getSceneElementsIncludingDeleted().filter(element => element.type === 'freedraw' && !element.isDeleted).map(element => element.id)),
+        lastMoveAt: performance.now(),
+        lastClientX: event.clientX,
+        lastClientY: event.clientY,
+      }
+    }
+    return false
+  }
+
+  const handleDrawingPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const eraser = partialEraserRef.current
+    if (eraser?.pointerId === event.pointerId) {
+      const point = scenePointFromPointer(event.clientX, event.clientY, event.currentTarget)
+      const editor = apiRef.current
+      if (!point || !editor) return
+      const previous = eraser.path.at(-1)
+      if (!previous || Math.hypot(point.x - previous[0], point.y - previous[1]) >= 1) eraser.path.push([point.x, point.y])
+      const rect = event.currentTarget.getBoundingClientRect()
+      setEraserPreview({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        radius: drawingSettingsRef.current.eraserRadius * Math.max(0.01, editor.getAppState().zoom.value),
+      })
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    const gesture = drawingGestureRef.current
+    if (gesture?.pointerId !== event.pointerId) return
+    if (Math.hypot(event.clientX - gesture.lastClientX, event.clientY - gesture.lastClientY) >= 0.7) {
+      gesture.lastMoveAt = performance.now()
+      gesture.lastClientX = event.clientX
+      gesture.lastClientY = event.clientY
+    }
+  }
+
+  const restoreStylusModeAfterPointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'pen') penPointersRef.current.delete(event.pointerId)
+    if (event.pointerType === 'touch') touchPointersRef.current.delete(event.pointerId)
+    if (drawingSettingsRef.current.stylusMode && touchPointersRef.current.size < 2) {
+      requestAnimationFrame(() => {
+        const editor = apiRef.current
+        if (!editor || statusRef.current !== 'Live' || !drawingModeRef.current) return
+        editor.updateScene({ appState: { penMode: true, penDetected: true }, captureUpdate: CaptureUpdateAction.NEVER })
+      })
+    }
+  }
+
+  const handleDrawingPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const eraser = partialEraserRef.current
+    if (eraser?.pointerId === event.pointerId) {
+      event.preventDefault()
+      event.stopPropagation()
+      partialEraserRef.current = null
+      setEraserPreview(null)
+      const editor = apiRef.current
+      if (editor && eraser.path.length) {
+        const result = eraseFreeDrawWithPath(
+          editor.getSceneElementsIncludingDeleted() as unknown as DrawingElementLike[],
+          eraser.path,
+          drawingSettingsRef.current.eraserRadius,
+        )
+        if (result.affected) {
+          editor.updateScene({ elements: result.elements as unknown as SceneElement[], captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+          requestAnimationFrame(captureCurrentScene)
+        }
+      }
+      restoreStylusModeAfterPointer(event)
+      return
+    }
+
+    const gesture = drawingGestureRef.current
+    if (gesture?.pointerId === event.pointerId) {
+      drawingGestureRef.current = null
+      const heldForMs = performance.now() - gesture.lastMoveAt
+      requestAnimationFrame(() => requestAnimationFrame(() => finishDrawingGesture(gesture, heldForMs)))
+    }
+    restoreStylusModeAfterPointer(event)
+  }
+
+  const handleDrawingPointerCancel = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (partialEraserRef.current?.pointerId === event.pointerId) partialEraserRef.current = null
+    if (drawingGestureRef.current?.pointerId === event.pointerId) drawingGestureRef.current = null
+    setEraserPreview(null)
+    restoreStylusModeAfterPointer(event)
+  }
+
+  const handleCanvasPointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (handleDrawingPointerDown(event)) return
+    handleRichTextPlacement(event)
   }
 
   const handleCanvasDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -1444,9 +1802,37 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [notify, refreshSelectionUi])
 
   return <div className="canvas-app live-canvas-app" data-canvas-engine="excalidraw-supabase">
-    <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} richTextMode={richTextMode} toggleRichText={toggleRichTextMode} hasLockedElements={hasLockedElements} unlockAll={unlockAllLocked} insertCustomShape={insertCustomShape} />
+    <LiveHeader
+      api={api}
+      identity={identity}
+      people={people}
+      status={status}
+      syncHealth={syncHealth}
+      theme={theme}
+      rename={rename}
+      changeTheme={changeTheme}
+      richTextMode={richTextMode}
+      toggleRichText={toggleRichTextMode}
+      hasLockedElements={hasLockedElements}
+      unlockAll={unlockAllLocked}
+      insertCustomShape={insertCustomShape}
+      deactivateDrawing={deactivateDrawing}
+      drawingControls={<DrawingControls
+        disabled={!api || status !== 'Live'}
+        mode={drawingMode}
+        settings={drawingSettings}
+        onMode={activateDrawingMode}
+        onSetting={rememberDrawingSetting}
+      />}
+    />
     <main className="canvas-workspace live-canvas-workspace" aria-label="Shared infinite canvas">
-      <div className={`live-excalidraw${richTextMode ? ' rich-text-insert-mode' : ''}`} onPointerDownCapture={handleRichTextPlacement} onDoubleClickCapture={handleCanvasDoubleClick} onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
+      <div
+        className={`live-excalidraw${richTextMode ? ' rich-text-insert-mode' : ''}${drawingMode ? ` drawing-mode drawing-mode--${drawingMode}` : ''}`}
+        onPointerDownCapture={handleCanvasPointerDownCapture}
+        onPointerMoveCapture={handleDrawingPointerMove}
+        onPointerUpCapture={handleDrawingPointerUp}
+        onPointerCancelCapture={handleDrawingPointerCancel}
+        onDoubleClickCapture={handleCanvasDoubleClick} onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
         <Excalidraw
           excalidrawAPI={setApi}
           onChange={onChange}
@@ -1467,6 +1853,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           <DefaultSidebar.Trigger style={{ display: 'none' }} aria-hidden="true" />
         </Excalidraw>
         <CanvasShapeLayer ref={shapeLayerRef} />
+        {eraserPreview && <div className="stroke-eraser-preview" style={{ left: eraserPreview.x, top: eraserPreview.y, width: eraserPreview.radius * 2, height: eraserPreview.radius * 2 }} />}
         <RichTextLayer
           ref={richTextLayerRef}
           api={api}
