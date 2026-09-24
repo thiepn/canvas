@@ -129,3 +129,22 @@
 .shape-preview--star,.shape-preview--cloud{border:0;width:30px;height:24px;font-size:24px;line-height:24px;text-align:center}
 .shape-preview--bubble{border-radius:7px;position:relative}.shape-preview--bubble::after{content:'';position:absolute;left:5px;bottom:-7px;border-style:solid;border-width:7px 7px 0 0;border-color:currentColor transparent transparent transparent}
 @media(max-width:700px){.shape-library-popover{position:fixed;left:10px;right:10px;top:62px;width:auto}.shape-library-grid{grid-template-columns:repeat(3,1fr)}}
+
+
+/* Phase 3 — shape and connector inspector. */
+.phase3-style-popover .selection-popover-panel,.phase3-connector-popover .selection-popover-panel{min-width:360px;max-width:min(420px,calc(100vw - 24px))}
+.phase3-style-panel,.phase3-connector-panel{display:flex;flex-direction:column;gap:9px}
+.phase3-field-row{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.phase3-field-row label,.phase3-field-grid label{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted);font-size:11px}
+.phase3-field-row input[type=color]{width:38px;height:30px;padding:2px;border:1px solid var(--line);border-radius:4px;background:var(--panel)}
+.phase3-swatches{display:flex;gap:4px;flex-wrap:wrap}
+.phase3-swatch{--swatch:#000;width:22px!important;min-width:22px!important;height:22px!important;min-height:22px!important;padding:0!important;border-radius:50%!important;background:var(--swatch)!important}
+.phase3-field-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.phase3-field-grid input,.phase3-field-grid select,.phase3-field-row select{width:92px;min-height:32px;padding:4px 6px;background:var(--paper);border:1px solid var(--line);border-radius:4px;color:var(--ink)}
+.phase3-section-title{font-size:10px;letter-spacing:.09em;color:var(--muted);font-weight:700;margin-top:2px}
+.phase3-button-row{display:flex;gap:5px;flex-wrap:wrap}
+.phase3-button-row button{flex:1;min-width:72px}
+.phase3-label-row{display:flex;gap:6px}
+.phase3-label-row input{flex:1;min-width:0;min-height:34px;padding:5px 8px;background:var(--paper);border:1px solid var(--line);border-radius:4px}
+.phase3-help{margin:0;color:var(--muted);font-size:10px;line-height:1.45}
+@media(max-width:700px){.phase3-style-popover .selection-popover-panel,.phase3-connector-popover .selection-popover-panel{min-width:0;max-width:none}.phase3-field-grid{grid-template-columns:1fr}.phase3-field-row{grid-template-columns:1fr 1fr}}
