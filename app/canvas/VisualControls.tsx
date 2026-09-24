@@ -15,8 +15,10 @@ type Props = {
   theme: ThemePreference
   profile: CanvasVisualProfile
   disabled?: boolean
+  gridVisible: boolean
   onTheme: (theme: ThemePreference) => void
   onProfile: (profile: CanvasVisualProfile) => void
+  onGridVisible: (visible: boolean) => void
   onDelight: () => void
 }
 
@@ -39,7 +41,7 @@ const MOTIONS: Array<{ value: CanvasMotion; label: string }> = [
   { value: 'reduced', label: 'Reduced' },
 ]
 
-export function VisualControls({ theme, profile, disabled = false, onTheme, onProfile, onDelight }: Props) {
+export function VisualControls({ theme, profile, disabled = false, gridVisible, onTheme, onProfile, onGridVisible, onDelight }: Props) {
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -127,17 +129,24 @@ export function VisualControls({ theme, profile, disabled = false, onTheme, onPr
           {GRID_PATTERNS.map(option => <button
             key={option.value}
             type="button"
-            className={profile.gridPattern === option.value ? 'is-active' : ''}
-            aria-pressed={profile.gridPattern === option.value}
-            onClick={() => patch('gridPattern', option.value)}
+            className={(option.value === 'none' ? !gridVisible : gridVisible && profile.gridPattern === option.value) ? 'is-active' : ''}
+            aria-pressed={option.value === 'none' ? !gridVisible : gridVisible && profile.gridPattern === option.value}
+            onClick={() => {
+              if (option.value === 'none') {
+                onGridVisible(false)
+                return
+              }
+              patch('gridPattern', option.value)
+              onGridVisible(true)
+            }}
           >{option.label}</button>)}
         </div>
         <label className="visual-range-control">Spacing
-          <input aria-label="Grid spacing" type="range" min="12" max="72" step="2" value={profile.gridSize} disabled={profile.gridPattern === 'none'} onChange={event => patch('gridSize', Number(event.target.value))} />
+          <input aria-label="Grid spacing" type="range" min="12" max="72" step="2" value={profile.gridSize} disabled={!gridVisible} onChange={event => patch('gridSize', Number(event.target.value))} />
           <output>{Math.round(profile.gridSize)}</output>
         </label>
         <label className="visual-range-control">Strength
-          <input aria-label="Grid strength" type="range" min="4" max="36" step="2" value={profile.gridOpacity} disabled={profile.gridPattern === 'none'} onChange={event => patch('gridOpacity', Number(event.target.value))} />
+          <input aria-label="Grid strength" type="range" min="4" max="36" step="2" value={profile.gridOpacity} disabled={!gridVisible} onChange={event => patch('gridOpacity', Number(event.target.value))} />
           <output>{Math.round(profile.gridOpacity)}</output>
         </label>
         <label className="visual-toggle">
