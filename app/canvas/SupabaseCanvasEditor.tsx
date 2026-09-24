@@ -330,12 +330,12 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
       </div>
       <div className="shape-library-heading shape-library-stamps-heading">STAMPS</div>
       <div className="shape-library-grid shape-library-stamp-grid">
-        <button type="button" onClick={() => addCustomShape('heart')}><span className="stamp-preview">♥</span>Heart</button>
-        <button type="button" onClick={() => addCustomShape('check')}><span className="stamp-preview">✓</span>Check</button>
-        <button type="button" onClick={() => addCustomShape('sparkle')}><span className="stamp-preview">✦</span>Sparkle</button>
-        <button type="button" onClick={() => addCustomShape('pin')}><span className="stamp-preview">●</span>Pin</button>
-        <button type="button" onClick={() => addCustomShape('flag')}><span className="stamp-preview">⚑</span>Flag</button>
-        <button type="button" onClick={() => addCustomShape('bolt')}><span className="stamp-preview">ϟ</span>Bolt</button>
+        <button type="button" onClick={() => addCustomShape('heart')}><span className="stamp-preview" aria-hidden="true">♥</span>Heart</button>
+        <button type="button" onClick={() => addCustomShape('check')}><span className="stamp-preview" aria-hidden="true">✓</span>Check</button>
+        <button type="button" onClick={() => addCustomShape('sparkle')}><span className="stamp-preview" aria-hidden="true">✦</span>Sparkle</button>
+        <button type="button" onClick={() => addCustomShape('pin')}><span className="stamp-preview" aria-hidden="true">●</span>Pin</button>
+        <button type="button" onClick={() => addCustomShape('flag')}><span className="stamp-preview" aria-hidden="true">⚑</span>Flag</button>
+        <button type="button" onClick={() => addCustomShape('bolt')}><span className="stamp-preview" aria-hidden="true">ϟ</span>Bolt</button>
       </div>
     </div>}
     <button type="button" className={`icon-button rich-text-button${richTextMode ? ' is-active' : ''}`} aria-label="Rich text" aria-pressed={richTextMode} title="Rich text (T)" disabled={!api || status !== 'Live'} onClick={toggleRichText}><Icon name="text" /></button>
