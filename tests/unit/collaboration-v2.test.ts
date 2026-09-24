@@ -53,7 +53,9 @@ test('state payload rejects malformed coordinates, selections, colors and oversi
   assert.equal(createCollaborationStatePayload({ ...valid, color: 'red' }), null)
   assert.equal(createCollaborationStatePayload({ ...valid, pointer: { ...valid.pointer, x: Number.NaN } }), null)
   assert.equal(createCollaborationStatePayload({ ...valid, selectedElementIds: Array.from({ length: 257 }, (_, index) => `shape-${index}`) }), null)
-  assert.equal(parseCollaborationStatePayload({ ...valid, protocol: 2, padding: 'x'.repeat(COLLABORATION_STATE_MAX_BYTES) }), createCollaborationStatePayload(valid))
+  const oversizedIds = Array.from({ length: 256 }, (_, index) => `shape-${index}-${'x'.repeat(90)}`)
+  assert.equal(createCollaborationStatePayload({ ...valid, selectedElementIds: oversizedIds }), null)
+  assert.deepEqual(parseCollaborationStatePayload({ ...valid, protocol: 2, ignoredExtraProperty: true }), createCollaborationStatePayload(valid))
 })
 
 test('sequence gate rejects duplicates and stale packets while accepting a new tab session', () => {
