@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { BinaryFiles } from '@excalidraw/excalidraw/types'
-import { createCanvasBackup, createCanvasClipboard, jpegBytesToPdf, parseCanvasImport } from '../../app/canvas/scene-transfer.ts'
+import { CANVAS_IMPORT_MAX_ELEMENTS, CANVAS_IMPORT_MAX_FILES, createCanvasBackup, createCanvasClipboard, jpegBytesToPdf, parseCanvasImport } from '../../app/canvas/scene-transfer.ts'
 
 const fileId = 'c'.repeat(64)
 const unusedId = 'd'.repeat(64)
@@ -70,4 +70,21 @@ test('portable Canvas clipboard reuses the same bounded scene/file import contra
   const parsed = parseCanvasImport(JSON.stringify(clipboard))
   assert.equal(parsed.elements.length, 2)
   assert.deepEqual(Object.keys(parsed.files), [fileId])
+})
+
+
+test('scene import enforces element and file-count denial-of-service limits', () => {
+  const tooManyElements = Array.from({ length: CANVAS_IMPORT_MAX_ELEMENTS + 1 }, (_, index) => ({ id: String(index) }))
+  assert.throws(
+    () => parseCanvasImport(JSON.stringify({ type: 'canvas-backup', version: 3, elements: tooManyElements, files: {} })),
+    /more than .* elements/i,
+  )
+
+  const tooManyFiles = Object.fromEntries(
+    Array.from({ length: CANVAS_IMPORT_MAX_FILES + 1 }, (_, index) => [String(index), { id: String(index) }]),
+  )
+  assert.throws(
+    () => parseCanvasImport(JSON.stringify({ type: 'canvas-backup', version: 3, elements: [], files: tooManyFiles })),
+    /more than .* files/i,
+  )
 })
