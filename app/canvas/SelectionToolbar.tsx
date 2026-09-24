@@ -611,8 +611,10 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
           tabIndex={-1}
           accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
           onChange={event => {
-            const file = event.currentTarget.files?.[0]
-            event.currentTarget.value = ''
+            const input = event.currentTarget
+            const file = input.files?.[0]
+            input.value = ''
+            input.blur()
             if (file) void onReplaceImage(singleImage.id, file)
           }}
         />
