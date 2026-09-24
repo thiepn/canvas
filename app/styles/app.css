@@ -148,3 +148,7 @@
 .phase3-label-row input{flex:1;min-width:0;min-height:34px;padding:5px 8px;background:var(--paper);border:1px solid var(--line);border-radius:4px}
 .phase3-help{margin:0;color:var(--muted);font-size:10px;line-height:1.45}
 @media(max-width:700px){.phase3-style-popover .selection-popover-panel,.phase3-connector-popover .selection-popover-panel{min-width:0;max-width:none}.phase3-field-grid{grid-template-columns:1fr}.phase3-field-row{grid-template-columns:1fr 1fr}}
+
+.phase3-bend-control{display:grid;grid-template-columns:auto 1fr 34px;align-items:center;gap:8px;color:var(--muted);font-size:11px}
+.phase3-bend-control input[type=range]{width:100%;min-height:24px}
+.phase3-bend-control output{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}

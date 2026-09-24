@@ -20,6 +20,7 @@ import {
   selectFrameContents,
   selectSame,
   setConnectorArrowheads,
+  setConnectorBend,
   setConnectorRouting,
   setSelectionPosition,
   toggleLockSelection,
@@ -339,6 +340,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
   }
 
   const applyConnectorRouting = (routing: ConnectorRouting) => apply(setConnectorRouting(currentElements(), ids(), routing))
+  const applyConnectorBend = (amount: number) => apply(setConnectorBend(currentElements(), ids(), amount))
   const applyConnectorHeads = (start: ConnectorArrowhead, end: ConnectorArrowhead) => apply(setConnectorArrowheads(currentElements(), ids(), start, end))
   const reverseSelectedConnector = () => {
     if (!mixedArrow) return
@@ -483,6 +485,8 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     : 0
   const shapeCornerRadius = firstCanvasShape?.style.cornerRadius ?? nativeRoundness
   const routing = singleArrow ? connectorRouting(singleArrow) : 'straight'
+  const connectorMeta = singleArrow?.customData?.canvasConnector as Record<string, unknown> | undefined
+  const bendAmount = Number.isFinite(Number(connectorMeta?.bend)) ? Number(connectorMeta?.bend) : 34
   const startHead = singleArrow ? arrowheadValue(singleArrow.startArrowhead) : null
   const endHead = singleArrow ? arrowheadValue(singleArrow.endArrowhead) : null
 
@@ -573,6 +577,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
             <div className="phase3-button-row">
               {(['straight', 'curved', 'elbow'] as ConnectorRouting[]).map(mode => <button key={mode} type="button" className={routing === mode ? 'is-active' : ''} onClick={() => applyConnectorRouting(mode)}>{mode === 'straight' ? 'Straight' : mode === 'curved' ? 'Curved' : 'Elbow'}</button>)}
             </div>
+            <label className="phase3-bend-control">Bend <input type="range" min="-100" max="100" step="5" value={bendAmount} disabled={routing !== 'curved'} onChange={event => applyConnectorBend(Number(event.target.value))} /><output>{Math.round(bendAmount)}</output></label>
             <div className="phase3-section-title">ENDS</div>
             <div className="phase3-field-row">
               <label>Start <select value={startHead ?? ''} onChange={event => applyConnectorHeads((event.target.value || null) as ConnectorArrowhead, endHead)}>{ARROWHEAD_OPTIONS.map(option => <option key={option.label} value={option.value ?? ''}>{option.label}</option>)}</select></label>

@@ -566,7 +566,10 @@ export function setConnectorRouting<T extends CanvasElementLike>(
       const dx = last[0] - first[0]
       const dy = last[1] - first[1]
       const length = Math.max(1, Math.hypot(dx, dy))
-      const bend = Math.min(52, Math.max(18, length * 0.16))
+      const connectorData = element.customData?.canvasConnector as Record<string, unknown> | undefined
+      const savedBend = Number(connectorData?.bend)
+      const bendAmount = Number.isFinite(savedBend) ? Math.max(-100, Math.min(100, savedBend)) : 34
+      const bend = bendAmount / 100 * Math.min(140, length * 0.42)
       const normalX = -dy / length
       const normalY = dx / length
       const middle: CanvasPoint = [
@@ -578,6 +581,10 @@ export function setConnectorRouting<T extends CanvasElementLike>(
         roundness: { type: 2 },
         fixedSegments: null,
         points: [first, middle, last],
+        customData: {
+          ...(element.customData ?? {}),
+          canvasConnector: { bend: bendAmount },
+        },
       } as Partial<T>)
     }
     return bump(element, {
@@ -585,6 +592,39 @@ export function setConnectorRouting<T extends CanvasElementLike>(
       roundness: null,
       fixedSegments: null,
       points: directPoints,
+    } as Partial<T>)
+  })
+}
+
+export function setConnectorBend<T extends CanvasElementLike>(
+  elements: readonly T[],
+  selectedIds: ReadonlySet<string>,
+  bendAmount: number,
+): T[] {
+  const amount = Math.max(-100, Math.min(100, Number.isFinite(bendAmount) ? bendAmount : 0))
+  return elements.map(element => {
+    if (!selectedIds.has(element.id) || element.isDeleted || element.type !== 'arrow') return element
+    const points = element.points ?? []
+    const first = points[0]
+    const last = points.at(-1)
+    if (!first || !last) return element
+    const dx = last[0] - first[0]
+    const dy = last[1] - first[1]
+    const length = Math.max(1, Math.hypot(dx, dy))
+    const offset = amount / 100 * Math.min(140, length * 0.42)
+    const middle: CanvasPoint = [
+      (first[0] + last[0]) / 2 + (-dy / length) * offset,
+      (first[1] + last[1]) / 2 + (dx / length) * offset,
+    ]
+    return bump(element, {
+      elbowed: false,
+      roundness: { type: 2 },
+      fixedSegments: null,
+      points: [first, middle, last],
+      customData: {
+        ...(element.customData ?? {}),
+        canvasConnector: { bend: amount },
+      },
     } as Partial<T>)
   })
 }

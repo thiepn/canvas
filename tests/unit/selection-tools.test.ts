@@ -18,6 +18,7 @@ import {
   selectFrameContents,
   selectSame,
   setConnectorArrowheads,
+  setConnectorBend,
   setConnectorRouting,
   setSelectionPosition,
   toggleLockSelection,
@@ -269,4 +270,22 @@ test('reverse connector swaps endpoints and bindings without moving geometry', (
   assert.equal(next.endBinding?.elementId, 'a')
   assert.equal(next.x, 10)
   assert.equal(next.y, 10)
+})
+
+
+test('connector bend continuously reshapes a curved connector while preserving endpoints', () => {
+  const arrow = element('arrow', 0, 0, 100, 0, {
+    type: 'arrow',
+    points: [[0, 0], [100, 0]],
+    startArrowhead: null,
+    endArrowhead: 'arrow',
+  })
+  const [positive] = setConnectorBend([arrow], new Set(['arrow']), 50)
+  assert.equal(positive.points?.length, 3)
+  assert.deepEqual(positive.points?.[0], [0, 0])
+  assert.deepEqual(positive.points?.at(-1), [100, 0])
+  assert.ok(Number(positive.points?.[1]?.[1]) > 0)
+  const [negative] = setConnectorBend([positive], new Set(['arrow']), -50)
+  assert.ok(Number(negative.points?.[1]?.[1]) < 0)
+  assert.equal((negative.customData?.canvasConnector as Record<string, unknown>)?.bend, -50)
 })
