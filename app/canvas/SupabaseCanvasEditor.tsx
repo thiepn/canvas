@@ -930,7 +930,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         p_updated_by: identityRef.current.deviceId,
       })
       if (error) {
-        if (error.code === '40001') {
+        if (error.code === 'PT409' || error.code === '40001' || /Canvas undo conflict/i.test(error.message)) {
           canvasDiagnostics.increment('ownUndoConflicts')
           notify('That action cannot be undone safely because a collaborator changed one of its objects.')
         } else {
