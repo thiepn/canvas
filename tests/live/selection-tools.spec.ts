@@ -151,7 +151,8 @@ test('native keyboard nudging remains precise with the Phase 2 overlay', async (
   await page.goto('./')
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
   await drawRectangle(page, [340, 210], [410, 270])
-  const [created] = await expect.poll(async () => await rows()).toHaveLength(1).then(async () => rows())
+  await expect.poll(async () => (await rows()).length).toBe(1)
+  const [created] = await rows()
   const originalX = Number(created.x)
   const originalY = Number(created.y)
 

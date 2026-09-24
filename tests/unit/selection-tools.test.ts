@@ -3,10 +3,12 @@ import test from 'node:test'
 import {
   alignSelection,
   commonBounds,
+  copyVisualStyle,
   distributeSelection,
   duplicateSelection,
   flipSelection,
   groupSelection,
+  pasteVisualStyle,
   reorderSelection,
   resizeSelection,
   rotateSelection,
@@ -107,4 +109,28 @@ test('select same can match type, stroke or fill', () => {
   assert.deepEqual(Object.keys(selectSame(input, new Set(['1']), 'type')), ['1', '2'])
   assert.deepEqual(Object.keys(selectSame(input, new Set(['1']), 'stroke')), ['1', '3'])
   assert.deepEqual(Object.keys(selectSame(input, new Set(['1']), 'fill')), ['1', '2'])
+})
+
+
+test('visual style copy and paste transfers drawing properties without geometry', () => {
+  const source = element('1', 10, 10, 30, 20, {
+    strokeColor: '#ff0000',
+    backgroundColor: '#ffeeaa',
+    fillStyle: 'hachure',
+    strokeWidth: 4,
+    strokeStyle: 'dashed',
+    roughness: 2,
+    opacity: 65,
+  })
+  const target = element('2', 200, 100, 50, 40, {
+    strokeColor: '#0000ff',
+    backgroundColor: 'transparent',
+  })
+  const style = copyVisualStyle(source)
+  const next = pasteVisualStyle([source, target], new Set(['2']), style)
+  assert.equal(next[1].strokeColor, '#ff0000')
+  assert.equal(next[1].backgroundColor, '#ffeeaa')
+  assert.equal(next[1].strokeWidth, 4)
+  assert.equal(next[1].x, 200)
+  assert.equal(next[1].width, 50)
 })
