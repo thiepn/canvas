@@ -1,6 +1,6 @@
 import { CaptureUpdateAction, ROUNDNESS, convertToExcalidrawElements, newElementWith } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   alignSelection,
   bindConnectorEndpoint,
@@ -72,6 +72,7 @@ type Props = {
   onGridPreference: (enabled: boolean) => void
   onSelectionRefresh: () => void
   onManipulationCommit: () => void
+  onReplaceImage: (elementId: string, file: File) => void | Promise<void>
 }
 
 function isRichTextAnchor(element: SceneElement): boolean {
@@ -144,7 +145,7 @@ function arrowheadValue(value: unknown): ConnectorArrowhead {
   return ARROWHEAD_OPTIONS.some(option => option.value === value) ? value as ConnectorArrowhead : null
 }
 
-export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSnapEnabled, gridEnabled, onObjectsSnapPreference, onGridPreference, onSelectionRefresh, onManipulationCommit }: Props) {
+export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSnapEnabled, gridEnabled, onObjectsSnapPreference, onGridPreference, onSelectionRefresh, onManipulationCommit, onReplaceImage }: Props) {
   const [copiedStyle, setCopiedStyle] = useState<VisualStyle | null>(null)
   const [x, setX] = useState('')
   const [y, setY] = useState('')
@@ -154,6 +155,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
   const [aspectLocked, setAspectLocked] = useState(true)
   const [connectorLabel, setConnectorLabel] = useState('')
   const [frameName, setFrameName] = useState('')
+  const replaceImageInputRef = useRef<HTMLInputElement>(null)
 
   const selected = selection.elements
   const bounds = useMemo(() => commonBounds(selected as unknown as CanvasElementLike[]), [selected])
@@ -169,6 +171,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     ? selected.find(element => element.id !== mixedArrow.id && isBindableShape(element)) ?? null
     : null
   const singleFrame = selected.length === 1 && selected[0].type === 'frame' ? selected[0] : null
+  const singleImage = selected.length === 1 && selected[0].type === 'image' ? selected[0] : null
   const canFrameSelection = selected.length > 0 && selected.every(element => element.type !== 'frame')
   const frameChildren = singleFrame ? frameContents(api?.getSceneElementsIncludingDeleted() as unknown as SpatialElementLike[] ?? [], singleFrame.id) : []
   const frameContentsLocked = frameChildren.length > 0 && frameChildren.every(element => element.locked)
@@ -599,6 +602,21 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
         ? <button type="button" onClick={ungroup} disabled={disabled}>Ungroup</button>
         : <button type="button" onClick={group} disabled={disabled || selected.length < 2 || selected.some(element => element.type === 'frame')}>Group</button>}
       <button type="button" onClick={lock} disabled={disabled}>Lock</button>
+      {singleImage && <>
+        <button type="button" disabled={disabled} onClick={() => replaceImageInputRef.current?.click()}>Replace image</button>
+        <input
+          ref={replaceImageInputRef}
+          className="visually-hidden-file-input"
+          type="file"
+          tabIndex={-1}
+          accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+          onChange={event => {
+            const file = event.currentTarget.files?.[0]
+            event.currentTarget.value = ''
+            if (file) void onReplaceImage(singleImage.id, file)
+          }}
+        />
+      </>}
 
       <details className="selection-popover">
         <summary>Align</summary>
