@@ -1217,6 +1217,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     syncSelectionUi(editor.getSceneElementsIncludingDeleted(), editor.getAppState())
   }, [syncSelectionUi])
 
+  const refreshCanvasSelectionOverlays = useCallback(() => {
+    const editor = apiRef.current
+    if (!editor) return
+    const elements = editor.getSceneElementsIncludingDeleted()
+    const appState = editor.getAppState()
+    syncSelectionUi(elements, appState)
+    richTextLayerRef.current?.sync(elements, appState)
+  }, [syncSelectionUi])
+
   const refreshSelectionAfterInteraction = useCallback(() => {
     requestAnimationFrame(refreshSelectionUi)
   }, [refreshSelectionUi])
@@ -1886,7 +1895,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onSelectionRefresh={refreshSelectionUi}
           onManipulationCommit={captureCurrentScene}
         />
-        <NavigationOverlay ref={navigationRef} api={api} />
+        <NavigationOverlay ref={navigationRef} api={api} onSelectionRefresh={refreshCanvasSelectionOverlays} />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}
       {status === 'Live' && (syncHealth.key === 'retrying-save' || syncHealth.key === 'confirming-save') && <div className={`save-health-banner save-health-banner--${syncHealth.tone}`}><span>{syncHealth.detail}</span>{syncHealth.key === 'retrying-save' && <button type="button" onClick={retrySaveNow}>Retry now</button>}</div>}

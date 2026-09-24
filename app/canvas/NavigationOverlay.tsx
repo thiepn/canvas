@@ -26,6 +26,7 @@ export type NavigationOverlayHandle = {
 
 type Props = {
   api: ExcalidrawImperativeAPI | null
+  onSelectionRefresh: () => void
 }
 
 const HOME_KEY = 'canvas.home-view.v1'
@@ -53,7 +54,7 @@ function frameLabel(element: SceneElement, index: number): string {
   return name || `Frame ${index + 1}`
 }
 
-export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(function NavigationOverlay({ api }, ref) {
+export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(function NavigationOverlay({ api, onSelectionRefresh }, ref) {
   const [snapshot, setSnapshot] = useState<NavigationSnapshot>({ elements: [], scrollX: 0, scrollY: 0, zoom: 1, width: 1, height: 1 })
   const snapshotRef = useRef(snapshot)
   const pendingRef = useRef<NavigationSnapshot | null>(null)
@@ -179,6 +180,7 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
         },
         captureUpdate: CaptureUpdateAction.NEVER,
       })
+      requestAnimationFrame(onSelectionRefresh)
     }
     navigateTo([element], true)
   }
@@ -254,8 +256,10 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
 
   const handleMapPointer = (event: ReactPointerEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
-    const x = mapBounds.minX + ((event.clientX - rect.left - offsetX) / Math.max(1, scale))
-    const y = mapBounds.minY + ((event.clientY - rect.top - offsetY) / Math.max(1, scale))
+    const mapX = (event.clientX - rect.left) / Math.max(1, rect.width) * MAP_WIDTH
+    const mapY = (event.clientY - rect.top) / Math.max(1, rect.height) * MAP_HEIGHT
+    const x = mapBounds.minX + ((mapX - offsetX) / Math.max(0.0001, scale))
+    const y = mapBounds.minY + ((mapY - offsetY) / Math.max(0.0001, scale))
     const current = api.getAppState()
     api.updateScene({
       appState: {
@@ -323,6 +327,11 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
         ref={searchInputRef}
         value={query}
         onChange={event => setQuery(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === 'ArrowDown') { event.preventDefault(); goToResult(activeResult + 1) }
+          if (event.key === 'ArrowUp') { event.preventDefault(); goToResult(activeResult - 1) }
+          if (event.key === 'Enter') { event.preventDefault(); goToResult(activeResult) }
+        }}
         placeholder="Find text or frames…"
         aria-label="Search canvas text"
       />
