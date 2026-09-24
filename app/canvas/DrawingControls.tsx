@@ -19,7 +19,7 @@ type Props = {
   mode: DrawingMode | null
   settings: DrawingControlSettings
   onMode: (mode: DrawingMode) => void
-  onSetting: <K extends keyof DrawingControlSettings>(key: K, value: DrawingControlSettings[K]) => void
+  onSetting: (key: keyof DrawingControlSettings, value: DrawingControlSettings[keyof DrawingControlSettings]) => void
 }
 
 const PEN_PRESETS = [1, 2, 4, 6, 10] as const
