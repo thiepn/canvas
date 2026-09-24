@@ -94,7 +94,17 @@ test('image upload, native manipulation, replacement, Storage reload and portabl
   await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
   await expect(page.getByRole('toolbar', { name: 'Selection tools' }).getByRole('button', { name: 'Replace image' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Crop image' })).toBeVisible()
-  await expect(page.getByTestId('opacity')).toBeVisible()
+  const opacity = page.getByTestId('opacity')
+  await expect(opacity).toBeVisible()
+  await opacity.fill('60')
+
+  let manipulatedVersion = versionA
+  await expect.poll(async () => {
+    const image = (await rows()).find(row => row.id === imageId)
+    if (!image || Number(image.element.opacity) !== 60) return false
+    manipulatedVersion = image.version
+    return manipulatedVersion > versionA
+  }).toBe(true)
 
   const storedA = await supabase.storage.from(BUCKET).download(PATH_A)
   expect(storedA.error).toBeNull()
@@ -107,8 +117,14 @@ test('image upload, native manipulation, replacement, Storage reload and portabl
 
   await expect.poll(async () => {
     const image = (await rows()).find(row => row.id === imageId)
-    return image ? { fileId: image.element.fileId, status: image.element.status, version: image.version } : null
-  }).toEqual({ fileId: ID_B, status: 'saved', version: versionA + 2 })
+    return Boolean(
+      image
+      && image.element.fileId === ID_B
+      && image.element.status === 'saved'
+      && Number(image.element.opacity) === 60
+      && image.version > manipulatedVersion
+    )
+  }).toBe(true)
 
   const storedB = await supabase.storage.from(BUCKET).download(PATH_B)
   expect(storedB.error).toBeNull()
