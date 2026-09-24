@@ -94,6 +94,12 @@ test('two live clients persist and synchronize a real rectangle through Supabase
       await expect(eraserTool).toBeChecked()
       await dragOnCanvas(pageB, [280, 290], [450, 290], 12)
       await expect.poll(() => isDeleted(elementId)).toBe(true)
+
+      // B's gesture foregrounds B. If A misses the fast Realtime tombstone while
+      // backgrounded, returning to A must trigger the anti-entropy fallback.
+      // This is the user-visible convergence guarantee for a background tab.
+      await pageA.bringToFront()
+      await pageA.evaluate(() => window.dispatchEvent(new Event('focus')))
       await expect.poll(() => exportElement(pageA, elementId)).toBeNull()
     })
 
