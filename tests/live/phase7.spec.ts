@@ -240,3 +240,24 @@ test('image clipboard survives reload and deduplicates the shared asset by conte
   expect(stored.error).toBeNull()
   expect(Buffer.from(await stored.data!.arrayBuffer())).toEqual(SVG_A)
 })
+
+test('immutable asset dedupe refuses a preoccupied hash path with different bytes', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Storage collision integrity needs one browser execution.')
+
+  const poisoned = await supabase.storage.from(BUCKET).upload(PATH_A, SVG_B, {
+    contentType: 'image/svg+xml',
+    upsert: false,
+  })
+  expect(poisoned.error).toBeNull()
+
+  await page.goto('./')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await chooseImage(page, SVG_A, 'phase7-collision.svg')
+
+  await expect(page.getByText(/hash path is occupied by different content/i)).toBeVisible()
+  await expect.poll(async () => (await rows()).filter(row => row.element.type === 'image').length).toBe(0)
+
+  const stored = await supabase.storage.from(BUCKET).download(PATH_A)
+  expect(stored.error).toBeNull()
+  expect(Buffer.from(await stored.data!.arrayBuffer())).toEqual(SVG_B)
+})
