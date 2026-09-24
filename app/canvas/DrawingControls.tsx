@@ -5,6 +5,7 @@ import type { DrawingMode } from './drawing-tools.ts'
 export type DrawingControlSettings = {
   penColor: string
   penWidth: number
+  penOpacity: number
   smoothing: number
   pressure: boolean
   highlighterColor: string
@@ -105,6 +106,10 @@ export function DrawingControls({ disabled, mode, settings, onMode, onSetting }:
           <input type="range" min="0" max="100" step="5" value={settings.smoothing} onChange={event => onSetting('smoothing', Number(event.target.value))} />
           <output>{Math.round(settings.smoothing)}</output>
         </label>
+        {mode === 'pen' && <label className="drawing-range-control">Opacity
+          <input aria-label="Pen opacity" type="range" min="5" max="100" step="5" value={settings.penOpacity} onChange={event => onSetting('penOpacity', Number(event.target.value))} />
+          <output>{Math.round(settings.penOpacity)}</output>
+        </label>}
       </>}
 
       {mode === 'pen' && <div className="drawing-toggle-grid">

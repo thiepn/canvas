@@ -36,6 +36,7 @@ test('pen uses exact width, smoothing and pressure settings on persisted freedra
   await page.getByLabel('Pen color').fill('#2563eb')
   await page.getByLabel('Drawing width').fill('6')
   await page.getByLabel('Smoothing').fill('80')
+  await page.getByLabel('Pen opacity').fill('75')
   await page.getByRole('button', { name: 'Pressure' }).click()
   await page.keyboard.press('Escape')
 
@@ -49,6 +50,7 @@ test('pen uses exact width, smoothing and pressure settings on persisted freedra
     return stroke.strokeColor === '#2563eb'
       && Number(stroke.strokeWidth) === 6
       && Number(options?.streamline) === 0.8
+      && Number(stroke.opacity) === 75
       && options?.variability === 'constant'
       && drawing?.kind === 'pen'
   }).toBe(true)

@@ -310,6 +310,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const [drawingSettings, setDrawingSettings] = useState<DrawingControlSettings>(() => ({
     penColor: drawingColorPreference(storage, 'canvas.pen-color.v1', '#1f2937'),
     penWidth: drawingNumberPreference(storage, 'canvas.pen-width.v1', 2, 0.5, 32),
+    penOpacity: drawingNumberPreference(storage, 'canvas.pen-opacity.v1', 100, 5, 100),
     smoothing: drawingNumberPreference(storage, 'canvas.pen-smoothing.v1', 55, 0, 100),
     pressure: drawingBooleanPreference(storage, 'canvas.pen-pressure.v1', true),
     highlighterColor: drawingColorPreference(storage, 'canvas.highlighter-color.v1', '#ffd43b'),
@@ -1464,6 +1465,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const prefKeys: Record<keyof DrawingControlSettings, string> = {
       penColor: 'canvas.pen-color.v1',
       penWidth: 'canvas.pen-width.v1',
+      penOpacity: 'canvas.pen-opacity.v1',
       smoothing: 'canvas.pen-smoothing.v1',
       pressure: 'canvas.pen-pressure.v1',
       highlighterColor: 'canvas.highlighter-color.v1',
@@ -1502,7 +1504,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           currentItemStrokeWidthKey: widthKey,
           currentItemStrokeStyle: 'solid',
           currentItemRoughness: 0,
-          currentItemOpacity: drawingMode === 'pen' ? 100 : 32,
+          currentItemOpacity: drawingMode === 'pen' ? drawingSettings.penOpacity : 32,
           currentItemStrokeVariability: drawingMode === 'pen' && drawingSettings.pressure ? 'variable' : 'constant',
           penMode: drawingSettings.stylusMode,
           penDetected: drawingSettings.stylusMode || current.penDetected,
@@ -1587,7 +1589,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       width: gesture.mode === 'pen' ? settings.penWidth : settings.highlighterWidth,
       smoothing: settings.smoothing,
       pressure: gesture.mode === 'pen' ? settings.pressure : false,
-      opacity: gesture.mode === 'pen' ? 100 : 32,
+      opacity: gesture.mode === 'pen' ? settings.penOpacity : 32,
     }) as unknown as SceneElement
 
     let next = scene.map(element => element.id === styled.id ? styled : element)
