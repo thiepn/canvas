@@ -244,23 +244,54 @@ test('image clipboard survives reload and deduplicates the shared asset by conte
 test('immutable asset collision stays unsaved until Retry now can persist the correct bytes', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Storage collision integrity needs one browser execution.')
 
-  // Use a run-unique intended hash so this integrity test cannot be poisoned by
-  // an object left behind by a prior failed/retried browser run.
+  // Deliberately omit viewBox so this fixture also certifies the canonical SVG
+  // identity contract used by Excalidraw, Storage, clipboard, and backups.
   const nonce = `${Date.now()}-${Math.random()}`
-  const intended = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64"><rect width="96" height="64" fill="#2563eb"/><desc>${nonce}</desc></svg>`)
-  const poison = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64"><rect width="96" height="64" fill="#dc2626"/><desc>poison-${nonce}</desc></svg>`)
-  const collisionId = createHash('sha256').update(intended).digest('hex')
-  const collisionPath = `sha256/${collisionId}`
+  const intended = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64" data-nonce="${nonce}"><rect width="96" height="64" fill="#2563eb"/></svg>`)
+  const poison = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64" viewBox="0 0 96 64"><rect width="96" height="64" fill="#dc2626"/></svg>`)
 
+  let collisionId = ''
+  let collisionPath = ''
   try {
+    // First discover the browser's canonical content-addressed ID through the
+    // real successful image path rather than duplicating SVG normalization in
+    // the test runner.
+    await page.goto('./?debug=1')
+    await expect(page.getByText('Live', { exact: true })).toBeVisible()
+    await chooseImage(page, intended, 'phase7-canonical-svg.svg')
+
+    let probeElementId = ''
+    await expect.poll(async () => {
+      const image = (await rows()).find(row => row.element.type === 'image')
+      if (!image) return null
+      probeElementId = image.id
+      collisionId = String(image.element.fileId)
+      collisionPath = `sha256/${collisionId}`
+      return image.element.status
+    }).toBe('saved')
+    expect(collisionId).toMatch(/^[0-9a-f]{64}$/)
+
+    const canonical = await supabase.storage.from(BUCKET).download(collisionPath)
+    expect(canonical.error).toBeNull()
+    const canonicalBytes = Buffer.from(await canonical.data!.arrayBuffer())
+    expect(createHash('sha256').update(canonicalBytes).digest('hex')).toBe(collisionId)
+    expect(canonicalBytes.toString('utf8')).toContain('viewBox="0 0 96 64"')
+
+    const { error: probeDeleteError } = await supabase.from(TABLE).delete().eq('id', probeElementId)
+    expect(probeDeleteError).toBeNull()
+    const removedCanonical = await supabase.storage.from(BUCKET).remove([collisionPath])
+    expect(removedCanonical.error).toBeNull()
+
+    await page.reload()
+    await expect(page.getByText('Live', { exact: true })).toBeVisible()
+    await expect.poll(async () => (await rows()).length).toBe(0)
+
     const poisoned = await supabase.storage.from(BUCKET).upload(collisionPath, poison, {
       contentType: 'image/svg+xml',
       upsert: false,
     })
     expect(poisoned.error).toBeNull()
 
-    await page.goto('./?debug=1')
-    await expect(page.getByText('Live', { exact: true })).toBeVisible()
     await chooseImage(page, intended, 'phase7-collision.svg')
 
     await expect.poll(async () => {
@@ -287,8 +318,9 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
 
     const stored = await supabase.storage.from(BUCKET).download(collisionPath)
     expect(stored.error).toBeNull()
-    expect(Buffer.from(await stored.data!.arrayBuffer())).toEqual(intended)
+    const storedBytes = Buffer.from(await stored.data!.arrayBuffer())
+    expect(createHash('sha256').update(storedBytes).digest('hex')).toBe(collisionId)
   } finally {
-    await supabase.storage.from(BUCKET).remove([collisionPath])
+    if (collisionPath) await supabase.storage.from(BUCKET).remove([collisionPath])
   }
 })
