@@ -25,6 +25,7 @@ import {
   type CanvasPreviewSource,
 } from './preview-lane.ts'
 import { createRichTextElement, RichTextLayer, type RichTextLayerHandle } from './rich-text.tsx'
+import { SelectionToolbar, unlockAllElements, type CanvasSelectionSnapshot } from './SelectionToolbar.tsx'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = CanvasConnectionState
@@ -151,7 +152,7 @@ function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   URL.revokeObjectURL(url)
 }
 
-function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText }: {
+function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll }: {
   api: ExcalidrawImperativeAPI | null
   identity: Identity
   people: PresencePerson[]
@@ -162,6 +163,8 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   changeTheme: (theme: ThemePreference) => void
   richTextMode: boolean
   toggleRichText: () => void
+  hasLockedElements: boolean
+  unlockAll: () => void
 }) {
   const [menu, setMenu] = useState(false)
   const [name, setName] = useState(identity.displayName)
@@ -208,6 +211,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
       <button type="button" className="menu-action" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" />Frame tool</button>
       <button type="button" className="menu-action" disabled={!api} onClick={() => downloadBackup(api)}><Icon name="download" />Export JSON backup</button>
       <button type="button" className="menu-action" disabled={!api} onClick={() => { fit(); setMenu(false) }}><Icon name="fit" />Fit all content</button>
+      <button type="button" className="menu-action" disabled={!api || status !== 'Live' || !hasLockedElements} onClick={() => { unlockAll(); setMenu(false) }}><Icon name="select" />Unlock all locked objects</button>
       <p className="privacy-note">One shared canvas. Anyone with the link can read and change everything. Names are not verified identities.</p>
       <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Draw · T Text · E Eraser · F Frame · Space Pan · Ctrl/⌘ Z Undo</p>
     </div>}
@@ -224,6 +228,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const richTextLayerRef = useRef<RichTextLayerHandle | null>(null)
   const [richTextMode, setRichTextMode] = useState(false)
+  const [selectionSnapshot, setSelectionSnapshot] = useState<CanvasSelectionSnapshot>({ elements: [], selectedGroupIds: {}, editingGroupId: null, objectsSnapModeEnabled: true })
+  const selectionSignatureRef = useRef('')
+  const [hasLockedElements, setHasLockedElements] = useState(false)
   const [status, setStatus] = useState<ConnectionState>('Connecting')
   const statusRef = useRef<ConnectionState>('Connecting')
   const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeState>({ queuedChanges: 0, writeInFlight: false, localEditing: false, saveIssue: 'none' })
@@ -1070,8 +1077,26 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     void channel.track({ deviceId: identity.deviceId, displayName: identity.displayName, color: identity.color, onlineAt: new Date().toISOString() }).catch(() => {})
   }, [identity, status])
 
+  const syncSelectionUi = useCallback((elements: readonly SceneElement[], appState: AppState) => {
+    const selected = elements.filter(element => !element.isDeleted && appState.selectedElementIds[element.id])
+    const selectedGroupIds = { ...appState.selectedGroupIds }
+    const signature = [
+      selected.map(element => `${element.id}:${element.version}`).join(','),
+      Object.entries(selectedGroupIds).filter(([, value]) => value).map(([id]) => id).sort().join(','),
+      appState.editingGroupId ?? '',
+      appState.objectsSnapModeEnabled ? '1' : '0',
+    ].join('|')
+    if (signature !== selectionSignatureRef.current) {
+      selectionSignatureRef.current = signature
+      setSelectionSnapshot({ elements: [...selected], selectedGroupIds, editingGroupId: appState.editingGroupId, objectsSnapModeEnabled: appState.objectsSnapModeEnabled })
+    }
+    const locked = elements.some(element => !element.isDeleted && element.locked)
+    setHasLockedElements(previous => previous === locked ? previous : locked)
+  }, [])
+
   const onChange = useCallback((elements: readonly SceneElement[], appState: AppState) => {
     richTextLayerRef.current?.sync(elements, appState)
+    syncSelectionUi(elements, appState)
     if (applyingRemote.current || statusRef.current !== 'Live') return
     const previousEditingTextId = editingTextRef.current
     const nextEditingTextId = appState.editingTextElement?.id ?? null
@@ -1142,7 +1167,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       operationTracker.endText()
     }
     editingTextRef.current = nextEditingTextId
-  }, [notify, operationTracker, patchSyncRuntime, queuePreview])
+  }, [notify, operationTracker, patchSyncRuntime, queuePreview, syncSelectionUi])
 
   const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return
@@ -1240,6 +1265,14 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (status !== 'Live' && richTextMode) setRichTextMode(false)
   }, [richTextMode, status])
 
+  useEffect(() => {
+    if (!api) return
+    const state = api.getAppState()
+    if (!state.objectsSnapModeEnabled) {
+      api.updateScene({ appState: { objectsSnapModeEnabled: true }, captureUpdate: CaptureUpdateAction.NEVER })
+    }
+  }, [api])
+
   const scenePointFromPointer = (clientX: number, clientY: number, target: HTMLDivElement) => {
     const editor = apiRef.current
     if (!editor) return null
@@ -1287,8 +1320,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     event.preventDefault(); event.stopPropagation(); notify('File uploads are disabled on Canvas.')
   }
 
+  const unlockAllLocked = useCallback(() => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    const count = unlockAllElements(editor)
+    if (count) notify(`Unlocked ${count} object${count === 1 ? '' : 's'}.`)
+  }, [notify])
+
   return <div className="canvas-app live-canvas-app" data-canvas-engine="excalidraw-supabase">
-    <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} richTextMode={richTextMode} toggleRichText={toggleRichTextMode} />
+    <LiveHeader api={api} identity={identity} people={people} status={status} syncHealth={syncHealth} theme={theme} rename={rename} changeTheme={changeTheme} richTextMode={richTextMode} toggleRichText={toggleRichTextMode} hasLockedElements={hasLockedElements} unlockAll={unlockAllLocked} />
     <main className="canvas-workspace live-canvas-workspace" aria-label="Shared infinite canvas">
       <div className={`live-excalidraw${richTextMode ? ' rich-text-insert-mode' : ''}`} onPointerDownCapture={handleRichTextPlacement} onDoubleClickCapture={handleCanvasDoubleClick} onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
         <Excalidraw
@@ -1314,6 +1354,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onEditEnd={endRichTextOperation}
           onDraft={recordRichTextDraft}
         />
+        <SelectionToolbar api={api} selection={selectionSnapshot} disabled={status !== 'Live'} onNotice={notify} />
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}
       {status === 'Live' && (syncHealth.key === 'retrying-save' || syncHealth.key === 'confirming-save') && <div className={`save-health-banner save-health-banner--${syncHealth.tone}`}><span>{syncHealth.detail}</span>{syncHealth.key === 'retrying-save' && <button type="button" onClick={retrySaveNow}>Retry now</button>}</div>}
