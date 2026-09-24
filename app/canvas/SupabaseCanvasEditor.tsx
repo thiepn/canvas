@@ -120,6 +120,7 @@ type SyncRuntimeState = { queuedChanges: number; writeInFlight: boolean; assetTr
 const ALLOWED_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame', 'image'])
 const OPERATION_FLUSH_DELAY_MS = 0
 const RECONNECT_FLUSH_DELAY_MS = 120
+const DURABLE_REQUEST_TIMEOUT_MS = 8_000
 const LONG_OPERATION_CHECKPOINT_MS = 1500
 const PREVIEW_BROADCAST_INTERVAL_MS = 45
 const PREVIEW_ECHO_GRACE_MS = 1000
@@ -1531,7 +1532,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         updated_by: identityRef.current.deviceId,
       }))
       const ids = rows.map(row => row.id)
-      const { error } = await supabase.from(config.tableName).upsert(rows, { onConflict: 'id' })
+      const { error } = await supabase
+        .from(config.tableName)
+        .upsert(rows, { onConflict: 'id' })
+        .abortSignal(AbortSignal.timeout(DURABLE_REQUEST_TIMEOUT_MS))
       if (error) {
         for (const element of elements) {
           const queued = durablePendingRef.current.get(element.id)
@@ -1555,7 +1559,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         return
       }
       if (!pageActiveRef.current) return
-      const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element,revision').in('id', ids)
+      const { data, error: readError } = await supabase
+        .from(config.tableName)
+        .select('id,version,version_nonce,is_deleted,element,revision')
+        .in('id', ids)
+        .abortSignal(AbortSignal.timeout(DURABLE_REQUEST_TIMEOUT_MS))
       if (!pageActiveRef.current) return
       if (readError) {
         patchSyncRuntime({ saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'unconfirmed') })
