@@ -1426,18 +1426,20 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       if (key === 'p' || key === 'x') {
         event.preventDefault()
         event.stopPropagation()
-        activateDrawingMode('pen')
+        setRichTextMode(false)
+        setDrawingMode('pen')
         return
       }
       if (key === 'e' && event.shiftKey) {
         event.preventDefault()
         event.stopPropagation()
-        activateDrawingMode('partial-eraser')
+        setRichTextMode(false)
+        setDrawingMode('partial-eraser')
       }
     }
     window.addEventListener('keydown', keydown, true)
     return () => window.removeEventListener('keydown', keydown, true)
-  }, [activateDrawingMode, richTextMode, toggleRichTextMode])
+  }, [richTextMode, toggleRichTextMode])
 
   useEffect(() => {
     if (status !== 'Live') {
@@ -1494,14 +1496,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const current = editor.getAppState()
     if (drawingMode === 'pen' || drawingMode === 'highlighter') {
       const width = drawingMode === 'pen' ? drawingSettings.penWidth : drawingSettings.highlighterWidth
-      const widthKey = width <= 0.75 ? 'thin' : width <= 1.5 ? 'medium' : 'bold'
       editor.setActiveTool({ type: 'freedraw', locked: true })
       editor.updateScene({
         appState: {
           currentItemStrokeColor: drawingMode === 'pen' ? drawingSettings.penColor : drawingSettings.highlighterColor,
           currentItemBackgroundColor: 'transparent',
           currentItemFillStyle: 'solid',
-          currentItemStrokeWidthKey: widthKey,
+          currentItemStrokeWidth: width,
           currentItemStrokeStyle: 'solid',
           currentItemRoughness: 0,
           currentItemOpacity: drawingMode === 'pen' ? drawingSettings.penOpacity : 32,
