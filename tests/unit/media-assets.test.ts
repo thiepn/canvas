@@ -94,3 +94,20 @@ test('SVG validation allows static artwork and rejects active or externally load
     )
   }
 })
+
+
+test('raster validation rejects MIME-spoofed bytes and accepts supported signatures', async () => {
+  await validateImageContent(new Blob([
+    new Uint8Array([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,0,0,0,0]),
+  ], { type: 'image/png' }))
+  await validateImageContent(new Blob([
+    new Uint8Array([0xff,0xd8,0xff,0xe0,0,0,0,0]),
+  ], { type: 'image/jpeg' }))
+  await validateImageContent(new Blob(['GIF89a123456'], { type: 'image/gif' }))
+  await validateImageContent(new Blob(['RIFF1234WEBPxxxx'], { type: 'image/webp' }))
+
+  await assert.rejects(
+    () => validateImageContent(new Blob(['<html>not png</html>'], { type: 'image/png' })),
+    /bytes do not match/i,
+  )
+})
