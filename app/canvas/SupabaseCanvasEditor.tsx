@@ -543,7 +543,17 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   const ensureUploadedAsset = useCallback((file: BinaryFileData): Promise<void> => {
     const id = file.id as string
-    if (assetReadyRef.current.has(id)) return Promise.resolve()
+    if (assetReadyRef.current.has(id)) {
+      const editor = apiRef.current
+      if (editor) {
+        const current = editor.getSceneElementsIncludingDeleted()
+        const promoted = markImagesSaved(current, id)
+        if (promoted.some((element, index) => element !== current[index])) {
+          editor.updateScene({ elements: promoted, captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+        }
+      }
+      return Promise.resolve()
+    }
     const existing = assetUploadPromisesRef.current.get(id)
     if (existing) return existing
     if (assetUploadFailuresRef.current.has(id)) return Promise.reject(new Error('Image upload is waiting for a retry.'))
