@@ -187,3 +187,24 @@ test('pasting arrow style onto a rectangle does not add arrowheads', () => {
   assert.equal(next[1].startArrowhead, undefined)
   assert.equal(next[1].endArrowhead, undefined)
 })
+
+
+test('selected frame and its children align as one spatial unit', () => {
+  const frame = element('frame', 0, 20, 100, 80, { type: 'frame' })
+  const child = element('child', 20, 40, 20, 20, { frameId: 'frame' })
+  const other = element('other', 200, 120, 20, 20)
+  const next = alignSelection([frame, child, other], new Set(['frame', 'child', 'other']), 'bottom')
+  assert.equal(next[0].y, 40)
+  assert.equal(next[1].y, 60)
+  assert.equal(next[2].y, 120)
+})
+
+test('resizing uses element centers so rotated selections do not drift from scaling geometry', () => {
+  const rotated = element('1', 20, 20, 40, 20, { angle: Math.PI / 4 })
+  const other = element('2', 100, 20, 20, 20)
+  const before = commonBounds([rotated, other])!
+  const next = resizeSelection([rotated, other], new Set(['1', '2']), before.width * 2, before.height * 2)
+  const after = commonBounds(next)!
+  assert.ok(Math.abs(after.midX - before.midX * 2 + before.minX) < after.width)
+  assert.ok(after.width > before.width)
+})

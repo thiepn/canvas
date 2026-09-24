@@ -69,10 +69,10 @@ function boundSelectionIds(elements: readonly SceneElement[], selected: Set<stri
 }
 
 function relatedSelectionIds(elements: readonly SceneElement[], selected: Set<string>): Set<string> {
-  const expanded = boundSelectionIds(elements, selected)
+  const expanded = new Set(selected)
   const selectedFrames = new Set(elements.filter(element => selected.has(element.id) && element.type === 'frame').map(element => element.id))
   for (const element of elements) if (element.frameId && selectedFrames.has(element.frameId)) expanded.add(element.id)
-  return expanded
+  return boundSelectionIds(elements, expanded)
 }
 
 function numeric(value: string): number | null {
@@ -94,6 +94,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
   const bounds = useMemo(() => commonBounds(selected as unknown as CanvasElementLike[]), [selected])
   const hasRichText = selected.some(isRichTextAnchor)
   const singleRichText = selected.length === 1 && hasRichText
+  const hasLinear = selected.some(element => element.type === 'line' || element.type === 'arrow' || element.type === 'freedraw')
   const grouped = Object.values(selection.selectedGroupIds).some(Boolean)
 
   useEffect(() => {
@@ -121,8 +122,8 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
   const currentElements = () => api.getSceneElementsIncludingDeleted() as unknown as CanvasElementLike[]
 
   const ids = () => selectedSet(api)
-  const geometryIds = () => boundSelectionIds(api.getSceneElementsIncludingDeleted(), ids())
   const relatedIds = () => relatedSelectionIds(api.getSceneElementsIncludingDeleted(), ids())
+  const geometryIds = () => relatedIds()
 
   const group = () => {
     const result = groupSelection(currentElements(), geometryIds())
@@ -285,8 +286,8 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
           <button type="button" onClick={() => arrange('forward')}>Forward</button>
           <button type="button" onClick={() => arrange('backward')}>Backward</button>
           <button type="button" onClick={() => arrange('back')}>Back</button>
-          <button type="button" onClick={() => flip('x')}>Flip H</button>
-          <button type="button" onClick={() => flip('y')}>Flip V</button>
+          <button type="button" onClick={() => flip('x')} disabled={hasLinear}>Flip H</button>
+          <button type="button" onClick={() => flip('y')} disabled={hasLinear}>Flip V</button>
           <button type="button" onClick={resetAngle}>Reset rotation</button>
         </div>
       </details>

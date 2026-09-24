@@ -124,6 +124,7 @@ function unitKey(element: CanvasElementLike): string {
 
 function selectionUnits<T extends CanvasElementLike>(elements: readonly T[]): T[][] {
   const selectedIds = new Set(elements.map(element => element.id))
+  const selectedFrames = new Set(elements.filter(element => element.type === 'frame').map(element => element.id))
   const boundToContainer = new Map<string, string>()
   const containersWithBoundText = new Set<string>()
   for (const element of elements) {
@@ -136,14 +137,20 @@ function selectionUnits<T extends CanvasElementLike>(elements: readonly T[]): T[
   }
   const units = new Map<string, T[]>()
   for (const element of elements) {
+    const frameKey = element.type === 'frame'
+      ? `frame:${element.id}`
+      : element.frameId && selectedFrames.has(element.frameId)
+        ? `frame:${element.frameId}`
+        : null
     const containerId = element.containerId && selectedIds.has(element.containerId)
       ? element.containerId
       : boundToContainer.get(element.id)
-    const key = containerId
-      ? `container:${containerId}`
-      : containersWithBoundText.has(element.id)
-        ? `container:${element.id}`
-        : unitKey(element)
+    const key = frameKey
+      ?? (containerId
+        ? `container:${containerId}`
+        : containersWithBoundText.has(element.id)
+          ? `container:${element.id}`
+          : unitKey(element))
     const current = units.get(key)
     if (current) current.push(element)
     else units.set(key, [element])
@@ -316,7 +323,14 @@ function reindexMoved<T extends CanvasElementLike>(elements: readonly T[], moved
     const lower = start > 0 ? next[start - 1].index ?? null : null
     const upper = end < next.length ? next[end].index ?? null : null
     let keys: string[]
-    try { keys = generateNKeysBetween(lower, upper, end - start) } catch { keys = generateNKeysBetween(null, null, end - start) }
+    try {
+      keys = generateNKeysBetween(lower, upper, end - start)
+    } catch {
+      const allKeys = generateNKeysBetween(null, null, next.length)
+      return next.map((element, itemIndex) => element.index === allKeys[itemIndex]
+        ? element
+        : bump(element, { index: allKeys[itemIndex] } as Partial<T>))
+    }
     for (let i = start; i < end; i++) next[i] = bump(next[i], { index: keys[i - start] } as Partial<T>)
   }
   return next
@@ -410,13 +424,17 @@ export function resizeSelection<T extends CanvasElementLike>(
   const sy = targetHeight !== null && Number.isFinite(targetHeight) && targetHeight > 0 ? targetHeight / bounds.height : 1
   return elements.map(element => {
     if (!selectedIds.has(element.id) || element.isDeleted) return element
-    const nextX = bounds.minX + (element.x - bounds.minX) * sx
-    const nextY = bounds.minY + (element.y - bounds.minY) * sy
+    const nextWidth = element.width * sx
+    const nextHeight = element.height * sy
+    const centerX = element.x + element.width / 2
+    const centerY = element.y + element.height / 2
+    const nextCenterX = bounds.minX + (centerX - bounds.minX) * sx
+    const nextCenterY = bounds.minY + (centerY - bounds.minY) * sy
     const patch: Partial<T> = {
-      x: nextX,
-      y: nextY,
-      width: element.width * sx,
-      height: element.height * sy,
+      x: nextCenterX - nextWidth / 2,
+      y: nextCenterY - nextHeight / 2,
+      width: nextWidth,
+      height: nextHeight,
     } as Partial<T>
     if (element.points) (patch as CanvasElementLike).points = element.points.map(point => scalePoint(point, sx, sy))
     if (element.type === 'text' && typeof element.fontSize === 'number') (patch as CanvasElementLike).fontSize = Math.max(1, element.fontSize * Math.min(Math.abs(sx), Math.abs(sy)))
