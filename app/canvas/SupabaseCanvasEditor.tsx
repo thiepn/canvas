@@ -407,7 +407,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const localSceneSnapshotRef = useRef(new Map<string, SceneElement>())
   const ownUndoBeforeRef = useRef(new Map<string, SceneElement | null>())
   const ownUndoStackRef = useRef<OwnUndoEntry<SceneElement>[]>([])
-  const undoModeRef = useRef(false)
+  const applyAuthoritativeRowsRef = useRef<(values: unknown[]) => void>(() => {})
+  const undoInFlightRef = useRef(false)
+  const [undoInFlight, setUndoInFlight] = useState(false)
   const [undoDepth, setUndoDepth] = useState(0)
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -466,9 +468,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         const element = change.type === 'delete' ? change.tombstone : change.element
         ownUndoBeforeRef.current.delete(element.id)
       }
-      if (undoModeRef.current) {
-        undoModeRef.current = false
-      } else if (undoChanges.length) {
+      if (undoChanges.length) {
         ownUndoStackRef.current.push({ mutationId: mutation.mutationId, committedAt: mutation.committedAt, changes: undoChanges })
         if (ownUndoStackRef.current.length > 100) ownUndoStackRef.current.splice(0, ownUndoStackRef.current.length - 100)
       }
@@ -879,29 +879,85 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     operationTracker.flush()
   }, [operationTracker, patchSyncRuntime])
 
-  const undoMyLastAction = useCallback(() => {
+  const undoMyLastAction = useCallback(async () => {
     const editor = apiRef.current
     const entry = ownUndoStackRef.current.at(-1)
-    if (!editor || statusRef.current !== 'Live' || !entry) return
+    if (!editor || statusRef.current !== 'Live' || !entry || undoInFlightRef.current) return
+
+    const affectedIds = new Set(entry.changes.map(change => change.id))
+    const hasUnconfirmedLocalWork = writeInFlightRef.current
+      || syncRuntimeRef.current.saveIssue !== 'none'
+      || [...affectedIds].some(id => pendingRef.current.has(id) || durablePendingRef.current.has(id))
+    if (hasUnconfirmedLocalWork) {
+      notify('Wait for the current action to finish saving before undoing it.')
+      return
+    }
+
     const current = editor.getSceneElementsIncludingDeleted()
     const currentById = indexSceneById(current)
     if (!canUndoOwnAction(entry, currentById)) {
       notify('That action cannot be undone safely because a collaborator changed one of its objects.')
       return
     }
-    ownUndoStackRef.current.pop()
-    setUndoDepth(ownUndoStackRef.current.length)
-    undoModeRef.current = true
-    const replacements = new Map<string, SceneElement>()
-    for (const change of entry.changes) {
+
+    const changes = entry.changes.flatMap(change => {
       const element = currentById.get(change.id)
-      if (!element) continue
-      replacements.set(change.id, restoreOwnActionElement(element, change.before))
+      if (!element) return []
+      const restored = restoreOwnActionElement(element, change.before)
+      return [{
+        id: change.id,
+        expectedVersion: change.after.version,
+        expectedVersionNonce: change.after.versionNonce,
+        expectedIsDeleted: change.after.isDeleted,
+        version: restored.version,
+        versionNonce: restored.versionNonce,
+        isDeleted: restored.isDeleted,
+        element: restored,
+      }]
+    })
+    if (changes.length !== entry.changes.length) {
+      notify('That action cannot be undone because one of its objects is no longer available.')
+      return
     }
-    const next = current.map(element => replacements.get(element.id) ?? element)
-    editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.IMMEDIATELY })
-    requestAnimationFrame(captureCurrentScene)
-  }, [captureCurrentScene, notify])
+
+    undoInFlightRef.current = true
+    setUndoInFlight(true)
+    canvasDiagnostics.increment('ownUndoAttempts')
+    try {
+      const functionName = config.tableName === 'canvas_ci_elements' ? 'canvas_ci_apply_own_undo' : 'canvas_apply_own_undo'
+      const { data, error } = await supabase.rpc(functionName, {
+        p_changes: changes,
+        p_updated_by: identityRef.current.deviceId,
+      })
+      if (error) {
+        if (error.code === '40001') {
+          canvasDiagnostics.increment('ownUndoConflicts')
+          notify('That action cannot be undone safely because a collaborator changed one of its objects.')
+        } else {
+          canvasDiagnostics.increment('ownUndoFailures')
+          notify(`Canvas could not undo that action: ${error.message}`)
+        }
+        return
+      }
+      if (!Array.isArray(data) || data.length !== changes.length) {
+        canvasDiagnostics.increment('ownUndoFailures')
+        notify('Canvas could not confirm the undo transaction.')
+        return
+      }
+
+      const latest = ownUndoStackRef.current.at(-1)
+      if (latest?.mutationId === entry.mutationId) ownUndoStackRef.current.pop()
+      setUndoDepth(ownUndoStackRef.current.length)
+      applyAuthoritativeRowsRef.current(data)
+      canvasDiagnostics.increment('ownUndoSuccesses')
+    } catch (error) {
+      canvasDiagnostics.increment('ownUndoFailures')
+      notify(`Canvas could not undo that action: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      undoInFlightRef.current = false
+      setUndoInFlight(false)
+    }
+  }, [config.tableName, notify, supabase])
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -1147,6 +1203,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     queueMicrotask(() => { applyingRemote.current = false })
   }, [patchSyncRuntime])
+
+  useEffect(() => {
+    applyAuthoritativeRowsRef.current = values => applyRows(values)
+    return () => { applyAuthoritativeRowsRef.current = () => {} }
+  }, [applyRows])
 
   const loadAuthoritative = useCallback(async (isCurrent: () => boolean = () => true, mode: 'initial' | 'reconcile' = 'initial') => {
     if (!pageActiveRef.current) return
@@ -2242,7 +2303,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         followDeviceId={followDeviceId}
         showRemoteCursors={showRemoteCursors}
         shareCursor={shareCursor}
-        canUndo={undoDepth > 0}
+        canUndo={undoDepth > 0 && !undoInFlight && syncRuntime.queuedChanges === 0 && !syncRuntime.writeInFlight && syncRuntime.saveIssue === 'none'}
         disabled={!api || status !== 'Live'}
         onJump={jumpToCollaborator}
         onFollow={toggleFollowCollaborator}
