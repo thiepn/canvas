@@ -118,6 +118,20 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
 
   if (!api) return null
 
+  const refreshFromApi = () => {
+    requestAnimationFrame(() => {
+      const current = api.getAppState()
+      setSnapshot({
+        elements: [...api.getSceneElements()],
+        scrollX: current.scrollX,
+        scrollY: current.scrollY,
+        zoom: current.zoom.value,
+        width: current.width,
+        height: current.height,
+      })
+    })
+  }
+
   const state = api.getAppState()
   const zoomPercent = Math.round(state.zoom.value * 100)
   const viewport = viewportSceneBounds({
@@ -168,6 +182,7 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
       },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
+    refreshFromApi()
   }
 
   const goToElement = (element: SceneElement, select = true) => {
@@ -216,6 +231,7 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
       },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
+    refreshFromApi()
   }
 
   const activeElements = snapshot.elements.filter(element => element.type !== 'text' || !element.containerId)
@@ -268,6 +284,7 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
       },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
+    refreshFromApi()
   }
 
   return <div className="navigation-overlay">
