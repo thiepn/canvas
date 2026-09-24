@@ -12,7 +12,7 @@ import { canvasDiagnostics } from '../diagnostics/metrics.ts'
 import { CanvasOperationTracker } from './operation-model.ts'
 import { readRevisionPages } from './revision-sync.ts'
 import { SceneVersionIndex, indexSceneById } from './scene-index.ts'
-import { deriveSyncHealth, recoveryMessage, type CanvasConnectionState, type SaveIssue, type SyncHealth } from './sync-health.ts'
+import { deriveSyncHealth, recoveryMessage, saveIssueAfterDurableAttempt, type CanvasConnectionState, type SaveIssue, type SyncHealth } from './sync-health.ts'
 import { enforceAuthoritativeTombstones, isNewerVersion, shouldApplyAuthoritativeChange, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 import {
   CANVAS_PREVIEW_TTL_MS,
@@ -1493,7 +1493,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
         }
         canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
-        patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, saveIssue: 'retrying' })
+        patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'retrying') })
         if (!pageActiveRef.current) return
         if (!navigator.onLine) transition('Offline')
         notify(`Canvas could not save: ${error.message}`)
@@ -1513,13 +1513,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const { data, error: readError } = await supabase.from(config.tableName).select('id,version,version_nonce,is_deleted,element,revision').in('id', ids)
       if (!pageActiveRef.current) return
       if (readError) {
-        patchSyncRuntime({ saveIssue: 'unconfirmed' })
+        patchSyncRuntime({ saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'unconfirmed') })
         notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
         void reconcileAuthoritative()
         return
       }
       applyRows(data ?? [])
-      patchSyncRuntime({ saveIssue: 'none' })
+      patchSyncRuntime({ saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'none') })
     } catch (error) {
       // Supabase normally reports write failures through the returned `error`
       // object, but a transport/runtime failure can reject the request instead.
@@ -1530,7 +1530,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
       }
       canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
-      patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, saveIssue: 'retrying' })
+      patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'retrying') })
       if (pageActiveRef.current) {
         if (!navigator.onLine) transition('Offline')
         const message = error && typeof error === 'object' && 'message' in error
