@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, convertToExcalidrawElements, newElementWith, reconcileElements, restoreElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
-import type { AppState, BinaryFileData, BinaryFiles, ClipboardData, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
+import type { AppState, BinaryFileData, BinaryFiles, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
 import { Icon } from '../components/Icon.tsx'
 import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity, type LocalStorageLike } from '../presence/identity.ts'
@@ -81,6 +81,7 @@ import {
 } from './media-runtime.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
+type CanvasPasteData = { elements?: readonly SceneElement[]; files?: BinaryFiles; text?: string; mixedContent?: unknown[] }
 type ConnectionState = CanvasConnectionState
 type PresencePerson = { deviceId: string; displayName: string; color: string }
 type SyncRow = { id: string; version: number; version_nonce: number; is_deleted: boolean; element: unknown; revision: number }
@@ -2474,7 +2475,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     notify('Drop images or a Canvas/Excalidraw JSON file.')
   }
 
-  const onExcalidrawPaste = useCallback((data: ClipboardData) => {
+  const onExcalidrawPaste = useCallback((data: CanvasPasteData) => {
     if (data.elements?.length || Object.keys(data.files ?? {}).length || data.mixedContent?.length) return false
     const editor = apiRef.current
     const text = data.text?.trim()
