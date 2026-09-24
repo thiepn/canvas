@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSP
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 
-export type CanvasShapeKind = 'rounded-rectangle' | 'triangle' | 'polygon' | 'hexagon' | 'star' | 'speech-bubble' | 'cloud'
+export type CanvasShapeKind = 'rounded-rectangle' | 'triangle' | 'polygon' | 'hexagon' | 'star' | 'speech-bubble' | 'cloud' | 'heart' | 'check' | 'sparkle' | 'pin' | 'flag' | 'bolt'
 export type CanvasShapeStrokeStyle = 'solid' | 'dashed' | 'dotted'
 export type CanvasShapeFillStyle = 'transparent' | 'solid' | 'hachure'
 
@@ -37,7 +37,7 @@ type ShapeSnapshot = {
 }
 
 const SHAPE_KEY = 'canvasShape'
-const SHAPE_KINDS = new Set<CanvasShapeKind>(['rounded-rectangle', 'triangle', 'polygon', 'hexagon', 'star', 'speech-bubble', 'cloud'])
+const SHAPE_KINDS = new Set<CanvasShapeKind>(['rounded-rectangle', 'triangle', 'polygon', 'hexagon', 'star', 'speech-bubble', 'cloud', 'heart', 'check', 'sparkle', 'pin', 'flag', 'bolt'])
 const DEFAULT_STYLE: CanvasShapeStyle = {
   strokeColor: '#1f2937',
   fillColor: '#e7f5ff',
@@ -234,6 +234,17 @@ function ShapeGraphic({ element, data }: { element: SceneElement; data: CanvasSh
     L ${width * .27} ${height * .78} H ${style.cornerRadius}
     Q 0 ${height * .78} 0 ${height * .70}
     V ${style.cornerRadius} Q 0 0 ${style.cornerRadius} 0 Z`
+  const heart = `M ${width * .5} ${height * .88}
+    C ${width * .42} ${height * .78}, ${width * .08} ${height * .57}, ${width * .08} ${height * .30}
+    C ${width * .08} ${height * .08}, ${width * .36} ${height * .02}, ${width * .5} ${height * .22}
+    C ${width * .64} ${height * .02}, ${width * .92} ${height * .08}, ${width * .92} ${height * .30}
+    C ${width * .92} ${height * .57}, ${width * .58} ${height * .78}, ${width * .5} ${height * .88} Z`
+  const pin = `M ${width * .5} ${height * .94}
+    C ${width * .40} ${height * .72}, ${width * .22} ${height * .56}, ${width * .22} ${height * .36}
+    A ${width * .28} ${height * .28} 0 1 1 ${width * .78} ${height * .36}
+    C ${width * .78} ${height * .56}, ${width * .60} ${height * .72}, ${width * .5} ${height * .94} Z`
+
+  const stampFill = { fill: style.strokeColor, stroke: 'none', opacity: style.opacity / 100 }
 
   return <svg className="canvas-shape-svg" viewBox={`0 0 ${width} ${height}`} width={width} height={height} aria-hidden="true">
     {style.fillStyle === 'hachure' && <defs>
@@ -249,6 +260,16 @@ function ShapeGraphic({ element, data }: { element: SceneElement; data: CanvasSh
     {data.kind === 'star' && <polygon points={starPoints(width, height)} {...shared} />}
     {data.kind === 'speech-bubble' && <path d={bubble} {...shared} />}
     {data.kind === 'cloud' && <path d={cloud} {...shared} />}
+    {data.kind === 'heart' && <path d={heart} {...stampFill} />}
+    {data.kind === 'check' && <polyline points={`${width * .14},${height * .53} ${width * .40},${height * .78} ${width * .86},${height * .22}`} fill="none" stroke={style.strokeColor} strokeWidth={Math.max(7, style.strokeWidth * 3.2)} strokeLinecap="round" strokeLinejoin="round" opacity={style.opacity / 100} />}
+    {data.kind === 'sparkle' && <polygon points={`${width * .5},2 ${width * .62},${height * .37} ${width - 2},${height * .5} ${width * .62},${height * .63} ${width * .5},${height - 2} ${width * .38},${height * .63} 2,${height * .5} ${width * .38},${height * .37}`} {...stampFill} />}
+    {data.kind === 'pin' && <path d={pin} {...stampFill} />}
+    {data.kind === 'pin' && <circle cx={width * .5} cy={height * .36} r={Math.min(width, height) * .10} fill="var(--panel,#fff)" opacity=".9" />}
+    {data.kind === 'flag' && <>
+      <rect x={width * .23} y={height * .10} width={Math.max(6, width * .08)} height={height * .80} rx={Math.max(3, width * .03)} {...stampFill} />
+      <path d={`M ${width * .31} ${height * .14} H ${width * .82} L ${width * .68} ${height * .36} L ${width * .82} ${height * .58} H ${width * .31} Z`} {...stampFill} />
+    </>}
+    {data.kind === 'bolt' && <polygon points={`${width * .56},2 ${width * .20},${height * .55} ${width * .46},${height * .55} ${width * .36},${height - 2} ${width * .82},${height * .40} ${width * .57},${height * .40}`} {...stampFill} />}
   </svg>
 }
 
