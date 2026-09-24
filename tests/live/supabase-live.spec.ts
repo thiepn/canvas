@@ -100,17 +100,13 @@ test('two live clients persist and synchronize a real rectangle through Supabase
         return tombstoneRevision
       }).toBeGreaterThan(0)
 
-      // B's gesture foregrounds B. If A misses the fast Realtime tombstone while
-      // backgrounded, returning to A must trigger anti-entropy. Wait for A's
-      // revision cursor to cross the authoritative deletion before asserting
-      // its rendered scene, so this verifies merge correctness rather than timing.
+      // B's gesture foregrounds B. Returning to A must converge the rendered
+      // scene through either the fast Realtime tombstone or focus anti-entropy.
+      // The dedicated anti-entropy test certifies cursor advancement; this test
+      // certifies the actual cross-client user-visible result.
       await pageA.bringToFront()
       await pageA.evaluate(() => window.dispatchEvent(new Event('focus')))
-      await expect.poll(async () => {
-        const snapshot = await pageA.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
-        return Number(snapshot?.gauges.reconciliationCursor ?? 0)
-      }).toBeGreaterThanOrEqual(tombstoneRevision)
-      expect(await exportElement(pageA, elementId)).toBeNull()
+      await expect.poll(async () => Boolean(await exportElement(pageA, elementId))).toBe(false)
     })
 
     await test.step('both clients reload the durable deletion', async () => {
