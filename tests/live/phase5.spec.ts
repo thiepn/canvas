@@ -31,17 +31,6 @@ async function canvasBox(page: Page) {
   return box
 }
 
-async function selectPoints(page: Page, points: Array<[number, number]>) {
-  const box = await canvasBox(page)
-  await page.keyboard.press('v')
-  for (let index = 0; index < points.length; index++) {
-    if (index) await page.keyboard.down('Shift')
-    await page.mouse.click(box.x + points[index][0], box.y + points[index][1])
-    if (index) await page.keyboard.up('Shift')
-  }
-  await expect(page.getByRole('toolbar', { name: 'Selection tools' })).toBeVisible()
-}
-
 async function selectRectangleEdges(page: Page, rectangles: Array<Record<string, unknown>>) {
   const box = await canvasBox(page)
   await page.keyboard.press('v')
