@@ -38,8 +38,22 @@ export function validateImageBlob(blob: Blob): void {
   if (blob.size > CANVAS_ASSET_MAX_BYTES) throw new Error('Images are limited to 12 MB.')
 }
 
-export async function sha256BlobId(blob: Blob): Promise<string> {
+export async function validateImageContent(blob: Blob): Promise<void> {
   validateImageBlob(blob)
+  if (blob.type.toLowerCase() !== 'image/svg+xml') return
+  const svg = await blob.text()
+  if (!/<svg(?:\s|>)/i.test(svg)) throw new Error('SVG import does not contain an SVG root element.')
+  if (/<(?:script|foreignObject|iframe|object|embed)(?:\s|>)/i.test(svg)
+    || /\son[a-z]+\s*=/i.test(svg)
+    || /(?:href|xlink:href)\s*=\s*["']\s*(?:javascript:|https?:|\/\/)/i.test(svg)
+    || /(?:@import|url\(\s*["']?\s*(?:https?:|\/\/|javascript:))/i.test(svg)
+    || /<!DOCTYPE|<!ENTITY/i.test(svg)) {
+    throw new Error('SVG contains active or external content that Canvas does not allow.')
+  }
+}
+
+export async function sha256BlobId(blob: Blob): Promise<string> {
+  await validateImageContent(blob)
   const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
