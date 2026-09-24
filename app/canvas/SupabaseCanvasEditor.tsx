@@ -39,6 +39,17 @@ import {
 } from './drawing-tools.ts'
 import { reorderSelection, type CanvasElementLike } from './selection-tools.ts'
 import { NavigationOverlay, type NavigationOverlayHandle } from './NavigationOverlay.tsx'
+import { CanvasBackdrop, type CanvasBackdropHandle } from './CanvasBackdrop.tsx'
+import { VisualControls } from './VisualControls.tsx'
+import {
+  loadVisualProfile,
+  performHaptic,
+  performTone,
+  resolveCanvasMotion,
+  saveVisualProfile,
+  visualRootStyle,
+  type CanvasVisualProfile,
+} from './visual-system.ts'
 import { CollaborationOverlay } from './CollaborationOverlay.tsx'
 import { CollaborationPanel } from './CollaborationPanel.tsx'
 import {
@@ -217,7 +228,7 @@ function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   void exportCanvasScene(api, 'json').catch(() => {})
 }
 
-function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape, drawingControls, collaborationPanel, mediaControls, deactivateDrawing }: {
+function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape, drawingControls, collaborationPanel, mediaControls, visualControls, deactivateDrawing }: {
   api: ExcalidrawImperativeAPI | null
   identity: Identity
   people: PresencePerson[]
@@ -234,6 +245,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   drawingControls: ReactNode
   collaborationPanel: ReactNode
   mediaControls: ReactNode
+  visualControls: ReactNode
   deactivateDrawing: () => void
 }) {
   const [menu, setMenu] = useState(false)
@@ -297,6 +309,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
     <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{status === 'Live' && <span className="connection-transport">Live</span>}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
+    {visualControls}
     {mediaControls}
     {drawingControls}
     <button ref={shapeTriggerRef} type="button" className={`icon-button shape-library-button${shapeMenu ? ' is-active' : ''}`} aria-label="Shape library" aria-expanded={shapeMenu} title="Shape library" disabled={!api || status !== 'Live'} onClick={() => setShapeMenu(value => !value)}><Icon name="rectangle" /></button>
@@ -342,11 +355,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const identityRef = useRef(identity)
   const [theme, setTheme] = useState(() => loadTheme(storage))
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
+  const [systemReducedMotion, setSystemReducedMotion] = useState(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [visualProfile, setVisualProfile] = useState<CanvasVisualProfile>(() => loadVisualProfile(storage))
+  const visualProfileRef = useRef(visualProfile)
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null)
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const richTextLayerRef = useRef<RichTextLayerHandle | null>(null)
   const shapeLayerRef = useRef<CanvasShapeLayerHandle | null>(null)
   const navigationRef = useRef<NavigationOverlayHandle | null>(null)
+  const backdropRef = useRef<CanvasBackdropHandle | null>(null)
   const [richTextMode, setRichTextMode] = useState(false)
   const [drawingMode, setDrawingMode] = useState<DrawingMode | null>(null)
   const drawingModeRef = useRef<DrawingMode | null>(null)
@@ -527,6 +544,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const assetBucket = useMemo(() => assetBucketForTable(config.tableName), [config.tableName])
 
   const resolvedTheme = theme === 'system' ? systemDark ? 'dark' : 'light' : theme
+  const resolvedMotion = resolveCanvasMotion(visualProfile.motion, systemReducedMotion)
+  const backdropProfile = useMemo<CanvasVisualProfile>(() => ({
+    ...visualProfile,
+    gridPattern: gridModeEnabled && visualProfile.gridPattern !== 'squares' ? visualProfile.gridPattern : 'none',
+  }), [gridModeEnabled, visualProfile])
   const syncHealth = useMemo(() => deriveSyncHealth({ connection: status, ...syncRuntime }), [status, syncRuntime])
   const recoveryNotice = recoveryMessage(syncHealth)
 
@@ -1259,10 +1281,22 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       clearRemotePreviews()
     }
   }, [captureCurrentScene, clearRemotePreviews, transition])
-  useEffect(() => { document.documentElement.dataset.theme = resolvedTheme }, [resolvedTheme])
+  useEffect(() => {
+    visualProfileRef.current = visualProfile
+    document.documentElement.dataset.theme = resolvedTheme
+    document.documentElement.dataset.canvasMotion = resolvedMotion
+    document.documentElement.dataset.canvasAccent = visualProfile.accent
+    document.documentElement.dataset.canvasPaper = visualProfile.paper
+  }, [resolvedMotion, resolvedTheme, visualProfile])
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)')
     const update = () => setSystemDark(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  useEffect(() => {
+    const media = matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => setSystemReducedMotion(media.matches)
     media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
   }, [])
