@@ -11,7 +11,7 @@ Image bytes are SHA-256 content-addressed and stored under `sha256/<digest>` in 
 - maximum image size: 12 MB
 - MIME allowlist: PNG, JPEG, WebP, GIF, SVG
 - production uploads are immutable; no anonymous overwrite/delete
-- CI can delete exact fixture objects
+- CI has hash-scoped read/delete access only for deterministic fixture cleanup
 - downloaded bytes are re-hashed before Excalidraw receives them
 
 Excalidraw image elements stay local in `pending` state while the binary uploads. Only `saved` image versions enter the durable Postgres queue.
