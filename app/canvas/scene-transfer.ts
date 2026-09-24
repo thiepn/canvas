@@ -1,6 +1,10 @@
 import type { BinaryFiles } from '@excalidraw/excalidraw/types'
 import { referencedFiles, type ImageElementLike } from './media-assets.ts'
 
+export const CANVAS_IMPORT_MAX_BYTES = 80 * 1024 * 1024
+export const CANVAS_IMPORT_MAX_ELEMENTS = 20_000
+export const CANVAS_IMPORT_MAX_FILES = 500
+
 export type CanvasBackupV3 = {
   type: 'canvas-backup'
   version: 3
@@ -46,11 +50,13 @@ export function createCanvasClipboard(elements: readonly ImageElementLike[], fil
 
 function objectFiles(value: unknown): BinaryFiles {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return value as BinaryFiles
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > CANVAS_IMPORT_MAX_FILES) throw new Error(`Canvas import contains more than ${CANVAS_IMPORT_MAX_FILES} files.`)
+  return Object.fromEntries(entries) as BinaryFiles
 }
 
 export function parseCanvasImport(text: string): ImportedCanvasData {
-  if (text.length > 80 * 1024 * 1024) throw new Error('Canvas import is too large.')
+  if (new TextEncoder().encode(text).length > CANVAS_IMPORT_MAX_BYTES) throw new Error('Canvas import is too large.')
   let value: unknown
   try {
     value = JSON.parse(text)
@@ -60,6 +66,7 @@ export function parseCanvasImport(text: string): ImportedCanvasData {
   if (!value || typeof value !== 'object') throw new Error('Canvas import must be a JSON object.')
   const raw = value as Record<string, unknown>
   if (!Array.isArray(raw.elements)) throw new Error('Canvas import does not contain an elements array.')
+  if (raw.elements.length > CANVAS_IMPORT_MAX_ELEMENTS) throw new Error(`Canvas import contains more than ${CANVAS_IMPORT_MAX_ELEMENTS} elements.`)
 
   if (raw.type === 'canvas-backup') {
     const version = Number(raw.version)
