@@ -246,7 +246,6 @@ export function distributeSelection<T extends CanvasElementLike>(
   if (units.length < 3) return [...elements]
   const selection = commonBounds(selected)!
   const start = axis === 'x' ? 'minX' : 'minY'
-  const end = axis === 'x' ? 'maxX' : 'maxY'
   const mid = axis === 'x' ? 'midX' : 'midY'
   const extent = axis === 'x' ? 'width' : 'height'
   units.sort((a, b) => a.box[mid] - b.box[mid])
