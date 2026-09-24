@@ -286,7 +286,25 @@ test('database accepts saved content-addressed images and rejects malformed medi
   })
   expect(videoError).toBeTruthy()
 
-  const { data, error: readError } = await supabase.from(TABLE).select('id').in('id', [validId, pendingId, videoId])
+  const unsafeLinkId = `unsafe-link-${Date.now()}`
+  const { error: unsafeLinkError } = await supabase.from(TABLE).insert({
+    id: unsafeLinkId,
+    version: 1,
+    version_nonce: 101,
+    is_deleted: false,
+    updated_by: 'production-e2e',
+    element: {
+      id: unsafeLinkId,
+      type: 'rectangle',
+      version: 1,
+      versionNonce: 101,
+      isDeleted: false,
+      link: 'javascript:alert(1)',
+    },
+  })
+  expect(unsafeLinkError).toBeTruthy()
+
+  const { data, error: readError } = await supabase.from(TABLE).select('id').in('id', [validId, pendingId, videoId, unsafeLinkId])
   expect(readError).toBeNull()
   expect(data?.map(row => row.id)).toEqual([validId])
 })
