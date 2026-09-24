@@ -28,7 +28,7 @@ test('spatial bounds include rotation-aware extents', () => {
 })
 
 test('rich text HTML becomes searchable plain text', () => {
-  assert.equal(richHtmlToPlainText('<p>Hello <strong>Canvas</strong></p><p>Second&nbsp;line</p>'), 'Hello Canvas\n Second line')
+  assert.equal(richHtmlToPlainText('<p>Hello <strong>Canvas</strong></p><p>Second&nbsp;line</p>'), 'Hello Canvas\nSecond line')
 })
 
 test('search covers native text, rich text and named frames', () => {
