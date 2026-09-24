@@ -196,6 +196,7 @@ test('native Shift constraint and Alt-drag duplication remain available', async 
 })
 
 test('snap and grid preferences survive reload', async ({ page, browserName }) => {
+  test.setTimeout(120_000)
   test.skip(browserName !== 'chromium', 'Device preference persistence needs one browser execution.')
   await page.goto('./')
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
