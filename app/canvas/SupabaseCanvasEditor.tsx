@@ -1515,7 +1515,6 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           currentItemStrokeStyle: 'solid',
           currentItemRoughness: 0,
           currentItemOpacity: drawingMode === 'pen' ? drawingSettings.penOpacity : 32,
-          currentItemStrokeVariability: drawingMode === 'pen' && drawingSettings.pressure ? 'variable' : 'constant',
           penMode: drawingSettings.stylusMode,
           penDetected: drawingSettings.stylusMode || current.penDetected,
         },

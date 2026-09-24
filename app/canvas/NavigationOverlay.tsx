@@ -137,7 +137,7 @@ export const NavigationOverlay = forwardRef<NavigationOverlayHandle, Props>(func
     })
   }
 
-  const fitAll = () => navigateTo(api.getSceneElements(), true)
+  const fitAll = () => navigateTo([...api.getSceneElements()], true)
 
   const fitSelection = () => {
     const selectedIds = api.getAppState().selectedElementIds
