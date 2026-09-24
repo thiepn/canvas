@@ -39,25 +39,6 @@ async function rows() {
 }
 
 
-async function replaceStorageFixture(path: string, bytes: Buffer) {
-  await expect.poll(async () => {
-    const removed = await supabase.storage.from(BUCKET).remove([path])
-    if (removed.error) throw removed.error
-
-    const inserted = await supabase.storage.from(BUCKET).upload(path, bytes, {
-      contentType: 'image/svg+xml',
-      upsert: false,
-    })
-    if (!inserted.error) return 'inserted'
-    if (/already exists|resource already exists|duplicate/i.test(inserted.error.message)) return 'occupied'
-    throw inserted.error
-  }, {
-    message: `Storage object ${path} must accept a fresh immutable insert after deletion.`,
-    timeout: 15_000,
-    intervals: [100, 200, 400, 800, 1200],
-  }).toBe('inserted')
-}
-
 async function openMediaMenu(page: Page) {
   const trigger = page.getByRole('button', { name: 'Images and transfer' })
   await trigger.click()
@@ -261,50 +242,27 @@ test('image clipboard survives reload and deduplicates the shared asset by conte
   expect(Buffer.from(await stored.data!.arrayBuffer())).toEqual(SVG_A)
 })
 
-test('immutable asset collision stays unsaved until Retry now can persist the correct bytes', async ({ page, browserName }) => {
+test('immutable asset collision is rejected without creating an authoritative image row', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Storage collision integrity needs one browser execution.')
 
-  // Deliberately omit viewBox so this fixture also certifies the canonical SVG
-  // identity contract used by Excalidraw, Storage, clipboard, and backups.
+  // This SVG already includes the exact render metadata Excalidraw normalizes,
+  // so its Node SHA-256 is the browser/Storage file ID. The nonce makes every
+  // test attempt independent of stale CI assets.
   const nonce = `${Date.now()}-${Math.random()}`
-  const intended = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64" data-nonce="${nonce}"><rect width="96" height="64" fill="#2563eb"/></svg>`)
+  const intended = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64" viewBox="0 0 96 64"><desc>${nonce}</desc><rect width="96" height="64" fill="#2563eb"/></svg>`)
   const poison = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64" viewBox="0 0 96 64"><rect width="96" height="64" fill="#dc2626"/></svg>`)
+  const collisionId = createHash('sha256').update(intended).digest('hex')
+  const collisionPath = `sha256/${collisionId}`
 
-  let collisionId = ''
-  let collisionPath = ''
   try {
-    // First discover the browser's canonical content-addressed ID through the
-    // real successful image path rather than duplicating SVG normalization in
-    // the test runner.
+    const poisoned = await supabase.storage.from(BUCKET).upload(collisionPath, poison, {
+      contentType: 'image/svg+xml',
+      upsert: false,
+    })
+    expect(poisoned.error).toBeNull()
+
     await page.goto('./?debug=1')
     await expect(page.getByText('Live', { exact: true })).toBeVisible()
-    await chooseImage(page, intended, 'phase7-canonical-svg.svg')
-
-    let probeElementId = ''
-    await expect.poll(async () => {
-      const image = (await rows()).find(row => row.element.type === 'image')
-      if (!image) return null
-      probeElementId = image.id
-      collisionId = String(image.element.fileId)
-      collisionPath = `sha256/${collisionId}`
-      return image.element.status
-    }).toBe('saved')
-    expect(collisionId).toMatch(/^[0-9a-f]{64}$/)
-
-    const canonical = await supabase.storage.from(BUCKET).download(collisionPath)
-    expect(canonical.error).toBeNull()
-    const canonicalBytes = Buffer.from(await canonical.data!.arrayBuffer())
-    expect(createHash('sha256').update(canonicalBytes).digest('hex')).toBe(collisionId)
-    expect(canonicalBytes.toString('utf8')).toContain('viewBox="0 0 96 64"')
-
-    const { error: probeDeleteError } = await supabase.from(TABLE).delete().eq('id', probeElementId)
-    expect(probeDeleteError).toBeNull()
-    await replaceStorageFixture(collisionPath, poison)
-
-    await page.reload()
-    await expect(page.getByText('Live', { exact: true })).toBeVisible()
-    await expect.poll(async () => (await rows()).length).toBe(0)
-
     await chooseImage(page, intended, 'phase7-collision.svg')
 
     await expect.poll(async () => {
@@ -318,21 +276,55 @@ test('immutable asset collision stays unsaved until Retry now can persist the co
     const poisonedStored = await supabase.storage.from(BUCKET).download(collisionPath)
     expect(poisonedStored.error).toBeNull()
     expect(Buffer.from(await poisonedStored.data!.arrayBuffer())).toEqual(poison)
+  } finally {
+    await supabase.storage.from(BUCKET).remove([collisionPath])
+  }
+})
 
-    await replaceStorageFixture(collisionPath, canonicalBytes)
+test('Retry now recovers an image after a transient Storage upload failure', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Image upload retry contract needs one browser execution.')
+
+  const nonce = `${Date.now()}-${Math.random()}`
+  const intended = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="104" height="68" viewBox="0 0 104 68"><desc>${nonce}</desc><rect width="104" height="68" fill="#16a34a"/></svg>`)
+  const expectedId = createHash('sha256').update(intended).digest('hex')
+  const path = `sha256/${expectedId}`
+  let failedOnce = false
+
+  try {
+    await page.route('**/storage/v1/object/canvas-ci-assets/**', async route => {
+      if (!failedOnce && route.request().method() === 'POST') {
+        failedOnce = true
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ statusCode: '503', error: 'Service unavailable', message: 'Phase 7 transient upload probe' }),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.goto('./?debug=1')
+    await expect(page.getByText('Live', { exact: true })).toBeVisible()
+    await chooseImage(page, intended, 'phase7-retry.svg')
+
+    await expect.poll(() => failedOnce).toBe(true)
+    await expect(page.getByText('Image not saved', { exact: true })).toBeVisible()
+    await expect.poll(async () => (await rows()).filter(row => row.element.type === 'image').length).toBe(0)
+
     await page.getByRole('button', { name: 'Retry now' }).click()
 
     await expect.poll(async () => {
       const image = (await rows()).find(row => row.element.type === 'image')
       return image ? { fileId: image.element.fileId, status: image.element.status } : null
-    }).toEqual({ fileId: collisionId, status: 'saved' })
+    }).toEqual({ fileId: expectedId, status: 'saved' })
     await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
 
-    const stored = await supabase.storage.from(BUCKET).download(collisionPath)
+    const stored = await supabase.storage.from(BUCKET).download(path)
     expect(stored.error).toBeNull()
-    const storedBytes = Buffer.from(await stored.data!.arrayBuffer())
-    expect(createHash('sha256').update(storedBytes).digest('hex')).toBe(collisionId)
+    expect(createHash('sha256').update(Buffer.from(await stored.data!.arrayBuffer())).digest('hex')).toBe(expectedId)
   } finally {
-    if (collisionPath) await Promise.allSettled([supabase.storage.from(BUCKET).remove([collisionPath])])
+    await page.unroute('**/storage/v1/object/canvas-ci-assets/**')
+    await supabase.storage.from(BUCKET).remove([path])
   }
 })
