@@ -1,6 +1,6 @@
 # Testing Canvas
 
-Canvas now has one active application architecture: Excalidraw in the browser, Supabase Postgres as authority, Supabase Realtime for collaboration, and GitHub Pages for hosting. Phase 8 removed the historical tldraw/Cloudflare Worker regression harness, so every retained browser release gate exercises the architecture users receive.
+Canvas now has one active application architecture: Excalidraw in the browser, Supabase Postgres as element authority, Supabase Realtime for collaboration, Supabase Storage for immutable content-addressed images, and GitHub Pages for hosting. Phase 8 removed the historical tldraw/Cloudflare Worker regression harness, so every retained browser release gate exercises the architecture users receive.
 
 ## Required local checks
 
@@ -26,7 +26,7 @@ npm run test:production
 
 `npm test` covers browser-independent production behavior, including identity/configuration, logical operations, preview protocol validation, paginated reconciliation, scene indexing, version ordering, sync-health state and wheel behavior.
 
-Passing unit tests are necessary but do not prove realtime browser behavior.
+Phase 7 unit coverage additionally validates content-addressed asset IDs, raster signatures, static-only SVG rules, portable scene parsing and PDF generation. Passing unit tests are necessary but do not prove realtime browser behavior.
 
 ## Live Supabase matrix
 
@@ -43,7 +43,10 @@ The matrix covers real Excalidraw interaction and Supabase behavior, including:
 - page lifecycle recovery;
 - 320px mobile shell containment;
 - explicit save health, offline/reconnect states and manual failed-write retry;
-- vector-only database enforcement and wheel zoom behavior.
+- image Storage upload/download, replacement, reload hydration and content-hash verification;
+- cross-session image clipboard deduplication and portable Canvas/Excalidraw imports;
+- JSON/PNG/SVG/PDF exports and standalone URL-card paste;
+- saved-image database enforcement, unsupported-media rejection and wheel zoom behavior.
 
 The quality workflow and manual performance workflow share one non-cancelling concurrency group so their setup/cleanup cannot corrupt each other's Supabase fixtures.
 
@@ -57,7 +60,7 @@ The manual `Canvas performance evidence` workflow measures the same production e
 
 ## Supabase schema and recovery
 
-Migration SQL is tracked in `supabase/migrations/`. Backend verification after schema changes should confirm RLS, Realtime publication, vector-only validation, stale-write rejection, no anonymous physical DELETE on production, and private owner-only recovery.
+Migration SQL is tracked in `supabase/migrations/`. Backend verification after schema changes should confirm RLS, Realtime publication, element/image validation, Storage bucket limits/policies, stale-write rejection, no anonymous physical DELETE on production elements, immutable production image assets, and private owner-only recovery.
 
 Do not expose privileged recovery as a browser endpoint merely to automate it.
 
