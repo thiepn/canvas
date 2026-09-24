@@ -42,6 +42,7 @@ import { NavigationOverlay, type NavigationOverlayHandle } from './NavigationOve
 import { CanvasBackdrop, type CanvasBackdropHandle } from './CanvasBackdrop.tsx'
 import { VisualControls } from './VisualControls.tsx'
 import {
+  accentColor,
   loadVisualProfile,
   performHaptic,
   performTone,
@@ -326,6 +327,15 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
         <button type="button" onClick={() => addCustomShape('star')}><span className="shape-preview shape-preview--star">★</span>Star</button>
         <button type="button" onClick={() => addCustomShape('speech-bubble')}><span className="shape-preview shape-preview--bubble" />Speech</button>
         <button type="button" onClick={() => addCustomShape('cloud')}><span className="shape-preview shape-preview--cloud">☁</span>Cloud</button>
+      </div>
+      <div className="shape-library-heading shape-library-stamps-heading">STAMPS</div>
+      <div className="shape-library-grid shape-library-stamp-grid">
+        <button type="button" onClick={() => addCustomShape('heart')}><span className="stamp-preview">♥</span>Heart</button>
+        <button type="button" onClick={() => addCustomShape('check')}><span className="stamp-preview">✓</span>Check</button>
+        <button type="button" onClick={() => addCustomShape('sparkle')}><span className="stamp-preview">✦</span>Sparkle</button>
+        <button type="button" onClick={() => addCustomShape('pin')}><span className="stamp-preview">●</span>Pin</button>
+        <button type="button" onClick={() => addCustomShape('flag')}><span className="stamp-preview">⚑</span>Flag</button>
+        <button type="button" onClick={() => addCustomShape('bolt')}><span className="stamp-preview">ϟ</span>Bolt</button>
       </div>
     </div>}
     <button type="button" className={`icon-button rich-text-button${richTextMode ? ' is-active' : ''}`} aria-label="Rich text" aria-pressed={richTextMode} title="Rich text (T)" disabled={!api || status !== 'Live'} onClick={toggleRichText}><Icon name="text" /></button>
@@ -1926,7 +1936,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     document.addEventListener('keyup', keyup, true)
     return () => document.removeEventListener('keyup', keyup, true)
-  }, [captureCurrentScene, refreshSelectionUi])
+  }, [captureCurrentScene, refreshSelectionUi, resolvedTheme])
 
   const onChange = useCallback((elements: readonly SceneElement[], appState: AppState, files: BinaryFiles) => {
     observeLocalFiles(files, elements)
@@ -2120,11 +2130,19 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (!editor || statusRef.current !== 'Live') return
     const appState = editor.getAppState()
     const zoom = Math.max(0.01, appState.zoom.value)
-    const width = kind === 'star' ? 140 : 180
-    const height = kind === 'star' ? 140 : kind === 'cloud' ? 115 : 120
+    const stamp = ['heart', 'check', 'sparkle', 'pin', 'flag', 'bolt'].includes(kind)
+    const width = stamp ? 108 : kind === 'star' ? 140 : 180
+    const height = stamp ? 108 : kind === 'star' ? 140 : kind === 'cloud' ? 115 : 120
     const centerX = appState.width / (2 * zoom) - appState.scrollX
     const centerY = appState.height / (2 * zoom) - appState.scrollY
-    const shape = createCanvasShapeElement({ kind, x: centerX - width / 2, y: centerY - height / 2, width, height })
+    const shape = createCanvasShapeElement({
+      kind,
+      x: centerX - width / 2,
+      y: centerY - height / 2,
+      width,
+      height,
+      ...(stamp ? { style: { strokeColor: accentColor(visualProfileRef.current.accent, resolvedTheme), fillStyle: 'transparent' } } : {}),
+    })
     editor.updateScene({
       elements: [...editor.getSceneElementsIncludingDeleted(), shape],
       appState: { selectedElementIds: { [shape.id]: true }, selectedGroupIds: {}, editingGroupId: null },
