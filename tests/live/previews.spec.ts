@@ -168,7 +168,14 @@ test('an abandoned remote preview expires back to the authoritative element with
     })
     expect(result).toBe('ok')
 
-    await expect.poll(async () => Number((await exportElement(pageB, id))?.x), { timeout: 1200 }).toBe(previewX)
+    await expect.poll(
+      async () => Number((await diagnostics(pageB)).counters.previewBroadcastsReceived ?? 0),
+      { timeout: 5_000 },
+    ).toBeGreaterThan(0)
+    await expect.poll(
+      async () => Number((await exportElement(pageB, id))?.x),
+      { timeout: 750 },
+    ).toBe(previewX)
     const beforeExpiryRows = await rows()
     expect(beforeExpiryRows).toHaveLength(1)
     expect(Number((beforeExpiryRows[0].element as Record<string, unknown>).x)).toBe(authoritativeX)
