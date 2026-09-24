@@ -32,12 +32,21 @@ export async function uploadCanvasAsset(
   const blob = await dataUrlToBlob(file.dataURL)
   const hash = await sha256BlobId(blob)
   if (hash !== file.id) throw new Error('Image content does not match its Canvas file ID.')
-  const { error } = await supabase.storage.from(bucket).upload(assetPathForFileId(file.id), blob, {
+  const path = assetPathForFileId(file.id)
+  const { error } = await supabase.storage.from(bucket).upload(path, blob, {
     contentType: file.mimeType,
     cacheControl: '31536000',
     upsert: false,
   })
-  if (error && !isDuplicateStorageError(error)) throw error
+  if (!error) return
+  if (!isDuplicateStorageError(error)) throw error
+
+  // Immutable deduplication is safe only when the existing object really is
+  // the same content. Never trust a preoccupied hash-shaped path by name alone.
+  const { data: existing, error: downloadError } = await supabase.storage.from(bucket).download(path)
+  if (downloadError) throw downloadError
+  const existingHash = await sha256BlobId(existing)
+  if (existingHash !== file.id) throw new Error('Canvas image hash path is occupied by different content.')
 }
 
 export async function downloadCanvasAsset(
