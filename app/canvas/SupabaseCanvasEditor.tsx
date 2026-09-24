@@ -228,7 +228,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const richTextLayerRef = useRef<RichTextLayerHandle | null>(null)
   const [richTextMode, setRichTextMode] = useState(false)
-  const [selectionSnapshot, setSelectionSnapshot] = useState<CanvasSelectionSnapshot>({ elements: [], selectedGroupIds: {}, editingGroupId: null, objectsSnapModeEnabled: true })
+  const [selectionSnapshot, setSelectionSnapshot] = useState<CanvasSelectionSnapshot>({ elements: [], selectedGroupIds: {}, editingGroupId: null, objectsSnapModeEnabled: true, gridModeEnabled: false })
   const selectionSignatureRef = useRef('')
   const [hasLockedElements, setHasLockedElements] = useState(false)
   const [status, setStatus] = useState<ConnectionState>('Connecting')
@@ -1085,10 +1085,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       Object.entries(selectedGroupIds).filter(([, value]) => value).map(([id]) => id).sort().join(','),
       appState.editingGroupId ?? '',
       appState.objectsSnapModeEnabled ? '1' : '0',
+      appState.gridModeEnabled ? '1' : '0',
     ].join('|')
     if (signature !== selectionSignatureRef.current) {
       selectionSignatureRef.current = signature
-      setSelectionSnapshot({ elements: [...selected], selectedGroupIds, editingGroupId: appState.editingGroupId, objectsSnapModeEnabled: appState.objectsSnapModeEnabled })
+      setSelectionSnapshot({ elements: [...selected], selectedGroupIds, editingGroupId: appState.editingGroupId, objectsSnapModeEnabled: appState.objectsSnapModeEnabled, gridModeEnabled: appState.gridModeEnabled })
     }
     const locked = elements.some(element => !element.isDeleted && element.locked)
     setHasLockedElements(previous => previous === locked ? previous : locked)

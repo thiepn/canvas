@@ -506,3 +506,13 @@ export function pasteVisualStyle<T extends CanvasElementLike>(
     return bump(element, patch)
   })
 }
+
+
+export function selectFrameContents<T extends CanvasElementLike>(
+  elements: readonly T[],
+  frameId: string,
+): Record<string, true> {
+  return Object.fromEntries(
+    elements.filter(element => !element.isDeleted && element.frameId === frameId && !element.locked).map(element => [element.id, true]),
+  )
+}

@@ -33,6 +33,7 @@ export type CanvasSelectionSnapshot = {
   selectedGroupIds: Record<string, boolean>
   editingGroupId: string | null
   objectsSnapModeEnabled: boolean
+  gridModeEnabled: boolean
 }
 
 type Props = {
@@ -79,6 +80,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
   const [width, setWidth] = useState('')
   const [height, setHeight] = useState('')
   const [rotation, setRotation] = useState('0')
+  const [aspectLocked, setAspectLocked] = useState(true)
 
   const selected = selection.elements
   const bounds = useMemo(() => commonBounds(selected as unknown as CanvasElementLike[]), [selected])
@@ -181,13 +183,43 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
   }))
 
   const commitPosition = () => apply(setSelectionPosition(currentElements(), ids(), numeric(x), numeric(y)))
-  const commitSize = () => apply(resizeSelection(currentElements(), ids(), numeric(width), numeric(height)))
+  const commitWidth = () => {
+    const nextWidth = numeric(width)
+    if (nextWidth === null) return
+    const nextHeight = aspectLocked && bounds && bounds.width > 0 ? nextWidth * bounds.height / bounds.width : numeric(height)
+    apply(resizeSelection(currentElements(), ids(), nextWidth, nextHeight))
+  }
+  const commitHeight = () => {
+    const nextHeight = numeric(height)
+    if (nextHeight === null) return
+    const nextWidth = aspectLocked && bounds && bounds.height > 0 ? nextHeight * bounds.width / bounds.height : numeric(width)
+    apply(resizeSelection(currentElements(), ids(), nextWidth, nextHeight))
+  }
   const commitRotation = () => apply(rotateSelection(currentElements(), ids(), numeric(rotation) ?? 0, true))
 
   const toggleSnap = () => api.updateScene({
     appState: { objectsSnapModeEnabled: !selection.objectsSnapModeEnabled },
     captureUpdate: CaptureUpdateAction.NEVER,
   })
+  const toggleGrid = () => api.updateScene({
+    appState: { gridModeEnabled: !selection.gridModeEnabled },
+    captureUpdate: CaptureUpdateAction.NEVER,
+  })
+  const selectFrameContents = () => {
+    if (selected.length !== 1 || selected[0].type !== 'frame') return
+    const frameId = selected[0].id
+    const selectedElementIds = Object.fromEntries(
+      api.getSceneElements().filter(element => element.frameId === frameId).map(element => [element.id, true]),
+    )
+    if (!Object.keys(selectedElementIds).length) {
+      onNotice('This frame is empty.')
+      return
+    }
+    api.updateScene({
+      appState: { selectedElementIds, selectedGroupIds: {}, editingGroupId: null },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    })
+  }
 
   return <div className="selection-toolbar" role="toolbar" aria-label="Selection tools">
     <div className="selection-toolbar-primary">
@@ -230,18 +262,22 @@ export function SelectionToolbar({ api, selection, disabled, onNotice }: Props) 
         <div className="selection-popover-panel transform-panel">
           <label>X <input aria-label="Selection X" inputMode="decimal" value={x} onChange={event => setX(event.target.value)} onBlur={commitPosition} onKeyDown={event => { if (event.key === 'Enter') commitPosition() }} /></label>
           <label>Y <input aria-label="Selection Y" inputMode="decimal" value={y} onChange={event => setY(event.target.value)} onBlur={commitPosition} onKeyDown={event => { if (event.key === 'Enter') commitPosition() }} /></label>
-          <label>W <input aria-label="Selection width" inputMode="decimal" value={width} onChange={event => setWidth(event.target.value)} onBlur={commitSize} onKeyDown={event => { if (event.key === 'Enter') commitSize() }} /></label>
-          <label>H <input aria-label="Selection height" inputMode="decimal" value={height} onChange={event => setHeight(event.target.value)} onBlur={commitSize} onKeyDown={event => { if (event.key === 'Enter') commitSize() }} /></label>
+          <label>W <input aria-label="Selection width" inputMode="decimal" value={width} onChange={event => setWidth(event.target.value)} onBlur={commitWidth} onKeyDown={event => { if (event.key === 'Enter') commitWidth() }} /></label>
+          <label>H <input aria-label="Selection height" inputMode="decimal" value={height} onChange={event => setHeight(event.target.value)} onBlur={commitHeight} onKeyDown={event => { if (event.key === 'Enter') commitHeight() }} /></label>
+          <button type="button" className={aspectLocked ? 'is-active' : ''} aria-pressed={aspectLocked} onClick={() => setAspectLocked(value => !value)} title="Lock aspect ratio">Ratio</button>
           <label>{selected.length === 1 ? '°' : 'Δ°'} <input aria-label="Selection rotation" inputMode="decimal" value={rotation} onChange={event => setRotation(event.target.value)} onBlur={commitRotation} onKeyDown={event => { if (event.key === 'Enter') commitRotation() }} /></label>
         </div>
       </details>
 
       <button type="button" className={selection.objectsSnapModeEnabled ? 'is-active' : ''} aria-pressed={selection.objectsSnapModeEnabled} onClick={toggleSnap} title="Object snapping and smart guides">Snap</button>
+      <button type="button" className={selection.gridModeEnabled ? 'is-active' : ''} aria-pressed={selection.gridModeEnabled} onClick={toggleGrid} title="Grid and grid snapping">Grid</button>
 
       <details className="selection-popover">
         <summary>More</summary>
         <div className="selection-popover-panel selection-more-panel">
-          <div className="selection-section"><strong>Select same</strong>
+          <div className="selection-section"><strong>Selection</strong>
+            <button type="button" onClick={selectFrameContents} disabled={selected.length !== 1 || selected[0].type !== 'frame'}>Frame contents</button>
+            <strong>Select same</strong>
             <button type="button" onClick={() => selectMatching('type')}>Type</button>
             <button type="button" onClick={() => selectMatching('stroke')}>Stroke color</button>
             <button type="button" onClick={() => selectMatching('fill')}>Fill color</button>
