@@ -389,7 +389,6 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
       opacity: singleArrow.opacity,
       startArrowhead: singleArrow.startArrowhead,
       endArrowhead: singleArrow.endArrowhead,
-      elbowed: Boolean((singleArrow as SceneElement & { elbowed?: boolean }).elbowed),
       label: { text: value, fontSize: 16 },
     }])
     const generatedText = generated.find(element => element.type === 'text')

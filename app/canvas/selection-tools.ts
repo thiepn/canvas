@@ -174,7 +174,7 @@ function selectionUnits<T extends CanvasElementLike>(elements: readonly T[]): T[
 function translateIds<T extends CanvasElementLike>(elements: readonly T[], ids: ReadonlySet<string>, dx: number, dy: number): T[] {
   if (!dx && !dy) return [...elements]
   return elements.map(element => ids.has(element.id) && !element.isDeleted
-    ? bump(element, { x: element.x + dx, y: element.y + dy } as Partial<T>)
+    ? bump(element, { x: element.x + dx, y: element.y + dy } as unknown as Partial<T>)
     : element)
 }
 
@@ -244,7 +244,7 @@ export function toggleLockSelection<T extends CanvasElementLike>(
   return {
     locked,
     elements: elements.map(element => selectedIds.has(element.id) && !element.isDeleted
-      ? bump(element, { locked } as Partial<T>)
+      ? bump(element, { locked } as unknown as Partial<T>)
       : element),
   }
 }
@@ -252,7 +252,7 @@ export function toggleLockSelection<T extends CanvasElementLike>(
 export function unlockAll<T extends CanvasElementLike>(elements: readonly T[]): { elements: T[]; selectedIds: Record<string, true> } {
   const locked = elements.filter(element => !element.isDeleted && element.locked)
   return {
-    elements: elements.map(element => element.locked ? bump(element, { locked: false } as Partial<T>) : element),
+    elements: elements.map(element => element.locked ? bump(element, { locked: false } as unknown as Partial<T>) : element),
     selectedIds: Object.fromEntries(locked.map(element => [element.id, true])),
   }
 }
@@ -280,7 +280,7 @@ export function alignSelection<T extends CanvasElementLike>(
   }
   return elements.map(element => {
     const translation = translations.get(element.id)
-    return translation ? bump(element, { x: element.x + translation.dx, y: element.y + translation.dy } as Partial<T>) : element
+    return translation ? bump(element, { x: element.x + translation.dx, y: element.y + translation.dy } as unknown as Partial<T>) : element
   })
 }
 
@@ -321,7 +321,7 @@ export function distributeSelection<T extends CanvasElementLike>(
 
   return elements.map(element => {
     const translation = translations.get(element.id)
-    return translation ? bump(element, { x: element.x + translation.dx, y: element.y + translation.dy } as Partial<T>) : element
+    return translation ? bump(element, { x: element.x + translation.dx, y: element.y + translation.dy } as unknown as Partial<T>) : element
   })
 }
 
@@ -342,9 +342,9 @@ function reindexMoved<T extends CanvasElementLike>(elements: readonly T[], moved
       const allKeys = generateNKeysBetween(null, null, next.length)
       return next.map((element, itemIndex) => element.index === allKeys[itemIndex]
         ? element
-        : bump(element, { index: allKeys[itemIndex] } as Partial<T>))
+        : bump(element, { index: allKeys[itemIndex] } as unknown as Partial<T>))
     }
-    for (let i = start; i < end; i++) next[i] = bump(next[i], { index: keys[i - start] } as Partial<T>)
+    for (let i = start; i < end; i++) next[i] = bump(next[i], { index: keys[i - start] } as unknown as Partial<T>)
   }
   return next
 }
@@ -479,7 +479,7 @@ export function rotateSelection<T extends CanvasElementLike>(
   if (!selected.length || !Number.isFinite(degrees)) return [...elements]
   if (selected.length === 1 && absoluteForSingle) {
     const target = normalizedAngle(degrees * Math.PI / 180)
-    return elements.map(element => element.id === selected[0].id ? bump(element, { angle: target } as Partial<T>) : element)
+    return elements.map(element => element.id === selected[0].id ? bump(element, { angle: target } as unknown as Partial<T>) : element)
   }
   const bounds = commonBounds(selected)!
   const delta = degrees * Math.PI / 180
@@ -494,13 +494,13 @@ export function rotateSelection<T extends CanvasElementLike>(
       x: rx - element.width / 2,
       y: ry - element.height / 2,
       angle: normalizedAngle(element.angle + delta),
-    } as Partial<T>)
+    } as unknown as Partial<T>)
   })
 }
 
 export function resetRotation<T extends CanvasElementLike>(elements: readonly T[], selectedIds: ReadonlySet<string>): T[] {
   return elements.map(element => selectedIds.has(element.id) && !element.isDeleted && element.angle
-    ? bump(element, { angle: 0 } as Partial<T>)
+    ? bump(element, { angle: 0 } as unknown as Partial<T>)
     : element)
 }
 
@@ -520,7 +520,7 @@ export function flipSelection<T extends CanvasElementLike>(elements: readonly T[
       y: axis === 'y' ? 2 * bounds.midY - cy - element.height / 2 : element.y,
       angle: normalizedAngle(axis === 'x' ? Math.PI - element.angle : -element.angle),
       ...(points ? { points } : {}),
-    } as Partial<T>)
+    } as unknown as Partial<T>)
   })
 }
 
@@ -560,7 +560,7 @@ export function setConnectorRouting<T extends CanvasElementLike>(
     const last = points.at(-1)
     const directPoints = first && last ? [first, last] : points
     if (routing === 'elbow') {
-      return bump(element, { elbowed: true, roundness: null, fixedSegments: null, points: directPoints } as Partial<T>)
+      return bump(element, { elbowed: true, roundness: null, fixedSegments: null, points: directPoints } as unknown as Partial<T>)
     }
     if (routing === 'curved' && first && last) {
       const dx = last[0] - first[0]
@@ -585,14 +585,14 @@ export function setConnectorRouting<T extends CanvasElementLike>(
           ...(element.customData ?? {}),
           canvasConnector: { bend: bendAmount },
         },
-      } as Partial<T>)
+      } as unknown as Partial<T>)
     }
     return bump(element, {
       elbowed: false,
       roundness: null,
       fixedSegments: null,
       points: directPoints,
-    } as Partial<T>)
+    } as unknown as Partial<T>)
   })
 }
 
@@ -625,7 +625,7 @@ export function setConnectorBend<T extends CanvasElementLike>(
         ...(element.customData ?? {}),
         canvasConnector: { bend: amount },
       },
-    } as Partial<T>)
+    } as unknown as Partial<T>)
   })
 }
 
@@ -636,7 +636,7 @@ export function setConnectorArrowheads<T extends CanvasElementLike>(
   endArrowhead: ConnectorArrowhead,
 ): T[] {
   return elements.map(element => selectedIds.has(element.id) && !element.isDeleted && element.type === 'arrow'
-    ? bump(element, { startArrowhead, endArrowhead } as Partial<T>)
+    ? bump(element, { startArrowhead, endArrowhead } as unknown as Partial<T>)
     : element)
 }
 
@@ -644,7 +644,7 @@ function removeBoundConnector<T extends CanvasElementLike>(element: T, connector
   if (!element.boundElements?.some(bound => bound.id === connectorId)) return element
   return bump(element, {
     boundElements: element.boundElements.filter(bound => bound.id !== connectorId),
-  } as Partial<T>)
+  } as unknown as Partial<T>)
 }
 
 export function bindConnectorEndpoint<T extends CanvasElementLike>(
@@ -662,12 +662,12 @@ export function bindConnectorEndpoint<T extends CanvasElementLike>(
     if (previous?.elementId === element.id && element.id !== target.id) return removeBoundConnector(element, connector.id)
     if (element.id === target.id) {
       const boundElements = [...(element.boundElements ?? []).filter(bound => bound.id !== connector.id), { id: connector.id, type: 'arrow' }]
-      return bump(element, { boundElements } as Partial<T>)
+      return bump(element, { boundElements } as unknown as Partial<T>)
     }
     if (element.id === connector.id) {
       return bump(element, (endpoint === 'start'
         ? { startBinding: binding }
-        : { endBinding: binding }) as Partial<T>)
+        : { endBinding: binding }) as unknown as Partial<T>)
     }
     return element
   })
@@ -686,7 +686,7 @@ export function detachConnectorEndpoint<T extends CanvasElementLike>(
     if (element.id !== connector.id) return element
     return bump(element, (endpoint === 'start'
       ? { startBinding: null }
-      : { endBinding: null }) as Partial<T>)
+      : { endBinding: null }) as unknown as Partial<T>)
   })
 }
 
@@ -700,7 +700,7 @@ export function reverseConnector<T extends CanvasElementLike>(
         endArrowhead: element.startArrowhead ?? null,
         startBinding: element.endBinding ?? null,
         endBinding: element.startBinding ?? null,
-      } as Partial<T>)
+      } as unknown as Partial<T>)
     : element)
 }
 
