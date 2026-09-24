@@ -255,7 +255,7 @@ test('connector binding updates reciprocal bound-element records and detach remo
   assert.deepEqual(detached.find(item => item.id === 'left')!.boundElements, [])
 })
 
-test('reverse connector swaps endpoints and bindings without moving geometry', () => {
+test('reverse connector swaps visible direction while preserving physical endpoint bindings', () => {
   const arrow = element('arrow', 10, 10, 100, 30, {
     type: 'arrow',
     startArrowhead: null,
@@ -266,8 +266,8 @@ test('reverse connector swaps endpoints and bindings without moving geometry', (
   const [next] = reverseConnector([arrow], 'arrow')
   assert.equal(next.startArrowhead, 'triangle')
   assert.equal(next.endArrowhead, null)
-  assert.equal(next.startBinding?.elementId, 'b')
-  assert.equal(next.endBinding?.elementId, 'a')
+  assert.equal(next.startBinding?.elementId, 'a')
+  assert.equal(next.endBinding?.elementId, 'b')
   assert.equal(next.x, 10)
   assert.equal(next.y, 10)
 })

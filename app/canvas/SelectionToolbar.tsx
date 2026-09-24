@@ -108,7 +108,10 @@ const ARROWHEAD_OPTIONS: Array<{ value: ConnectorArrowhead; label: string }> = [
   { value: 'arrow', label: 'Arrow' },
   { value: 'triangle', label: 'Triangle' },
   { value: 'circle', label: 'Circle' },
+  { value: 'circle_outline', label: 'Circle outline' },
+  { value: 'triangle_outline', label: 'Triangle outline' },
   { value: 'diamond', label: 'Diamond' },
+  { value: 'diamond_outline', label: 'Diamond outline' },
   { value: 'bar', label: 'Bar' },
 ]
 

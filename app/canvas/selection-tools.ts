@@ -698,8 +698,6 @@ export function reverseConnector<T extends CanvasElementLike>(
     ? bump(element, {
         startArrowhead: element.endArrowhead ?? null,
         endArrowhead: element.startArrowhead ?? null,
-        startBinding: element.endBinding ?? null,
-        endBinding: element.startBinding ?? null,
       } as unknown as Partial<T>)
     : element)
 }
