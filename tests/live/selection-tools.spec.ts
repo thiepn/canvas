@@ -212,7 +212,7 @@ test('snap and grid preferences survive reload', async ({ page, browserName }) =
 
   await page.reload()
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
-  await selectPoints(page, [[385, 210]])
+  await selectPoints(page, [[351, 210]])
   toolbar = page.getByRole('toolbar', { name: 'Selection tools' })
   await expect(toolbar.getByRole('button', { name: 'Snap' })).toHaveAttribute('aria-pressed', 'false')
   await expect(toolbar.getByRole('button', { name: 'Grid' })).toHaveAttribute('aria-pressed', 'true')
