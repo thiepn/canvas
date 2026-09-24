@@ -33,11 +33,15 @@ test('focus anti-entropy repairs a deliberately dropped Postgres change without 
     await dragOnCanvas(pageA, [300, 250], [430, 330])
 
     let id = ''
+    let revision = 0
     await expect.poll(async () => {
-      const { data, error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).select('id,element,is_deleted').eq('is_deleted', false).limit(1))
+      const { data, error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).select('id,element,is_deleted,revision').eq('is_deleted', false).limit(1))
       if (error) throw error
       const row = data?.[0]
-      if (row?.element?.type === 'rectangle' && row.element.width === 130) id = row.id
+      if (row?.element?.type === 'rectangle' && row.element.width === 130) {
+        id = row.id
+        revision = Number(row.revision)
+      }
       return id
     }).not.toBe('')
 
@@ -46,11 +50,22 @@ test('focus anti-entropy repairs a deliberately dropped Postgres change without 
       return snapshot?.counters.realtimeChangesDroppedForDiagnostics ?? 0
     }).toBeGreaterThan(0)
 
-    // Let the Phase 4 preview expire. With the durable event intentionally dropped,
-    // B must no longer have authority for the rectangle until reconciliation runs.
-    await expect.poll(() => exportElement(pageB, id), { timeout: 5000 }).toBeNull()
+    // The dropped durable event must leave B's completed anti-entropy cursor
+    // behind the authoritative row. This proves reconciliation is necessary
+    // without using an interactive export read that can foreground the page.
+    const before = await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
+    expect(Number(before?.gauges.reconciliationCursor ?? 0)).toBeLessThan(revision)
 
+    // Returning to the backgrounded client is the product trigger for focus
+    // reconciliation. Bring it forward first so visibility-gated reconciliation
+    // is deterministic in all browser engines.
+    await pageB.bringToFront()
     await pageB.evaluate(() => window.dispatchEvent(new Event('focus')))
+
+    await expect.poll(async () => {
+      const snapshot = await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__?.snapshot())
+      return Number(snapshot?.gauges.reconciliationCursor ?? 0)
+    }).toBeGreaterThanOrEqual(revision)
     await expect.poll(async () => Boolean(await exportElement(pageB, id))).toBe(true)
     await expect(pageB.getByText('Live', { exact: true })).toBeVisible()
 
