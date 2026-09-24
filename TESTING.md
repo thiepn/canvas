@@ -1,6 +1,6 @@
 # Testing Canvas
 
-Canvas now has one active application architecture: Excalidraw in the browser, Supabase Postgres as element authority, Supabase Realtime for collaboration, Supabase Storage for immutable content-addressed images, and GitHub Pages for hosting. Phase 8 removed the historical tldraw/Cloudflare Worker regression harness, so every retained browser release gate exercises the architecture users receive.
+Canvas has one active application architecture: Excalidraw in the browser, Supabase Postgres as element authority, Supabase Realtime for collaboration, Supabase Storage for immutable content-addressed images, and GitHub Pages for hosting. The historical tldraw/Cloudflare Worker regression harness is retired, so every retained browser release gate exercises the architecture users receive.
 
 ## Required local checks
 
@@ -26,7 +26,9 @@ npm run test:production
 
 `npm test` covers browser-independent production behavior, including identity/configuration, logical operations, preview protocol validation, paginated reconciliation, scene indexing, version ordering, sync-health state and wheel behavior.
 
-Phase 7 unit coverage additionally validates content-addressed asset IDs, raster signatures, static-only SVG rules, portable scene parsing and PDF generation. Passing unit tests are necessary but do not prove realtime browser behavior.
+Phase 7 unit coverage additionally validates content-addressed asset IDs, raster signatures, static-only SVG rules, portable scene parsing and PDF generation.
+
+Phase 8 unit coverage validates visual-profile defaults/persistence, light/dark paper/accent resolution, scene-locked grid math and motion preference resolution. Passing unit tests are necessary but do not prove realtime browser behavior.
 
 ## Live Supabase matrix
 
@@ -46,7 +48,12 @@ The matrix covers real Excalidraw interaction and Supabase behavior, including:
 - image Storage upload/download, replacement, reload hydration and content-hash verification;
 - cross-session image clipboard deduplication and portable Canvas/Excalidraw imports;
 - JSON/PNG/SVG/PDF exports and standalone URL-card paste;
-- saved-image database enforcement, unsupported-media rejection and wheel zoom behavior.
+- saved-image database enforcement, unsupported-media rejection and wheel zoom behavior;
+- Phase 8 device-local visual profile persistence without shared scene writes;
+- light/dark appearance, accents, paper surfaces and grid background controls;
+- scene-locked dot/line grid scaling and native square-grid compatibility;
+- persistent vector stamps as normal shared custom-shape objects;
+- reduced-motion and local delight behavior.
 
 The quality workflow and manual performance workflow share one non-cancelling concurrency group so their setup/cleanup cannot corrupt each other's Supabase fixtures.
 
