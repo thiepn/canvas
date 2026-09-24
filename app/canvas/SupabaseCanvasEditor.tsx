@@ -619,6 +619,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
             : 'Canvas could not store a local crash-recovery snapshot. Shared saving still works.')
         }
       })
+    return recoveryWriteChainRef.current
   }, [config.tableName, notify])
 
   useEffect(() => {
@@ -1578,8 +1579,21 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     writeInFlightRef.current = true
     const elements = Array.from(durablePendingRef.current.values()).filter(isPersistableCanvasElement)
     durablePendingRef.current.clear()
+    for (const element of elements) durableInFlightRef.current.set(element.id, element)
     canvasDiagnostics.gauge('durableQueueElements', 0)
     patchSyncRuntime({ queuedChanges: 0, writeInFlight: true })
+    await persistRecoveryState()
+
+    const requeueAttempt = () => {
+      for (const element of elements) {
+        durableInFlightRef.current.delete(element.id)
+        const queued = durablePendingRef.current.get(element.id)
+        if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
+      }
+      void persistRecoveryState()
+      canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+    }
+
     try {
       const rows = elements.map(element => ({
         id: element.id,
@@ -1595,11 +1609,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         .upsert(rows, { onConflict: 'id' })
         .abortSignal(AbortSignal.timeout(DURABLE_REQUEST_TIMEOUT_MS))
       if (error) {
-        for (const element of elements) {
-          const queued = durablePendingRef.current.get(element.id)
-          if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
-        }
-        canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+        requeueAttempt()
         patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'retrying') })
         if (!pageActiveRef.current) return
         if (!navigator.onLine) transition('Offline')
@@ -1624,23 +1634,22 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         .abortSignal(AbortSignal.timeout(DURABLE_REQUEST_TIMEOUT_MS))
       if (!pageActiveRef.current) return
       if (readError) {
+        // Keep the in-flight journal until anti-entropy confirms whether the
+        // accepted write became authoritative.
+        void persistRecoveryState()
         patchSyncRuntime({ saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'unconfirmed') })
         notify(`Canvas saved, but could not confirm the latest state: ${readError.message}`)
         void reconcileAuthoritative()
         return
       }
       applyRows(data ?? [])
+      for (const element of elements) durableInFlightRef.current.delete(element.id)
+      void persistRecoveryState()
       patchSyncRuntime({ saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'none') })
     } catch (error) {
-      // Supabase normally reports write failures through the returned `error`
-      // object, but a transport/runtime failure can reject the request instead.
-      // Requeue the exact attempted versions so a thrown failure cannot drop a
-      // completed mutation between the durability boundary and retry.
-      for (const element of elements) {
-        const queued = durablePendingRef.current.get(element.id)
-        if (!queued || isNewerVersion(stampOf(element), stampOf(queued))) durablePendingRef.current.set(element.id, element)
-      }
-      canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+      // A transport/runtime failure (including the bounded AbortSignal timeout)
+      // must restore the exact attempted versions into the retry queue.
+      requeueAttempt()
       patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, saveIssue: saveIssueAfterDurableAttempt(assetUploadFailuresRef.current.size, 'retrying') })
       if (pageActiveRef.current) {
         if (!navigator.onLine) transition('Offline')
@@ -1666,7 +1675,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         flushTimer.current = setTimeout(() => { flushTimer.current = null; void flushDurablePending() }, OPERATION_FLUSH_DELAY_MS)
       }
     }
-  }, [applyRows, config.tableName, loadAuthoritative, notify, patchSyncRuntime, reconcileAuthoritative, supabase, transition])
+  }, [applyRows, config.tableName, loadAuthoritative, notify, patchSyncRuntime, persistRecoveryState, reconcileAuthoritative, supabase, transition])
 
   const scheduleFlush = useCallback((delayMs = RECONNECT_FLUSH_DELAY_MS) => {
     if (!pageActiveRef.current || flushTimer.current) return
