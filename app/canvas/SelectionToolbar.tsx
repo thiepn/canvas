@@ -34,6 +34,7 @@ import {
   type VisualStyle,
   type ZOrderAction,
 } from './selection-tools.ts'
+import { CANVAS_FILL_COLORS, CANVAS_STROKE_COLORS } from './visual-system.ts'
 import {
   canvasShapeData,
   isCanvasShapeElement,
@@ -110,8 +111,8 @@ function numeric(value: string): number | null {
   return Number.isFinite(next) ? next : null
 }
 
-const SHAPE_COLORS = ['#1f2937', '#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777'] as const
-const SHAPE_FILLS = ['#ffffff', '#fff3bf', '#ffe8cc', '#d3f9d8', '#c5f6fa', '#dbeafe', '#ede9fe', '#fce7f3', '#e5e7eb'] as const
+const SHAPE_COLORS = CANVAS_STROKE_COLORS
+const SHAPE_FILLS = CANVAS_FILL_COLORS
 const ARROWHEAD_OPTIONS: Array<{ value: ConnectorArrowhead; label: string }> = [
   { value: null, label: 'None' },
   { value: 'arrow', label: 'Arrow' },
