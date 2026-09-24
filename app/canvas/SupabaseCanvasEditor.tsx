@@ -12,6 +12,13 @@ import { canvasDiagnostics } from '../diagnostics/metrics.ts'
 import { CanvasOperationTracker } from './operation-model.ts'
 import { readRevisionPages } from './revision-sync.ts'
 import { SceneVersionIndex, indexSceneById } from './scene-index.ts'
+import {
+  clearRecoveryJournal,
+  readRecoveryJournal,
+  recoveryCandidates,
+  writeRecoveryJournal,
+  type RecoveryElement,
+} from './recovery-journal.ts'
 import { deriveSyncHealth, recoveryMessage, saveIssueAfterDurableAttempt, type CanvasConnectionState, type SaveIssue, type SyncHealth } from './sync-health.ts'
 import { enforceAuthoritativeTombstones, isNewerVersion, shouldApplyAuthoritativeChange, shouldKeepPending, type VersionStamp } from './sync-version.ts'
 import {
@@ -486,6 +493,11 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   // checkpoints) that are allowed to cross the network durability boundary.
   const pendingRef = useRef(new Map<string, SceneElement>())
   const durablePendingRef = useRef(new Map<string, SceneElement>())
+  const durableInFlightRef = useRef(new Map<string, SceneElement>())
+  const recoveryLoadedRef = useRef(false)
+  const recoveryWriteChainRef = useRef<Promise<void>>(Promise.resolve())
+  const recoveryWarningRef = useRef(false)
+  const persistRecoveryStateRef = useRef<() => void>(() => {})
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const checkpointTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const writeInFlightRef = useRef(false)
@@ -546,6 +558,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       }
       canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
       patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, localEditing: false })
+      persistRecoveryStateRef.current()
       durabilityCommitRef.current()
     },
   }), [patchSyncRuntime])
@@ -569,6 +582,49 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
     noticeTimer.current = setTimeout(() => setNotice(''), 6000)
   }, [])
+
+  const persistRecoveryState = useCallback(() => {
+    const tableName = config.tableName
+    const deviceId = identityRef.current.deviceId
+    const byId = new Map<string, SceneElement>()
+    for (const source of [durableInFlightRef.current, durablePendingRef.current]) {
+      for (const element of source.values()) {
+        if (!isPersistableCanvasElement(element)) continue
+        const previous = byId.get(element.id)
+        if (!previous || isNewerVersion(stampOf(element), stampOf(previous))) byId.set(element.id, element)
+      }
+    }
+    const elements = [...byId.values()]
+    recoveryWriteChainRef.current = recoveryWriteChainRef.current
+      .catch(() => {})
+      .then(async () => {
+        if (!elements.length) {
+          await clearRecoveryJournal(tableName, deviceId)
+          canvasDiagnostics.gauge('recoveryJournalElements', 0)
+          return
+        }
+        const result = await writeRecoveryJournal(tableName, deviceId, elements as unknown as RecoveryElement[])
+        if (result.ok) {
+          recoveryWarningRef.current = false
+          canvasDiagnostics.gauge('recoveryJournalElements', result.stored)
+          canvasDiagnostics.gauge('recoveryJournalBytes', result.bytes)
+          canvasDiagnostics.increment('recoveryJournalWrites')
+          return
+        }
+        canvasDiagnostics.increment('recoveryJournalFailures')
+        if (!recoveryWarningRef.current && (result.reason === 'quota' || result.reason === 'invalid')) {
+          recoveryWarningRef.current = true
+          notify(result.reason === 'quota'
+            ? 'Local crash recovery storage is full. Shared saving still works, but avoid closing Canvas until changes show Saved.'
+            : 'Canvas could not store a local crash-recovery snapshot. Shared saving still works.')
+        }
+      })
+  }, [config.tableName, notify])
+
+  useEffect(() => {
+    persistRecoveryStateRef.current = persistRecoveryState
+    return () => { persistRecoveryStateRef.current = () => {} }
+  }, [persistRecoveryState])
 
   const adjustAssetTransfers = useCallback((delta: number) => {
     assetTransferCountRef.current = Math.max(0, assetTransferCountRef.current + delta)
@@ -1096,6 +1152,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
     canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
     patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, localEditing: false })
+    persistRecoveryStateRef.current()
     continuousOperationRef.current = null
     clearCheckpointRef.current()
     operationTracker.flush()
@@ -1259,6 +1316,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const hide = () => {
       clearRemotePreviews()
       captureCurrentScene()
+      persistRecoveryStateRef.current()
       // Navigation may reject an outstanding save. Its recovery callback must
       // not start another fetch in the document that is being torn down.
       pageActiveRef.current = false
