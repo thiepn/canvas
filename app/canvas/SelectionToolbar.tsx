@@ -42,6 +42,14 @@ import {
   type CanvasShapeStrokeStyle,
   type CanvasShapeStyle,
 } from './canvas-shapes.tsx'
+import {
+  assignElementsToFrame,
+  fitFrameToContents,
+  frameContents,
+  renameFrame,
+  setFrameContentsLocked,
+  type SpatialElementLike,
+} from './spatial-navigation.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 
@@ -145,6 +153,7 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
   const [rotation, setRotation] = useState('0')
   const [aspectLocked, setAspectLocked] = useState(true)
   const [connectorLabel, setConnectorLabel] = useState('')
+  const [frameName, setFrameName] = useState('')
 
   const selected = selection.elements
   const bounds = useMemo(() => commonBounds(selected as unknown as CanvasElementLike[]), [selected])
@@ -159,6 +168,10 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
   const connectorTarget = selected.length === 2 && mixedArrow
     ? selected.find(element => element.id !== mixedArrow.id && isBindableShape(element)) ?? null
     : null
+  const singleFrame = selected.length === 1 && selected[0].type === 'frame' ? selected[0] : null
+  const canFrameSelection = selected.length > 0 && selected.every(element => element.type !== 'frame')
+  const frameChildren = singleFrame ? frameContents(api?.getSceneElementsIncludingDeleted() as unknown as SpatialElementLike[] ?? [], singleFrame.id) : []
+  const frameContentsLocked = frameChildren.length > 0 && frameChildren.every(element => element.locked)
   const grouped = Object.values(selection.selectedGroupIds).some(Boolean)
 
   useEffect(() => {
@@ -183,6 +196,10 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     const label = labelId ? api.getSceneElementsIncludingDeleted().find(element => element.id === labelId) : null
     setConnectorLabel(label?.type === 'text' ? label.text : '')
   }, [api, singleArrow])
+
+  useEffect(() => {
+    setFrameName(singleFrame?.name ?? '')
+  }, [singleFrame])
 
   if (!api || !selected.length || singleRichText) return null
 
@@ -293,6 +310,72 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
     opacity: 100,
     roundness: null,
   }))
+
+  const createFrameAroundSelection = () => {
+    const selectedIds = geometryIds()
+    const selectedElements = api.getSceneElementsIncludingDeleted().filter(element => selectedIds.has(element.id) && !element.isDeleted && element.type !== 'frame')
+    const bounds = commonBounds(selectedElements as unknown as CanvasElementLike[])
+    if (!bounds || !selectedElements.length) return
+    const padding = 32
+    const [frame] = convertToExcalidrawElements([{
+      type: 'frame',
+      children: [],
+      name: 'Frame',
+      x: bounds.minX - padding,
+      y: bounds.minY - padding,
+      width: Math.max(80, bounds.width + padding * 2),
+      height: Math.max(80, bounds.height + padding * 2),
+    }]) as unknown as SceneElement[]
+    if (!frame || frame.type !== 'frame') return
+    const assigned = assignElementsToFrame(
+      api.getSceneElementsIncludingDeleted() as unknown as SpatialElementLike[],
+      selectedIds,
+      frame.id,
+    ) as unknown as SceneElement[]
+    api.updateScene({
+      elements: [...assigned, frame],
+      appState: { selectedElementIds: { [frame.id]: true }, selectedGroupIds: {}, editingGroupId: null },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    })
+    refreshSelection()
+    commitManipulation()
+  }
+
+  const autoFitSelectedFrame = () => {
+    if (!singleFrame) return
+    const next = fitFrameToContents(
+      api.getSceneElementsIncludingDeleted() as unknown as SpatialElementLike[],
+      singleFrame.id,
+      32,
+    )
+    api.updateScene({ elements: next as unknown as SceneElement[], captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+    refreshSelection()
+    commitManipulation()
+  }
+
+  const commitFrameName = () => {
+    if (!singleFrame) return
+    const next = renameFrame(
+      api.getSceneElementsIncludingDeleted() as unknown as SpatialElementLike[],
+      singleFrame.id,
+      frameName,
+    )
+    api.updateScene({ elements: next as unknown as SceneElement[], captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+    refreshSelection()
+    commitManipulation()
+  }
+
+  const toggleFrameContentsLock = () => {
+    if (!singleFrame) return
+    const next = setFrameContentsLocked(
+      api.getSceneElementsIncludingDeleted() as unknown as SpatialElementLike[],
+      singleFrame.id,
+      !frameContentsLocked,
+    )
+    api.updateScene({ elements: next as unknown as SceneElement[], captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+    refreshSelection()
+    commitManipulation()
+  }
 
   const applyShapeStyle = (patch: {
     strokeColor?: string
@@ -555,6 +638,32 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSn
           <label>{selected.length === 1 ? '°' : 'Δ°'} <input aria-label="Selection rotation" inputMode="decimal" value={rotation} onChange={event => setRotation(event.target.value)} onBlur={commitRotation} onKeyDown={event => { if (event.key === 'Enter') commitRotation() }} /></label>
         </div>
       </details>
+
+      {(singleFrame || canFrameSelection) && <details className="selection-popover phase5-frame-popover">
+        <summary>Frame</summary>
+        <div className="selection-popover-panel phase5-frame-panel">
+          {singleFrame ? <>
+            <label className="phase5-frame-name">Name
+              <input
+                aria-label="Frame name"
+                value={frameName}
+                maxLength={80}
+                onChange={event => setFrameName(event.target.value)}
+                onBlur={commitFrameName}
+                onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commitFrameName() } }}
+                placeholder="Frame"
+              />
+            </label>
+            <div className="phase5-frame-actions">
+              <button type="button" onClick={autoFitSelectedFrame} disabled={!frameChildren.length}>Auto-fit</button>
+              <button type="button" onClick={selectContentsOfFrame} disabled={!frameChildren.length}>Select contents</button>
+              <button type="button" onClick={toggleFrameContentsLock} disabled={!frameChildren.length}>{frameContentsLocked ? 'Unlock contents' : 'Lock contents'}</button>
+              <button type="button" onClick={duplicate}>Duplicate frame</button>
+            </div>
+            <small>{frameChildren.length} item{frameChildren.length === 1 ? '' : 's'} inside</small>
+          </> : <button type="button" className="phase5-frame-selection-button" onClick={createFrameAroundSelection}>Frame selection</button>}
+        </div>
+      </details>}
 
       {allShapes && <details className="selection-popover phase3-style-popover">
         <summary>Shape</summary>
