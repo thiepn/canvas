@@ -55,12 +55,15 @@ async function beginHeldRectangle(page: Page) {
   const to: [number, number] = [500, 370]
   await page.mouse.move(box.x + from[0], box.y + from[1])
   await page.mouse.down()
-  for (let step = 1; step <= 4; step++) {
+  // Keep this synthetic hold far below the 1.5 s durability checkpoint even
+  // on a slow CI browser. Two real pointer moves are enough to produce an
+  // intermediate geometry snapshot and a Broadcast preview.
+  for (let step = 1; step <= 2; step++) {
     await page.mouse.move(
-      box.x + from[0] + (to[0] - from[0]) * step / 4,
-      box.y + from[1] + (to[1] - from[1]) * step / 4,
+      box.x + from[0] + (to[0] - from[0]) * step / 2,
+      box.y + from[1] + (to[1] - from[1]) * step / 2,
     )
-    await page.waitForTimeout(70)
+    await page.waitForTimeout(25)
   }
 }
 
@@ -97,7 +100,7 @@ test('active pointer geometry reaches the peer over Broadcast before any durable
     // This poll is deliberately shorter than Phase 3's 1.5s safety checkpoint.
     // If Broadcast does not work, the test must fail rather than waiting long
     // enough for Postgres durability to make the peer pass by accident.
-    await expect.poll(async () => (await diagnostics(pageB)).counters.previewBroadcastsReceived ?? 0, { timeout: 900 }).toBeGreaterThan(0)
+    await expect.poll(async () => (await diagnostics(pageB)).counters.previewBroadcastsReceived ?? 0, { timeout: 800 }).toBeGreaterThan(0)
     expect(await rows()).toHaveLength(0)
     expect((await diagnostics(pageA)).counters.dbWriteBatches ?? 0).toBe(0)
     expect((await diagnostics(pageB)).counters.dbWriteBatches ?? 0).toBe(0)
