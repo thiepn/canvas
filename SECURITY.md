@@ -53,7 +53,8 @@ Image binaries use public-read Supabase Storage buckets because the canvas itsel
 - the client verifies SHA-256 before upload and after download;
 - production has INSERT but no public UPDATE/DELETE policy, making digest objects immutable;
 - CI has DELETE only for exact fixture cleanup;
-- active/external SVG constructs are rejected client-side before upload.
+- active/external SVG constructs are rejected client-side before upload;
+- persisted links are limited to HTTP(S), internal `#` anchors, or empty/null values, and imports/remote rows are validated against the same rule.
 
 Postgres accepts an image element only after the asset lane marks it `saved` with a valid SHA-256 file ID. Pending/error images cannot become authoritative rows. Video, audio, PDF objects, arbitrary attachments, iframes and embeddables remain rejected.
 
