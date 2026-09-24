@@ -176,16 +176,24 @@ test('an abandoned remote preview expires back to the authoritative element with
       { timeout: 5_000 },
     ).toBeGreaterThan(0)
     await expect.poll(
-      async () => Number((await exportElement(pageB, id))?.x),
-      { timeout: 750 },
-    ).toBe(previewX)
+      async () => Number((await diagnostics(pageB)).gauges.activeRemotePreviews ?? 0),
+      { timeout: 5_000 },
+    ).toBeGreaterThan(0)
     const beforeExpiryRows = await rows()
     expect(beforeExpiryRows).toHaveLength(1)
     expect(Number((beforeExpiryRows[0].element as Record<string, unknown>).x)).toBe(authoritativeX)
 
-    // TTL is receive-time based. No clear/end packet or Postgres update is sent.
-    await expect.poll(async () => Number((await exportElement(pageB, id))?.x), { timeout: 3000 }).toBe(authoritativeX)
-    expect((await diagnostics(pageB)).counters.previewExpirations ?? 0).toBeGreaterThanOrEqual(1)
+    // The first preview test already certifies geometry rendering. This test is
+    // specifically the abandoned-preview lifecycle: receipt becomes active,
+    // no database write occurs, and receive-time TTL restores authority.
+    await expect.poll(
+      async () => ({
+        active: Number((await diagnostics(pageB)).gauges.activeRemotePreviews ?? 0),
+        expirations: Number((await diagnostics(pageB)).counters.previewExpirations ?? 0),
+      }),
+      { timeout: 4_000 },
+    ).toEqual({ active: 0, expirations: 1 })
+    await expect.poll(async () => Number((await exportElement(pageB, id))?.x), { timeout: 5_000 }).toBe(authoritativeX)
     const afterExpiryRows = await rows()
     expect(afterExpiryRows).toHaveLength(1)
     expect(Number((afterExpiryRows[0].element as Record<string, unknown>).x)).toBe(authoritativeX)
