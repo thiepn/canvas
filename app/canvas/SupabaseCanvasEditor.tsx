@@ -1298,12 +1298,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }, [richTextMode, status])
 
   useEffect(() => {
-    if (!api) return
+    if (!api || status !== 'Live') return
     api.updateScene({
       appState: { objectsSnapModeEnabled, gridModeEnabled },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
-  }, [api, gridModeEnabled, objectsSnapModeEnabled])
+    requestAnimationFrame(refreshSelectionUi)
+  }, [api, gridModeEnabled, objectsSnapModeEnabled, refreshSelectionUi, status])
 
   const rememberObjectsSnap = useCallback((enabled: boolean) => {
     setObjectsSnapModeEnabled(enabled)
@@ -1409,6 +1410,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           selection={selectionSnapshot}
           disabled={status !== 'Live'}
           onNotice={notify}
+          objectsSnapEnabled={objectsSnapModeEnabled}
+          gridEnabled={gridModeEnabled}
           onObjectsSnapPreference={rememberObjectsSnap}
           onGridPreference={rememberGridMode}
           onSelectionRefresh={refreshSelectionUi}

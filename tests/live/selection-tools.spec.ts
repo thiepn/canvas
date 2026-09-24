@@ -236,6 +236,6 @@ test('native keyboard nudging remains precise with the Phase 2 overlay', async (
   await expect.poll(async () => {
     const [element] = await rows()
     return [Number(element.x) - originalX, Number(element.y) - originalY]
-  }).toEqual([1, 10])
+  }).toEqual([1, 5])
   await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
 })

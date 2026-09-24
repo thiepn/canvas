@@ -42,6 +42,8 @@ type Props = {
   selection: CanvasSelectionSnapshot
   disabled: boolean
   onNotice: (message: string) => void
+  objectsSnapEnabled: boolean
+  gridEnabled: boolean
   onObjectsSnapPreference: (enabled: boolean) => void
   onGridPreference: (enabled: boolean) => void
   onSelectionRefresh: () => void
@@ -83,7 +85,7 @@ function numeric(value: string): number | null {
   return Number.isFinite(next) ? next : null
 }
 
-export function SelectionToolbar({ api, selection, disabled, onNotice, onObjectsSnapPreference, onGridPreference, onSelectionRefresh, onManipulationCommit }: Props) {
+export function SelectionToolbar({ api, selection, disabled, onNotice, objectsSnapEnabled, gridEnabled, onObjectsSnapPreference, onGridPreference, onSelectionRefresh, onManipulationCommit }: Props) {
   const [copiedStyle, setCopiedStyle] = useState<VisualStyle | null>(null)
   const [x, setX] = useState('')
   const [y, setY] = useState('')
@@ -238,21 +240,29 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
   const commitRotation = () => apply(rotateSelection(currentElements(), geometryIds(), numeric(rotation) ?? 0, true))
 
   const toggleSnap = () => {
-    const next = !selection.objectsSnapModeEnabled
+    const next = !objectsSnapEnabled
     api.updateScene({
-      appState: { objectsSnapModeEnabled: next },
+      appState: {
+        objectsSnapModeEnabled: next,
+        ...(next ? { gridModeEnabled: false } : {}),
+      },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
     onObjectsSnapPreference(next)
+    if (next && gridEnabled) onGridPreference(false)
     refreshSelection()
   }
   const toggleGrid = () => {
-    const next = !selection.gridModeEnabled
+    const next = !gridEnabled
     api.updateScene({
-      appState: { gridModeEnabled: next },
+      appState: {
+        gridModeEnabled: next,
+        ...(next ? { objectsSnapModeEnabled: false } : {}),
+      },
       captureUpdate: CaptureUpdateAction.NEVER,
     })
     onGridPreference(next)
+    if (next && objectsSnapEnabled) onObjectsSnapPreference(false)
     refreshSelection()
   }
   const selectContentsOfFrame = () => {
@@ -321,8 +331,8 @@ export function SelectionToolbar({ api, selection, disabled, onNotice, onObjects
         </div>
       </details>
 
-      <button type="button" className={selection.objectsSnapModeEnabled ? 'is-active' : ''} aria-pressed={selection.objectsSnapModeEnabled} onClick={toggleSnap} title="Object snapping and smart guides">Snap</button>
-      <button type="button" className={selection.gridModeEnabled ? 'is-active' : ''} aria-pressed={selection.gridModeEnabled} onClick={toggleGrid} title="Grid and grid snapping">Grid</button>
+      <button type="button" className={objectsSnapEnabled ? 'is-active' : ''} aria-pressed={objectsSnapEnabled} onClick={toggleSnap} title="Object snapping and smart guides">Snap</button>
+      <button type="button" className={gridEnabled ? 'is-active' : ''} aria-pressed={gridEnabled} onClick={toggleGrid} title="Grid and grid snapping">Grid</button>
 
       <details className="selection-popover">
         <summary>More</summary>
