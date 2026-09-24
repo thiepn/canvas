@@ -67,8 +67,10 @@ export function MediaControls({
       tabIndex={-1}
       accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
       onChange={event => {
-        const file = event.currentTarget.files?.[0]
-        event.currentTarget.value = ''
+        const input = event.currentTarget
+        const file = input.files?.[0]
+        input.value = ''
+        input.blur()
         void pick(file, onAddImage)
       }}
     />
@@ -79,8 +81,10 @@ export function MediaControls({
       tabIndex={-1}
       accept=".json,.excalidraw,application/json,image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg"
       onChange={event => {
-        const file = event.currentTarget.files?.[0]
-        event.currentTarget.value = ''
+        const input = event.currentTarget
+        const file = input.files?.[0]
+        input.value = ''
+        input.blur()
         void pick(file, onImport)
       }}
     />
