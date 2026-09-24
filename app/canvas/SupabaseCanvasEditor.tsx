@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { CaptureUpdateAction, DefaultSidebar, Excalidraw, MainMenu, convertToExcalidrawElements, newElementWith, reconcileElements, restoreElements } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
-import type { AppState, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
+import type { AppState, BinaryFileData, BinaryFiles, ClipboardData, Collaborator, ExcalidrawImperativeAPI, SocketId } from '@excalidraw/excalidraw/types'
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
 import { Icon } from '../components/Icon.tsx'
 import { browserStorage, cleanName, loadIdentity, saveIdentity, type Identity, type LocalStorageLike } from '../presence/identity.ts'
@@ -60,6 +60,25 @@ import {
   type RemoteCollaborationState,
 } from './collaboration-v2.ts'
 import { canUndoOwnAction, restoreOwnActionElement, type OwnUndoEntry } from './own-action-undo.ts'
+import { MediaControls, type CanvasExportFormat } from './MediaControls.tsx'
+import {
+  assetBucketForTable,
+  generateCanvasFileId,
+  isPersistableCanvasElement,
+  isSupportedImageMime,
+  referencedAssetIds,
+} from './media-assets.ts'
+import {
+  createBookmarkCard,
+  createCanvasImage,
+  downloadCanvasAsset,
+  exportCanvasScene,
+  insertElements,
+  markImagesErrored,
+  markImagesSaved,
+  prepareCanvasJsonImport,
+  uploadCanvasAsset,
+} from './media-runtime.ts'
 
 type SceneElement = ReturnType<ExcalidrawImperativeAPI['getSceneElementsIncludingDeleted']>[number]
 type ConnectionState = CanvasConnectionState
@@ -81,9 +100,9 @@ type RemotePreview = {
   element: SceneElement
 }
 type QueuedPreview = { source: CanvasPreviewSource; elements: SceneElement[] }
-type SyncRuntimeState = { queuedChanges: number; writeInFlight: boolean; localEditing: boolean; saveIssue: SaveIssue }
+type SyncRuntimeState = { queuedChanges: number; writeInFlight: boolean; assetTransfers: number; localEditing: boolean; saveIssue: SaveIssue }
 
-const ALLOWED_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame'])
+const ALLOWED_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame', 'image'])
 const OPERATION_FLUSH_DELAY_MS = 0
 const RECONNECT_FLUSH_DELAY_MS = 120
 const LONG_OPERATION_CHECKPOINT_MS = 1500
@@ -104,7 +123,7 @@ const UI_OPTIONS = {
     saveToActiveFile: false,
     toggleTheme: false,
   },
-  tools: { image: false },
+  tools: { image: true },
   welcomeScreen: false,
 } as const
 
@@ -131,6 +150,7 @@ function elementFromRow(row: SyncRow): SceneElement | null {
   if (!row.element || typeof row.element !== 'object') return null
   const element = row.element as Record<string, unknown>
   if (element.id !== row.id || typeof element.type !== 'string' || !ALLOWED_TYPES.has(element.type)) return null
+  if (!isPersistableCanvasElement(element as unknown as SceneElement)) return null
   if (Number(element.version) !== row.version || Number(element.versionNonce) !== row.version_nonce || Boolean(element.isDeleted) !== row.is_deleted) return null
   return row.element as SceneElement
 }
@@ -154,6 +174,7 @@ function hasSafePoints(value: unknown): boolean {
 function elementFromPreview(value: CanvasPreviewElement): SceneElement | null {
   const raw = value as Record<string, unknown>
   if (typeof raw.type !== 'string' || !ALLOWED_TYPES.has(raw.type)) return null
+  if (!isPersistableCanvasElement(value as unknown as SceneElement)) return null
   if (![raw.x, raw.y, raw.width, raw.height, raw.angle].every(finiteCoordinate)) return null
   if ((raw.type === 'line' || raw.type === 'arrow' || raw.type === 'freedraw') && !hasSafePoints(raw.points)) return null
   if (raw.type === 'text' && (typeof raw.text !== 'string' || raw.text.length > 200_000)) return null
@@ -191,19 +212,10 @@ function drawingColorPreference(storage: LocalStorageLike | null, key: string, f
 
 function downloadBackup(api: ExcalidrawImperativeAPI | null) {
   if (!api) return
-  const active = api.getSceneElements().filter(isAllowedElement)
-  const payload = JSON.stringify({ type: 'canvas-backup', version: 2, engine: 'excalidraw', exportedAt: new Date().toISOString(), elements: active }, null, 2)
-  const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }))
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = `Canvas-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
-  document.body.append(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
+  void exportCanvasScene(api, 'json').catch(() => {})
 }
 
-function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape, drawingControls, collaborationPanel, deactivateDrawing }: {
+function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, changeTheme, richTextMode, toggleRichText, hasLockedElements, unlockAll, insertCustomShape, drawingControls, collaborationPanel, mediaControls, deactivateDrawing }: {
   api: ExcalidrawImperativeAPI | null
   identity: Identity
   people: PresencePerson[]
@@ -219,6 +231,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   insertCustomShape: (kind: CanvasShapeKind) => void
   drawingControls: ReactNode
   collaborationPanel: ReactNode
+  mediaControls: ReactNode
   deactivateDrawing: () => void
 }) {
   const [menu, setMenu] = useState(false)
@@ -282,6 +295,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
     <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{status === 'Live' && <span className="connection-transport">Live</span>}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
+    {mediaControls}
     {drawingControls}
     <button ref={shapeTriggerRef} type="button" className={`icon-button shape-library-button${shapeMenu ? ' is-active' : ''}`} aria-label="Shape library" aria-expanded={shapeMenu} title="Shape library" disabled={!api || status !== 'Live'} onClick={() => setShapeMenu(value => !value)}><Icon name="rectangle" /></button>
     {shapeMenu && <div ref={shapeMenuRef} className="shape-library-popover" aria-label="Shape library menu">
@@ -374,7 +388,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const statusRef = useRef<ConnectionState>('Connecting')
   useEffect(() => { drawingModeRef.current = drawingMode }, [drawingMode])
   useEffect(() => { drawingSettingsRef.current = drawingSettings }, [drawingSettings])
-  const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeState>({ queuedChanges: 0, writeInFlight: false, localEditing: false, saveIssue: 'none' })
+  const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeState>({ queuedChanges: 0, writeInFlight: false, assetTransfers: 0, localEditing: false, saveIssue: 'none' })
   const syncRuntimeRef = useRef(syncRuntime)
   const [connectionAttempt, setConnectionAttempt] = useState(0)
   const pageActiveRef = useRef(true)
@@ -408,6 +422,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const ownUndoBeforeRef = useRef(new Map<string, SceneElement | null>())
   const ownUndoStackRef = useRef<OwnUndoEntry<SceneElement>[]>([])
   const applyAuthoritativeRowsRef = useRef<(values: unknown[]) => void>(() => {})
+  const assetReadyRef = useRef(new Set<string>())
+  const assetUploadPromisesRef = useRef(new Map<string, Promise<void>>())
+  const assetDownloadPromisesRef = useRef(new Map<string, Promise<void>>())
+  const assetUploadFailuresRef = useRef(new Set<string>())
+  const assetDownloadFailuresRef = useRef(new Set<string>())
+  const assetTransferCountRef = useRef(0)
   const undoInFlightRef = useRef(false)
   const [undoInFlight, setUndoInFlight] = useState(false)
   const [undoDepth, setUndoDepth] = useState(0)
@@ -450,19 +470,26 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const current = syncRuntimeRef.current
     const next = { ...current, ...patch }
     syncRuntimeRef.current = next
-    if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return
+    if (next.queuedChanges === current.queuedChanges && next.writeInFlight === current.writeInFlight && next.assetTransfers === current.assetTransfers && next.localEditing === current.localEditing && next.saveIssue === current.saveIssue) return
     setSyncRuntime(next)
   }, [])
   const operationTracker = useMemo(() => new CanvasOperationTracker<SceneElement>({
     deviceId: () => identityRef.current.deviceId,
     onCommit: mutation => {
       recordMutationDiagnostics(mutation)
-      const undoChanges = mutation.changes.map(change => {
+      const undoChanges = mutation.changes.flatMap(change => {
         const element = change.type === 'delete' ? change.tombstone : change.element
-        const before = ownUndoBeforeRef.current.has(element.id)
+        if (!isPersistableCanvasElement(element)) return []
+        const rawBefore = ownUndoBeforeRef.current.has(element.id)
           ? ownUndoBeforeRef.current.get(element.id) ?? null
           : change.existedBefore ? authoritativeElementsRef.current.get(element.id) ?? null : null
-        return { id: element.id, before, after: stampOf(element) }
+        const before = element.type === 'image'
+          && element.status === 'saved'
+          && rawBefore?.type === 'image'
+          && rawBefore.status !== 'saved'
+          ? null
+          : rawBefore
+        return [{ id: element.id, before, after: stampOf(element) }]
       })
       for (const change of mutation.changes) {
         const element = change.type === 'delete' ? change.tombstone : change.element
@@ -479,7 +506,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       for (const change of mutation.changes) {
         const element = change.type === 'delete' ? change.tombstone : change.element
         const nextStamp = stampOf(element)
-        if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
+        if (!isPersistableCanvasElement(element) || !isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
         const queued = durablePendingRef.current.get(element.id)
         if (!queued || isNewerVersion(nextStamp, stampOf(queued))) durablePendingRef.current.set(element.id, element)
       }
@@ -492,6 +519,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const supabase = useMemo(() => createClient(config.supabaseUrl, config.supabaseKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   }), [config.supabaseKey, config.supabaseUrl])
+  const assetBucket = useMemo(() => assetBucketForTable(config.tableName), [config.tableName])
 
   const resolvedTheme = theme === 'system' ? systemDark ? 'dark' : 'light' : theme
   const syncHealth = useMemo(() => deriveSyncHealth({ connection: status, ...syncRuntime }), [status, syncRuntime])
@@ -502,6 +530,98 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
     noticeTimer.current = setTimeout(() => setNotice(''), 6000)
   }, [])
+
+  const adjustAssetTransfers = useCallback((delta: number) => {
+    assetTransferCountRef.current = Math.max(0, assetTransferCountRef.current + delta)
+    patchSyncRuntime({ assetTransfers: assetTransferCountRef.current })
+    canvasDiagnostics.gauge('assetTransfers', assetTransferCountRef.current)
+  }, [patchSyncRuntime])
+
+  const ensureUploadedAsset = useCallback((file: BinaryFileData): Promise<void> => {
+    const id = file.id as string
+    if (assetReadyRef.current.has(id)) return Promise.resolve()
+    const existing = assetUploadPromisesRef.current.get(id)
+    if (existing) return existing
+    if (assetUploadFailuresRef.current.has(id)) return Promise.reject(new Error('Image upload is waiting for a retry.'))
+
+    const promise = (async () => {
+      adjustAssetTransfers(1)
+      canvasDiagnostics.increment('assetUploadsStarted')
+      try {
+        await uploadCanvasAsset(supabase, assetBucket, file)
+        assetReadyRef.current.add(id)
+        assetUploadFailuresRef.current.delete(id)
+        canvasDiagnostics.increment('assetUploadsCompleted')
+        const editor = apiRef.current
+        if (!editor) return
+        const current = editor.getSceneElementsIncludingDeleted()
+        const next = markImagesSaved(current, id)
+        if (next.some((element, index) => element !== current[index])) {
+          editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+        }
+      } catch (error) {
+        assetUploadFailuresRef.current.add(id)
+        canvasDiagnostics.increment('assetUploadFailures')
+        const editor = apiRef.current
+        if (editor) {
+          const current = editor.getSceneElementsIncludingDeleted()
+          const next = markImagesErrored(current, id)
+          if (next.some((element, index) => element !== current[index])) {
+            editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER })
+          }
+        }
+        notify(`Image could not be saved: ${error instanceof Error ? error.message : String(error)}`)
+        throw error
+      } finally {
+        assetUploadPromisesRef.current.delete(id)
+        adjustAssetTransfers(-1)
+      }
+    })()
+    assetUploadPromisesRef.current.set(id, promise)
+    return promise
+  }, [adjustAssetTransfers, assetBucket, notify, supabase])
+
+  const ensureAssetsForElements = useCallback((elements: readonly SceneElement[]) => {
+    const editor = apiRef.current
+    if (!editor) return
+    const files = editor.getFiles()
+    for (const id of referencedAssetIds(elements)) {
+      if (files[id] || assetDownloadPromisesRef.current.has(id) || assetDownloadFailuresRef.current.has(id)) continue
+      const promise = (async () => {
+        adjustAssetTransfers(1)
+        canvasDiagnostics.increment('assetDownloadsStarted')
+        try {
+          const file = await downloadCanvasAsset(supabase, assetBucket, id)
+          if (!pageActiveRef.current) return
+          assetReadyRef.current.add(id)
+          assetDownloadFailuresRef.current.delete(id)
+          apiRef.current?.addFiles([file])
+          canvasDiagnostics.increment('assetDownloadsCompleted')
+        } catch (error) {
+          assetDownloadFailuresRef.current.add(id)
+          canvasDiagnostics.increment('assetDownloadFailures')
+          notify(`Image could not be loaded: ${error instanceof Error ? error.message : String(error)}`)
+        } finally {
+          assetDownloadPromisesRef.current.delete(id)
+          adjustAssetTransfers(-1)
+        }
+      })()
+      assetDownloadPromisesRef.current.set(id, promise)
+    }
+  }, [adjustAssetTransfers, assetBucket, notify, supabase])
+
+  const observeLocalFiles = useCallback((files: BinaryFiles, elements: readonly SceneElement[]) => {
+    const pendingIds = new Set(
+      elements.flatMap(element => element.type === 'image' && !element.isDeleted && element.status === 'pending' && element.fileId
+        ? [element.fileId as string]
+        : []),
+    )
+    for (const id of pendingIds) {
+      const file = files[id]
+      if (!file || assetReadyRef.current.has(id) || assetUploadPromisesRef.current.has(id) || assetUploadFailuresRef.current.has(id)) continue
+      void ensureUploadedAsset(file).catch(() => {})
+    }
+  }, [ensureUploadedAsset])
 
   // Network callbacks must lock writes immediately, before React commits a render.
   const transition = useCallback((next: ConnectionState) => {
@@ -869,8 +989,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       localSceneSnapshotRef.current.set(element.id, element)
       const queued = pendingRef.current.get(element.id)
       if (!queued || isNewerVersion(nextStamp, stampOf(queued))) pendingRef.current.set(element.id, element)
-      const durable = durablePendingRef.current.get(element.id)
-      if (!durable || isNewerVersion(nextStamp, stampOf(durable))) durablePendingRef.current.set(element.id, element)
+      if (isPersistableCanvasElement(element)) {
+        const durable = durablePendingRef.current.get(element.id)
+        if (!durable || isNewerVersion(nextStamp, stampOf(durable))) durablePendingRef.current.set(element.id, element)
+      }
     }
     canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
     patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, localEditing: false })
@@ -1194,6 +1316,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     )
     applyingRemote.current = true
     editor.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
+    ensureAssetsForElements(reconciled as SceneElement[])
     if (replace) {
       sceneVersionIndexRef.current.replace(reconciled as SceneElement[], isAllowedElement)
       localSceneSnapshotRef.current = indexSceneById(reconciled as SceneElement[])
@@ -1202,7 +1325,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       for (const element of remoteElements) localSceneSnapshotRef.current.set(element.id, element)
     }
     queueMicrotask(() => { applyingRemote.current = false })
-  }, [patchSyncRuntime])
+  }, [ensureAssetsForElements, patchSyncRuntime])
 
   useEffect(() => {
     applyAuthoritativeRowsRef.current = values => applyRows(values)
@@ -1270,7 +1393,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const flushDurablePending = useCallback(async () => {
     if (writeInFlightRef.current || !pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || durablePendingRef.current.size === 0) return
     writeInFlightRef.current = true
-    const elements = Array.from(durablePendingRef.current.values())
+    const elements = Array.from(durablePendingRef.current.values()).filter(isPersistableCanvasElement)
     durablePendingRef.current.clear()
     canvasDiagnostics.gauge('durableQueueElements', 0)
     patchSyncRuntime({ queuedChanges: 0, writeInFlight: true })
@@ -1393,7 +1516,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         for (const change of snapshot.changes) {
           const element = change.type === 'delete' ? change.tombstone : change.element
           const nextStamp = stampOf(element)
-          if (!isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
+          if (!isPersistableCanvasElement(element) || !isNewerVersion(nextStamp, shadowRef.current.get(element.id))) continue
           const queued = durablePendingRef.current.get(element.id)
           if (!queued || isNewerVersion(nextStamp, stampOf(queued))) {
             durablePendingRef.current.set(element.id, element)
@@ -1686,7 +1809,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     return () => document.removeEventListener('keyup', keyup, true)
   }, [captureCurrentScene, refreshSelectionUi])
 
-  const onChange = useCallback((elements: readonly SceneElement[], appState: AppState) => {
+  const onChange = useCallback((elements: readonly SceneElement[], appState: AppState, files: BinaryFiles) => {
+    observeLocalFiles(files, elements)
     richTextLayerRef.current?.sync(elements, appState)
     shapeLayerRef.current?.sync(elements, appState)
     navigationRef.current?.sync(elements, appState)
@@ -1720,7 +1844,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     canvasDiagnostics.sample('sceneObservationMs', performance.now() - observationStarted)
     if (observation.hasDisallowed) {
       const allowed = elements.filter(isAllowedElement)
-      notify('Images, embeds, and file-backed objects are disabled on this canvas.')
+      notify('Unsupported embeds and file-backed objects were removed. Canvas supports vector objects and images.')
       applyingRemote.current = true
       apiRef.current?.updateScene({ elements: allowed, captureUpdate: CaptureUpdateAction.NEVER })
       sceneVersionIndexRef.current.replace(allowed, isAllowedElement)
@@ -1765,7 +1889,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       setCollaborationActivity('idle')
     }
     editingTextRef.current = nextEditingTextId
-  }, [notify, operationTracker, patchSyncRuntime, queuePreview, setCollaborationActivity, syncSelectionUi])
+  }, [notify, observeLocalFiles, operationTracker, patchSyncRuntime, queuePreview, setCollaborationActivity, syncSelectionUi])
 
   const onPointerUpdate = useCallback((payload: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'up' | 'down' }) => {
     if (statusRef.current !== 'Live') return
@@ -2262,15 +2386,82 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     createRichTextAt(point.x, point.y)
   }
 
-  const blockPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
-    const hasFile = Array.from(event.clipboardData.items).some(item => item.kind === 'file')
-    if (!hasFile) return
-    event.preventDefault(); event.stopPropagation(); notify('Images and files are disabled. Paste text instead.')
+  const handlePasteCapture = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const files = Array.from(event.clipboardData.files)
+    if (!files.length) return
+    if (files.every(file => isSupportedImageMime(file.type))) return
+    event.preventDefault()
+    event.stopPropagation()
+    notify('Canvas paste accepts images and text, but not arbitrary files.')
   }
-  const blockDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.files.length) return
-    event.preventDefault(); event.stopPropagation(); notify('File uploads are disabled on Canvas.')
+
+  const addImageFile = useCallback(async (file: File) => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    try {
+      const prepared = await createCanvasImage(file, editor)
+      insertElements(editor, [prepared.element], { [prepared.file.id]: prepared.file } as BinaryFiles)
+      await ensureUploadedAsset(prepared.file)
+    } catch (error) {
+      notify(`Image could not be added: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [ensureUploadedAsset, notify])
+
+  const importCanvasFile = useCallback(async (file: File) => {
+    const editor = apiRef.current
+    if (!editor || statusRef.current !== 'Live') return
+    if (isSupportedImageMime(file.type)) {
+      await addImageFile(file)
+      return
+    }
+    try {
+      const imported = await prepareCanvasJsonImport(await file.text())
+      if (!imported.elements.length) throw new Error('The import contains no supported canvas objects.')
+      insertElements(editor, imported.elements, imported.files)
+      for (const fileData of Object.values(imported.files)) {
+        void ensureUploadedAsset(fileData).catch(() => {})
+      }
+    } catch (error) {
+      notify(`Canvas could not import that file: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [addImageFile, ensureUploadedAsset, notify])
+
+  const exportCanvas = useCallback(async (format: CanvasExportFormat) => {
+    const editor = apiRef.current
+    if (!editor) return
+    try {
+      await exportCanvasScene(editor, format)
+    } catch (error) {
+      notify(`Canvas could not export ${format.toUpperCase()}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [notify])
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    const files = Array.from(event.dataTransfer.files)
+    if (!files.length) return
+    const importableJson = files.length === 1 && (files[0].type === 'application/json' || /\.(json|excalidraw)$/i.test(files[0].name))
+    if (importableJson) {
+      event.preventDefault()
+      event.stopPropagation()
+      void importCanvasFile(files[0])
+      return
+    }
+    if (files.every(file => isSupportedImageMime(file.type))) return
+    event.preventDefault()
+    event.stopPropagation()
+    notify('Drop images or a Canvas/Excalidraw JSON file.')
   }
+
+  const onExcalidrawPaste = useCallback((data: ClipboardData) => {
+    if (data.elements?.length || Object.keys(data.files ?? {}).length || data.mixedContent?.length) return false
+    const editor = apiRef.current
+    const text = data.text?.trim()
+    if (!editor || !text || statusRef.current !== 'Live') return false
+    const card = createBookmarkCard(text, editor)
+    if (!card) return false
+    insertElements(editor, card)
+    return true
+  }, [])
 
   const unlockAllLocked = useCallback(() => {
     const editor = apiRef.current
@@ -2298,6 +2489,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       unlockAll={unlockAllLocked}
       insertCustomShape={insertCustomShape}
       deactivateDrawing={deactivateDrawing}
+      mediaControls={<MediaControls
+        disabled={!api || status !== 'Live'}
+        busy={syncRuntime.assetTransfers > 0}
+        onAddImage={addImageFile}
+        onImport={importCanvasFile}
+        onExport={exportCanvas}
+      />}
       collaborationPanel={<CollaborationPanel
         collaborators={remoteCollaboration}
         followDeviceId={followDeviceId}
@@ -2329,10 +2527,15 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         onPointerMoveCapture={handleDrawingPointerMove}
         onPointerUpCapture={handleDrawingPointerUp}
         onPointerCancelCapture={handleDrawingPointerCancel}
-        onDoubleClickCapture={handleCanvasDoubleClick} onPasteCapture={blockPaste} onDropCapture={blockDrop} onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
+        onDoubleClickCapture={handleCanvasDoubleClick}
+        onPasteCapture={handlePasteCapture}
+        onDropCapture={handleDrop}
+        onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}>
         <Excalidraw
           excalidrawAPI={setApi}
           onChange={onChange}
+          onPaste={onExcalidrawPaste}
+          generateIdForFile={generateCanvasFileId}
           onPointerUpdate={onPointerUpdate}
           onPointerUp={refreshSelectionAfterInteraction}
           onScrollChange={() => requestAnimationFrame(refreshNavigationUi)}
