@@ -137,8 +137,15 @@ function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
   return structuredClone(value)
 }
 
+const IMPORTABLE_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame', 'image'])
+
 function remapImportedElements(rawElements: unknown[], fileMap: Map<string, string>): unknown[] {
-  const objects = rawElements.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object')
+  const objects = rawElements.filter((value): value is Record<string, unknown> =>
+    Boolean(value)
+    && typeof value === 'object'
+    && typeof (value as Record<string, unknown>).type === 'string'
+    && IMPORTABLE_TYPES.has((value as Record<string, unknown>).type as string),
+  )
   const idMap = new Map<string, string>()
   const groupMap = new Map<string, string>()
   for (const element of objects) {
