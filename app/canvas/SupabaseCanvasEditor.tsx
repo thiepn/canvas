@@ -1406,6 +1406,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       canvasDiagnostics.gauge('activeRemotePreviews', 0)
     }
     let changed = replace
+    let recoveryChanged = false
 
     for (const row of rows) {
       const element = elementFromRow(row)
@@ -1425,6 +1426,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       }
       const pending = pendingRef.current.get(row.id)
       const durablePending = durablePendingRef.current.get(row.id)
+      const durableInFlight = durableInFlightRef.current.get(row.id)
 
       // Keep the operation observer aligned with authoritative remote state, but
       // never move it backwards over a newer local element still awaiting ACK.
@@ -1435,6 +1437,10 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       // survive merely because this authoritative row was already observed.
       if (pending && !shouldKeepPending(stampOf(pending), nextStamp)) pendingRef.current.delete(row.id)
       if (durablePending && !shouldKeepPending(stampOf(durablePending), nextStamp)) durablePendingRef.current.delete(row.id)
+      if (durableInFlight && !shouldKeepPending(stampOf(durableInFlight), nextStamp)) {
+        durableInFlightRef.current.delete(row.id)
+        recoveryChanged = true
+      }
       canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
 
       const rendered = localById.get(row.id)
@@ -1484,6 +1490,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       changed = true
     }
 
+    if (recoveryChanged) void persistRecoveryState()
     const durableQueueSize = durablePendingRef.current.size
     patchSyncRuntime({
       queuedChanges: durableQueueSize,
@@ -1509,7 +1516,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       for (const element of remoteElements) localSceneSnapshotRef.current.set(element.id, element)
     }
     queueMicrotask(() => { applyingRemote.current = false })
-  }, [ensureAssetsForElements, patchSyncRuntime])
+  }, [ensureAssetsForElements, patchSyncRuntime, persistRecoveryState])
 
   useEffect(() => {
     applyAuthoritativeRowsRef.current = values => applyRows(values)
@@ -1558,6 +1565,51 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       canvasDiagnostics.sample('antiEntropyMs', performance.now() - startedAt)
     }
   }, [applyRows, config.tableName, supabase])
+
+  const restoreRecoveryState = useCallback(async () => {
+    if (recoveryLoadedRef.current) return
+    recoveryLoadedRef.current = true
+    const journal = await readRecoveryJournal(config.tableName, identityRef.current.deviceId)
+    if (!journal) return
+
+    const authority = new Map<string, VersionStamp>()
+    for (const [id, element] of authoritativeElementsRef.current) authority.set(id, stampOf(element))
+    const candidates = recoveryCandidates(journal, authority)
+      .filter(candidate => isAllowedElement(candidate as unknown as SceneElement))
+      .map(candidate => candidate as unknown as SceneElement)
+
+    if (!candidates.length) {
+      await clearRecoveryJournal(config.tableName, identityRef.current.deviceId)
+      canvasDiagnostics.gauge('recoveryJournalElements', 0)
+      return
+    }
+
+    const editor = apiRef.current
+    if (!editor || !pageActiveRef.current) return
+    const recoveredById = new Map(candidates.map(element => [element.id, element]))
+    const current = editor.getSceneElementsIncludingDeleted()
+    const merged = current.map(element => recoveredById.get(element.id) ?? element)
+    const existing = new Set(current.map(element => element.id))
+    for (const element of candidates) if (!existing.has(element.id)) merged.push(element)
+
+    applyingRemote.current = true
+    editor.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER })
+    sceneVersionIndexRef.current.replace(merged, isAllowedElement)
+    localSceneSnapshotRef.current = indexSceneById(merged)
+    for (const element of candidates) {
+      const nextStamp = stampOf(element)
+      pendingRef.current.set(element.id, element)
+      durablePendingRef.current.set(element.id, element)
+      observedSceneRef.current.set(element.id, nextStamp)
+    }
+    canvasDiagnostics.increment('recoveryJournalRestores')
+    canvasDiagnostics.increment('recoveryJournalElementsRestored', candidates.length)
+    canvasDiagnostics.gauge('durableQueueElements', durablePendingRef.current.size)
+    patchSyncRuntime({ queuedChanges: durablePendingRef.current.size, localEditing: false })
+    notify(`Recovered ${candidates.length} unsaved local change${candidates.length === 1 ? '' : 's'} after the previous interruption.`)
+    queueMicrotask(() => { applyingRemote.current = false })
+    await persistRecoveryState()
+  }, [config.tableName, notify, patchSyncRuntime, persistRecoveryState])
 
   const reconcileAuthoritative = useCallback(async () => {
     if (reconciliationInFlightRef.current || !pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || continuousOperationRef.current) return
@@ -1880,7 +1932,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
             void currentChannel.track({ deviceId: identityRef.current.deviceId, displayName: identityRef.current.displayName, color: identityRef.current.color, onlineAt: new Date().toISOString() }).catch(() => {})
             const stillCurrent = () => isCurrent() && generation === syncGeneration
             void loadAuthoritative(stillCurrent)
-              .then(() => {
+              .then(async () => {
+                if (!stillCurrent()) return
+                await restoreRecoveryState()
                 if (!stillCurrent()) return
                 retryDelayRef.current = 1200
                 transition('Live')
@@ -1916,7 +1970,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         channelCleanupRef.current = supabase.removeChannel(channel).catch(() => {})
       }
     }
-  }, [api, applyCollaborationEffect, applyCollaborationState, applyRemotePreview, applyRows, clearRemotePreviews, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, patchSyncRuntime, scheduleFlush, supabase, syncPresence, transition])
+  }, [api, applyCollaborationEffect, applyCollaborationState, applyRemotePreview, applyRows, clearRemotePreviews, config.tableName, connectionAttempt, identity.deviceId, loadAuthoritative, notify, patchSyncRuntime, restoreRecoveryState, scheduleFlush, supabase, syncPresence, transition])
 
   useEffect(() => {
     if (status !== 'Live') return
