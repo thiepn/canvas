@@ -87,9 +87,11 @@ export class SpatialGridIndex<T extends SpatialIndexElement> {
   private readonly entries = new Map<string, Entry<T>>()
   private readonly buckets = new Map<string, Set<string>>()
   private readonly large = new Set<string>()
+  private readonly cellSize: number
 
-  constructor(private readonly cellSize = 512) {
+  constructor(cellSize = 512) {
     if (!Number.isFinite(cellSize) || cellSize < 32) throw new Error('Spatial index cell size must be at least 32.')
+    this.cellSize = cellSize
   }
 
   private cellRange(bounds: SpatialIndexBounds) {
