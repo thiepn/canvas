@@ -239,28 +239,54 @@ test('offline state pauses editing and returns to Live after reconnect', async (
   await expect(page.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
 })
 
-test('database independently rejects forbidden media records', async ({ browserName }) => {
+test('database accepts saved content-addressed images and rejects malformed media records', async ({ browserName }) => {
   test.skip(browserName !== 'chromium', 'Backend contract needs one execution, not one per browser engine.')
 
-  const id = `forbidden-image-${Date.now()}`
-  const forbidden = {
-    id,
+  const validId = `image-contract-${Date.now()}`
+  const fileId = 'a'.repeat(64)
+  const valid = {
+    id: validId,
     version: 1,
-    version_nonce: 1,
+    version_nonce: 100,
     is_deleted: false,
     updated_by: 'production-e2e',
     element: {
-      id,
+      id: validId,
       type: 'image',
+      x: 10,
+      y: 10,
+      width: 100,
+      height: 80,
+      angle: 0,
       version: 1,
-      versionNonce: 1,
+      versionNonce: 100,
       isDeleted: false,
+      fileId,
+      status: 'saved',
+      scale: [1, 1],
+      crop: null,
     },
   }
-  const { error } = await supabase.from(TABLE).insert(forbidden)
-  expect(error).toBeTruthy()
+  const { error: validError } = await supabase.from(TABLE).insert(valid)
+  expect(validError).toBeNull()
 
-  const { data, error: readError } = await supabase.from(TABLE).select('id').eq('id', id)
+  const pendingId = `pending-image-${Date.now()}`
+  const { error: pendingError } = await supabase.from(TABLE).insert({
+    ...valid,
+    id: pendingId,
+    element: { ...valid.element, id: pendingId, status: 'pending' },
+  })
+  expect(pendingError).toBeTruthy()
+
+  const videoId = `forbidden-video-${Date.now()}`
+  const { error: videoError } = await supabase.from(TABLE).insert({
+    ...valid,
+    id: videoId,
+    element: { ...valid.element, id: videoId, type: 'embeddable' },
+  })
+  expect(videoError).toBeTruthy()
+
+  const { data, error: readError } = await supabase.from(TABLE).select('id').in('id', [validId, pendingId, videoId])
   expect(readError).toBeNull()
-  expect(data).toEqual([])
+  expect(data?.map(row => row.id)).toEqual([validId])
 })
