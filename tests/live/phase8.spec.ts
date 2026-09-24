@@ -154,7 +154,7 @@ test('reduced motion and delight controls stay local and respect the visual prof
   await page.goto('./')
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
 
-  let menu = await openVisuals(page)
+  const menu = await openVisuals(page)
   await menu.getByRole('button', { name: 'Full', exact: true }).click()
   await menu.getByRole('button', { name: 'Tiny sparkle' }).click()
   await expect(page.locator('.canvas-delight-burst')).toHaveCount(1)
