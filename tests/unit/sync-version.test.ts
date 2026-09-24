@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isNewerVersion, shouldKeepPending, type VersionStamp } from '../../app/canvas/sync-version.ts'
+import { enforceAuthoritativeTombstones, isNewerVersion, shouldKeepPending, type VersionStamp } from '../../app/canvas/sync-version.ts'
 
 function stamp(version: number, versionNonce: number, isDeleted = false): VersionStamp {
   return { version, versionNonce, isDeleted }
@@ -25,4 +25,19 @@ test('pending retries survive only while they win against authoritative state', 
 test('deletion state does not override Excalidraw version ordering', () => {
   assert.equal(shouldKeepPending(stamp(6, 1, true), stamp(6, 2, false)), true)
   assert.equal(shouldKeepPending(stamp(6, 2, false), stamp(6, 1, true)), false)
+})
+
+
+test('accepted authoritative tombstones cannot be lost by partial-scene reconciliation', () => {
+  const visible = { id: 'shape-a', ...stamp(4, 50, false), x: 10 }
+  const tombstone = { id: 'shape-a', ...stamp(5, 40, true), x: 10 }
+  assert.deepEqual(enforceAuthoritativeTombstones([visible], [tombstone]), [tombstone])
+
+  const exactVisible = { id: 'shape-b', ...stamp(7, 20, false), x: 20 }
+  const exactTombstone = { id: 'shape-b', ...stamp(7, 20, true), x: 20 }
+  assert.deepEqual(enforceAuthoritativeTombstones([exactVisible], [exactTombstone]), [exactTombstone])
+
+  const newerLocal = { id: 'shape-c', ...stamp(9, 10, false), x: 30 }
+  const olderTombstone = { id: 'shape-c', ...stamp(8, 1, true), x: 30 }
+  assert.deepEqual(enforceAuthoritativeTombstones([newerLocal], [olderTombstone]), [newerLocal])
 })
