@@ -2432,27 +2432,31 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }
 
   const handlePasteCapture = (event: React.ClipboardEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement | null
-    if (target?.closest('input,textarea,select,[contenteditable="true"]')) return
-
     const files = Array.from(event.clipboardData.files)
-    if (files.length) {
-      if (files.every(file => isSupportedImageMime(file.type))) return
-      event.preventDefault()
-      event.stopPropagation()
-      notify('Canvas paste accepts images and text, but not arbitrary files.')
-      return
-    }
-
-    const text = event.clipboardData.getData('text/plain').trim()
-    const editor = apiRef.current
-    if (!text || !editor || statusRef.current !== 'Live') return
-    const card = createBookmarkCard(text, editor)
-    if (!card) return
+    if (!files.length || files.every(file => isSupportedImageMime(file.type))) return
     event.preventDefault()
     event.stopPropagation()
-    insertElements(editor, card)
+    notify('Canvas paste accepts images and text, but not arbitrary files.')
   }
+
+  useEffect(() => {
+    const handleDocumentPaste = (event: ClipboardEvent) => {
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest('input,textarea,select,[contenteditable="true"]')) return
+      if (event.clipboardData?.files.length) return
+
+      const text = event.clipboardData?.getData('text/plain').trim()
+      const editor = apiRef.current
+      if (!text || !editor || statusRef.current !== 'Live') return
+      const card = createBookmarkCard(text, editor)
+      if (!card) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      insertElements(editor, card)
+    }
+    document.addEventListener('paste', handleDocumentPaste, true)
+    return () => document.removeEventListener('paste', handleDocumentPaste, true)
+  }, [])
 
   const addImageFile = useCallback(async (file: File) => {
     const editor = apiRef.current
