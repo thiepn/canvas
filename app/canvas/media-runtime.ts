@@ -20,7 +20,7 @@ import {
   referencedAssetIds,
   sha256BlobId,
 } from './media-assets.ts'
-import { isSafeCanvasGeometry } from './geometry-contract.ts'
+import { isSafeCanvasGeometry, isSafeCanvasPoints } from './geometry-contract.ts'
 import { createCanvasBackup, createCanvasClipboard, jpegBytesToPdf, parseCanvasImport } from './scene-transfer.ts'
 import type { CanvasExportFormat } from './MediaControls.tsx'
 
@@ -151,12 +151,15 @@ function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
 const IMPORTABLE_TYPES = new Set(['rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'freedraw', 'text', 'frame', 'image'])
 
 function remapImportedElements(rawElements: unknown[], fileMap: Map<string, string>): unknown[] {
-  const objects = rawElements.filter((value): value is Record<string, unknown> =>
-    Boolean(value)
-    && typeof value === 'object'
-    && typeof (value as Record<string, unknown>).type === 'string'
-    && IMPORTABLE_TYPES.has((value as Record<string, unknown>).type as string),
-  )
+  const objects = rawElements.filter((value): value is Record<string, unknown> => {
+    if (!value || typeof value !== 'object') return false
+    const element = value as Record<string, unknown>
+    if (typeof element.type !== 'string' || !IMPORTABLE_TYPES.has(element.type)) return false
+    if (!isSafeCanvasGeometry(element)) return false
+    if ((element.type === 'line' || element.type === 'arrow' || element.type === 'freedraw') && !isSafeCanvasPoints(element.points)) return false
+    if (element.type === 'text' && (typeof element.text !== 'string' || element.text.length > 200_000)) return false
+    return true
+  })
   const idMap = new Map<string, string>()
   const groupMap = new Map<string, string>()
   for (const element of objects) {
