@@ -25,6 +25,21 @@ Supported content stays deliberately canvas-native:
 
 Video, audio, PDF-as-canvas-object, arbitrary attachments, iframes/embeds and remote-media objects are not part of the product. Image binaries are content-addressed in Supabase Storage while Postgres independently validates the corresponding image elements.
 
+## Scale and resilience
+
+Phase 9 hardens Canvas for large, long-lived shared worlds without changing the product model:
+
+- immutable-version scene indexing plus spatial culling for Canvas-owned DOM overlays;
+- bounded image transfer concurrency so large image scenes cannot fan out unbounded network/memory work;
+- an IndexedDB crash-recovery journal for completed local mutations that are not yet authoritatively confirmed;
+- recovery replay only when the local immutable version still outranks Supabase authority;
+- bounded PostgREST requests with retry/reconciliation instead of indefinitely stuck `Saving…`;
+- database and client geometry contracts, point-array limits and import element/file/byte ceilings;
+- explicit partial-import reporting when unsafe/unsupported elements are dropped;
+- 320 px, short-landscape, keyboard-focus, forced-colors, reduced-motion and text-zoom resilience;
+- hardened static-shell service-worker update/offline behavior without caching shared Supabase state;
+- 10,000-element performance evidence with enforced budgets and a scheduled weekly regression workflow.
+
 ## Production architecture
 
 The application uses:
