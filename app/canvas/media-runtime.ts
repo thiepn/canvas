@@ -20,6 +20,7 @@ import {
   referencedAssetIds,
   sha256BlobId,
 } from './media-assets.ts'
+import { isSafeCanvasGeometry } from './geometry-contract.ts'
 import { createCanvasBackup, createCanvasClipboard, jpegBytesToPdf, parseCanvasImport } from './scene-transfer.ts'
 import type { CanvasExportFormat } from './MediaControls.tsx'
 
@@ -281,7 +282,7 @@ export async function prepareCanvasJsonImport(text: string): Promise<{
     repairBindings: false,
     refreshDimensions: false,
   }) as MediaSceneElement[]
-  return { elements: restored, files }
+  return { elements: restored.filter(element => isSafeCanvasGeometry(element)), files }
 }
 
 export function createBookmarkCard(urlText: string, api: ExcalidrawImperativeAPI): MediaSceneElement[] | null {
