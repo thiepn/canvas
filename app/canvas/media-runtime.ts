@@ -286,12 +286,14 @@ export async function prepareCanvasJsonImport(text: string): Promise<{
     repairBindings: false,
     refreshDimensions: false,
   }) as MediaSceneElement[]
+  const elements = restored.filter(element =>
+    isSafeCanvasGeometry(element)
+    && (!(element.type === 'line' || element.type === 'arrow' || element.type === 'freedraw') || isSafeCanvasPoints(element.points)),
+  )
   return {
-    elements: restored.filter(element =>
-      isSafeCanvasGeometry(element)
-      && (!(element.type === 'line' || element.type === 'arrow' || element.type === 'freedraw') || isSafeCanvasPoints(element.points)),
-    ),
+    elements,
     files,
+    droppedElements: Math.max(0, imported.elements.length - elements.length),
   }
 }
 
