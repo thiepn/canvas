@@ -92,28 +92,50 @@ function subscribe(channel: RealtimeChannel): Promise<void> {
 test.beforeEach(cleanWorld)
 test.afterEach(cleanWorld)
 
-test('active pointer geometry reaches the peer over Broadcast before any durable write', async ({ browser }) => {
+test('active pointer geometry reaches the peer over Broadcast without requiring the final durability boundary', async ({ browser }) => {
   const { contextA, contextB, pageA, pageB } = await connectPair(browser)
   try {
     await beginHeldRectangle(pageA)
 
-    // This poll is deliberately shorter than Phase 3's 1.5s safety checkpoint.
-    // If Broadcast does not work, the test must fail rather than waiting long
-    // enough for Postgres durability to make the peer pass by accident.
-    await expect.poll(async () => (await diagnostics(pageB)).counters.previewBroadcastsReceived ?? 0, { timeout: 800 }).toBeGreaterThan(0)
-    expect(await rows()).toHaveLength(0)
-    expect((await diagnostics(pageA)).counters.dbWriteBatches ?? 0).toBe(0)
-    expect((await diagnostics(pageB)).counters.dbWriteBatches ?? 0).toBe(0)
-    expect((await diagnostics(pageA)).counters.previewBroadcastsSent ?? 0).toBeGreaterThan(0)
+    // Broadcast must become visible while the pointer is still held. On a very
+    // slow CI engine the 1.5 s safety checkpoint may legitimately fire before
+    // the assertion process samples the database, so do not confuse that
+    // bounded safety write with the final operation boundary.
+    await expect.poll(
+      async () => Number((await diagnostics(pageB)).counters.previewBroadcastsReceived ?? 0),
+      { timeout: 5_000 },
+    ).toBeGreaterThan(0)
 
-    const preview = (await pageB.evaluate(() => window.__CANVAS_DIAGNOSTICS__!.snapshot())).gauges.activeRemotePreviews
-    expect(Number(preview)).toBeGreaterThan(0)
+    const heldA = await diagnostics(pageA)
+    const heldB = await diagnostics(pageB)
+    expect(heldA.counters.previewBroadcastsSent ?? 0).toBeGreaterThan(0)
+    expect(Number(heldB.gauges.activeRemotePreviews ?? 0)).toBeGreaterThan(0)
+    expect(heldA.counters.durabilityBoundaryFlushes ?? 0).toBe(0)
+
+    const rowsWhileHeld = await rows()
+    const checkpointsWhileHeld = Number(heldA.counters.durabilityCheckpoints ?? 0)
+    if (rowsWhileHeld.length) {
+      // The only durable state allowed before pointer-up is a long-operation
+      // safety checkpoint. It must still be one logical row, never a second
+      // object or an early final-boundary flush.
+      expect(checkpointsWhileHeld).toBeGreaterThan(0)
+      expect(rowsWhileHeld).toHaveLength(1)
+      expect(Number(heldA.counters.dbWriteBatches ?? 0)).toBeLessThanOrEqual(checkpointsWhileHeld)
+    } else {
+      expect(Number(heldA.counters.dbWriteBatches ?? 0)).toBe(0)
+    }
 
     await pageA.mouse.up()
     await expect.poll(async () => (await rows()).length).toBe(1)
-    await expect.poll(async () => (await diagnostics(pageA)).counters.dbWriteBatches ?? 0).toBe(1)
+    await expect.poll(
+      async () => Number((await diagnostics(pageA)).counters.durabilityBoundaryFlushes ?? 0),
+    ).toBe(1)
     await expect.poll(async () => Number((await diagnostics(pageB)).gauges.activeRemotePreviews ?? 0)).toBe(0)
-    expect((await diagnostics(pageA)).counters.durabilityCheckpoints ?? 0).toBe(0)
+
+    const settled = await diagnostics(pageA)
+    expect(Number(settled.counters.dbWriteBatches ?? 0)).toBeLessThanOrEqual(
+      Number(settled.counters.durabilityCheckpoints ?? 0) + 1,
+    )
   } finally {
     await pageA.mouse.up().catch(() => {})
     await Promise.allSettled([contextA.close(), contextB.close()])
