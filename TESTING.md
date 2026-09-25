@@ -28,7 +28,9 @@ npm run test:production
 
 Phase 7 unit coverage additionally validates content-addressed asset IDs, raster signatures, static-only SVG rules, portable scene parsing and PDF generation.
 
-Phase 8 unit coverage validates visual-profile defaults/persistence, light/dark paper/accent resolution, scene-locked grid math and motion preference resolution. Passing unit tests are necessary but do not prove realtime browser behavior.
+Phase 8 unit coverage validates visual-profile defaults/persistence, light/dark paper/accent resolution, scene-locked grid math and motion preference resolution.
+
+Phase 9 unit coverage adds spatial indexing/culling, IndexedDB journal parsing/conflict rules, bounded task concurrency, geometry/point contracts and import denial-of-service limits. Passing unit tests are necessary but do not prove realtime browser behavior.
 
 ## Live Supabase matrix
 
@@ -55,6 +57,14 @@ The matrix covers real Excalidraw interaction and Supabase behavior, including:
 - persistent vector stamps as normal shared custom-shape objects;
 - reduced-motion and local delight behavior.
 
+
+- Phase 9 crash-journal recovery after an interrupted write and stale-journal conflict rejection;
+- delayed PostgREST convergence without duplicate rows;
+- backend rejection of pathological geometry;
+- 600+ custom-shape overlay culling;
+- a bounded four-client collaboration burst;
+- 320px layout containment, short-landscape popovers, keyboard skip navigation and forced-colors focus visibility.
+
 The quality workflow and manual performance workflow share one non-cancelling concurrency group so their setup/cleanup cannot corrupt each other's Supabase fixtures.
 
 ## Compiled production matrix
@@ -64,6 +74,13 @@ The quality workflow and manual performance workflow share one non-cancelling co
 ## Performance evidence
 
 The manual `Canvas performance evidence` workflow measures the same production editor against the isolated CI table. Diagnostics remain opt-in and do not contain element content.
+
+
+## Phase 9 performance budgets
+
+`npm run performance:budget` validates the generated `artifacts/performance.json` evidence. The manual performance workflow also runs weekly and fails when broad release budgets are exceeded. The budgets target catastrophic regression detection rather than microbenchmark competition: the 10k-object fixture must stay within bounded render/pan/edit/serialization/heap limits, and collaboration must remain within bounded open/render/write/reconnect latency.
+
+The performance job remains serialized with the ordinary Supabase CI writer because both use `canvas_ci_elements`.
 
 ## Supabase schema and recovery
 
