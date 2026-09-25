@@ -68,7 +68,7 @@ maximum('internal reconnect p95 ms', collab.diagnosticsReconnectP95Ms, budgets.c
 maximum('writes per gesture p95', collab.writesPerGestureP95, budgets.collaboration.writesPerGestureP95, true)
 maximum('pending writes after reconnect', collab.pendingWritesAfterReconnect, budgets.collaboration.pendingWritesAfterReconnect, true)
 
-console.log('Canvas Phase 9 performance budget')
+console.log('Canvas v2 performance budget')
 for (const item of checked) console.log(`  ✓ ${item.label}: ${item.value.toFixed(2)} ≤ ${item.limit}`)
 
 if (failures.length) {
