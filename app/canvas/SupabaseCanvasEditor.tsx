@@ -323,7 +323,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
   }
   return <header className="canvas-header live-canvas-header">
     <h1>Canvas<span className="brand-period" aria-hidden="true">.</span></h1>
-    <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{status === 'Live' && <span className="connection-transport">Live</span>}</div>
+    <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{!SIMPLE_UI && status === 'Live' && <span className="connection-transport">Live</span>}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
     {!SIMPLE_UI && visualControls}
@@ -380,7 +380,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
         <button type="button" className="menu-action" disabled={!api || status !== 'Live' || !hasLockedElements} onClick={() => { unlockAll(); setMenu(false) }}><Icon name="select" />Unlock all locked objects</button>
       </>}
       <p className="privacy-note">One shared canvas. Anyone with the link can read and change everything. Names are not verified identities. Unsaved changes may be kept temporarily in local crash-recovery storage on this device until the shared save is confirmed.</p>
-      <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Pen · Shift+E Stroke eraser · E Object eraser · T Text · F Frame · Space Pan</p>
+      {!SIMPLE_UI && <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Pen · Shift+E Stroke eraser · E Object eraser · T Text · F Frame · Space Pan</p>}
     </div>}
   </header>
 }
