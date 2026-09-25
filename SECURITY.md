@@ -103,3 +103,19 @@ Lint, strict TypeScript, production-model unit tests, real Supabase browser test
 ## Reporting
 
 For a vulnerability that would expose credentials, bypass intended database constraints, grant access to the private recovery schema, or corrupt other applications sharing the Supabase project, avoid demonstrating it destructively against the live world. Provide a minimal reproduction against the isolated CI table or a fresh project where possible.
+
+
+## Phase 9 data-hardening boundaries
+
+Phase 9 adds defense in depth around malformed or resource-exhausting scene data:
+
+- Postgres rejects primary element geometry outside `|x/y| <= 1e9`, `|width/height| <= 1e8`, and `|angle| <= 1000`;
+- the browser applies the same primary geometry contract before authoritative rows, imports or recovery data reach Excalidraw;
+- line/arrow/freehand point arrays are limited to 10,000 finite bounded points;
+- imported text remains bounded and import packages are capped at 80 MB / 20,000 elements / 500 files;
+- rejected shared rows increment content-free diagnostics counters only; element content is not logged;
+- image transfers remain MIME/signature/content-hash validated and now have bounded concurrency.
+
+The IndexedDB recovery journal contains unsaved scene element data and therefore inherits the sensitivity of the canvas itself. It never leaves the device through a new endpoint, is keyed to the current anonymous device/table, expires after seven days, has strict size/geometry validation and is removed as soon as Supabase authority confirms or supersedes its entries.
+
+The recovery journal is not trusted over shared authority: stale local versions cannot overwrite newer collaborator/server versions.
