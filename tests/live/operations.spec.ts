@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
 import { DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL } from '../../app/config/public-config.ts'
 import { dragOnCanvas } from './scene-helpers.ts'
+import { retryTransientSupabaseTestOperation } from './supabase-test-helpers.ts'
 
 const TABLE = 'canvas_ci_elements'
 const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE_KEY, {
@@ -9,12 +10,12 @@ const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE
 })
 
 async function cleanWorld() {
-  const { error } = await supabase.from(TABLE).delete().neq('id', '')
+  const { error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).delete().neq('id', ''))
   if (error) throw error
 }
 
 async function persistedElements(): Promise<Array<Record<string, unknown>>> {
-  const { data, error } = await supabase.from(TABLE).select('element')
+  const { data, error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).select('element'))
   if (error) throw error
   return (data ?? []).map(row => row.element as Record<string, unknown>)
 }
