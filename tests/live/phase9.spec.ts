@@ -300,7 +300,7 @@ test('320px, short landscape, keyboard skip navigation and forced colors remain 
   const narrowPage = await narrow.newPage()
   try {
     await narrowPage.goto('./')
-    await expect(narrowPage.getByText('Live', { exact: true })).toBeVisible()
+    await expect(narrowPage.locator('[data-connection-state="live"]')).toBeVisible()
     const overflow = await narrowPage.evaluate(() => ({
       body: document.body.scrollWidth - document.documentElement.clientWidth,
       root: document.documentElement.scrollWidth - document.documentElement.clientWidth,
