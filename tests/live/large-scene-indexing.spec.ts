@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL } from '../../app/config/public-config.ts'
 import type { DiagnosticsSnapshot } from '../../app/diagnostics/metrics.ts'
 import { dragOnCanvas, readScene } from './scene-helpers.ts'
+import { retryTransientSupabaseTestOperation } from './supabase-test-helpers.ts'
 
 const TABLE = 'canvas_ci_elements'
 const TARGET_ROWS = 1100
@@ -18,7 +19,7 @@ type StoredRow = {
 }
 
 async function cleanWorld() {
-  const { error } = await supabase.from(TABLE).delete().neq('id', '')
+  const { error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE).delete().neq('id', ''))
   if (error) throw error
 }
 
@@ -39,16 +40,16 @@ async function createTemplate(browser: Browser): Promise<StoredRow> {
     await dragOnCanvas(page, [300, 250], [430, 330])
     let row: StoredRow | null = null
     await expect.poll(async () => {
-      const { data, error } = await supabase.from(TABLE)
+      const { data, error } = await retryTransientSupabaseTestOperation(() => supabase.from(TABLE)
         .select('id,version,version_nonce,element')
         .eq('is_deleted', false)
         .order('revision', { ascending: false })
         .limit(1)
-        .maybeSingle()
+        .maybeSingle())
       if (error) throw error
       if (data?.element?.type === 'rectangle' && data.element.width === 130 && data.element.height === 80) row = data as StoredRow
       return Boolean(row)
-    }).toBe(true)
+    }, { timeout: 60_000 }).toBe(true)
     if (!row) throw new Error('Failed to create the large-scene seed rectangle.')
     return row
   } finally {
@@ -87,22 +88,26 @@ async function seedLargeScene(template: StoredRow) {
   }
 
   for (let offset = 0; offset < rows.length; offset += 200) {
-    const { error } = await supabase.from(TABLE).upsert(rows.slice(offset, offset + 200), { onConflict: 'id' })
+    const { error } = await retryTransientSupabaseTestOperation(() =>
+      supabase.from(TABLE).upsert(rows.slice(offset, offset + 200), { onConflict: 'id' }),
+    )
     if (error) throw error
   }
 
   await expect.poll(async () => {
-    const { count, error } = await supabase.from(TABLE).select('*', { count: 'exact', head: true }).eq('is_deleted', false)
+    const { count, error } = await retryTransientSupabaseTestOperation(() =>
+      supabase.from(TABLE).select('*', { count: 'exact', head: true }).eq('is_deleted', false),
+    )
     if (error) throw error
     return count
-  }).toBe(TARGET_ROWS)
+  }, { timeout: 60_000 }).toBe(TARGET_ROWS)
 }
 
 test.beforeEach(cleanWorld)
 test.afterEach(cleanWorld)
 
 test('large scenes hydrate atomically and local edits skip unchanged element work', async ({ browser }) => {
-  test.setTimeout(150_000)
+  test.setTimeout(240_000)
   const template = await createTemplate(browser)
   await seedLargeScene(template)
 
