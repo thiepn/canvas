@@ -603,6 +603,9 @@
 .canvas-app[data-simple-ui="true"] .canvas-backdrop::after{
   display:none!important;
 }
+.canvas-app[data-simple-ui="true"] .rich-text-toolbar{
+  display:none!important;
+}
 .canvas-app[data-simple-ui="true"] .live-canvas-header{
   box-shadow:none;
 }
