@@ -25,7 +25,8 @@
     "test:production": "node scripts/test-production.mjs",
     "source:syntax": "node scripts/check-source.mjs",
     "performance:report": "node scripts/render-performance-report.mjs",
-    "audit:architecture": "node scripts/audit-architecture.mjs"
+    "audit:architecture": "node scripts/audit-architecture.mjs",
+    "performance:budget": "node scripts/assert-performance-budget.mjs"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
