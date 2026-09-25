@@ -1611,6 +1611,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
     applyingRemote.current = true
     editor.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER })
+    ensureAssetsForElements(merged)
     sceneVersionIndexRef.current.replace(merged, isAllowedElement)
     localSceneSnapshotRef.current = indexSceneById(merged)
     for (const element of candidates) {
@@ -1626,7 +1627,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     notify(`Recovered ${candidates.length} unsaved local change${candidates.length === 1 ? '' : 's'} after the previous interruption.`)
     queueMicrotask(() => { applyingRemote.current = false })
     await persistRecoveryState()
-  }, [config.tableName, notify, patchSyncRuntime, persistRecoveryState])
+  }, [config.tableName, ensureAssetsForElements, notify, patchSyncRuntime, persistRecoveryState])
 
   const reconcileAuthoritative = useCallback(async () => {
     if (reconciliationInFlightRef.current || !pageActiveRef.current || statusRef.current !== 'Live' || !navigator.onLine || continuousOperationRef.current) return
