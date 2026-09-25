@@ -237,3 +237,33 @@ test('320px, short landscape, keyboard skip navigation and forced colors remain 
     await forced.close()
   }
 })
+
+test('four live clients converge under a small collaboration burst', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Phase 9 collaboration-load contract needs one browser execution.')
+  test.setTimeout(120_000)
+  const contexts = await Promise.all(Array.from({ length: 4 }, () => browser.newContext({ viewport: { width: 1100, height: 720 } })))
+  const pages = await Promise.all(contexts.map(context => context.newPage()))
+  try {
+    await Promise.all(pages.map(page => page.goto('./?debug=1')))
+    await Promise.all(pages.map(page => expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 30_000 })))
+
+    for (let index = 0; index < pages.length; index++) {
+      const page = pages[index]
+      await page.getByTitle(/^Rectangle\b/i).click()
+      const x = 240 + index * 55
+      const y = 220 + index * 35
+      await dragOnCanvas(page, [x, y], [x + 100, y + 70], 4)
+    }
+
+    await expect.poll(async () => (await activeRows()).filter(row => row.element?.type === 'rectangle').length, { timeout: 30_000 }).toBe(4)
+
+    for (const page of pages) {
+      await page.bringToFront()
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+      await expect.poll(async () => (await readScene(page)).filter(element => element.type === 'rectangle').length, { timeout: 30_000 }).toBe(4)
+      await expect(page.getByText('Live', { exact: true })).toBeVisible()
+    }
+  } finally {
+    await Promise.allSettled(contexts.map(context => context.close()))
+  }
+})
