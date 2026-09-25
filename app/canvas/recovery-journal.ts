@@ -70,14 +70,14 @@ export function buildRecoveryJournal(
     const previous = byId.get(element.id)
     if (!previous || isNewerVersion(element, previous)) byId.set(element.id, element)
   }
-  const bounded = [...byId.values()].slice(-RECOVERY_MAX_ELEMENTS)
+  if (byId.size > RECOVERY_MAX_ELEMENTS) return null
   const journal: RecoveryJournal = {
     schemaVersion: RECOVERY_SCHEMA_VERSION,
     key: keyFor(tableName, deviceId),
     tableName,
     deviceId,
     savedAt,
-    elements: bounded,
+    elements: [...byId.values()],
   }
   const bytes = new TextEncoder().encode(JSON.stringify(journal)).length
   return bytes <= RECOVERY_MAX_BYTES ? journal : null
