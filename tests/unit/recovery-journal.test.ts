@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   RECOVERY_MAX_AGE_MS,
+  RECOVERY_MAX_ELEMENTS,
   buildRecoveryJournal,
   parseRecoveryJournal,
   recoveryCandidates,
@@ -71,4 +72,12 @@ test('pending images are never accepted into the durable crash journal', () => {
   const journal = buildRecoveryJournal('canvas_elements', 'device-a', [pendingImage])
   assert.ok(journal)
   assert.equal(journal.elements.length, 0)
+})
+
+
+test('recovery journal rejects oversized pending sets instead of silently truncating them', () => {
+  const elements = Array.from({ length: RECOVERY_MAX_ELEMENTS + 1 }, (_, index) =>
+    element(`item-${index}`, 1, index + 1),
+  )
+  assert.equal(buildRecoveryJournal('canvas_elements', 'device-a', elements), null)
 })
