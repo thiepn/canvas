@@ -21,3 +21,18 @@ export function isSafeCanvasGeometry(value: CanvasGeometryLike): boolean {
     && finiteWithin(value.height, CANVAS_MAX_DIMENSION)
     && finiteWithin(value.angle, CANVAS_MAX_ANGLE)
 }
+
+
+export const CANVAS_MAX_POINTS = 10_000
+
+export function isSafeCanvasPoints(value: unknown, maxPoints = CANVAS_MAX_POINTS): boolean {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.length <= maxPoints
+    && value.every(point =>
+      Array.isArray(point)
+      && point.length >= 2
+      && finiteWithin(point[0], CANVAS_MAX_COORDINATE)
+      && finiteWithin(point[1], CANVAS_MAX_COORDINATE),
+    )
+}
