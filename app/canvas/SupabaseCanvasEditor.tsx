@@ -2776,6 +2776,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
             const imported = await prepareCanvasJsonImport(text)
             if (!imported.elements.length) throw new Error('The clipboard contains no supported canvas objects.')
             insertElements(editor, imported.elements, imported.files)
+            if (imported.droppedElements) notify(`Pasted the supported objects and skipped ${imported.droppedElements} unsafe or unsupported item${imported.droppedElements === 1 ? '' : 's'}.`)
             for (const fileData of Object.values(imported.files)) {
               void ensureUploadedAsset(fileData).catch(() => {})
             }
@@ -2824,6 +2825,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       const imported = await prepareCanvasJsonImport(await file.text())
       if (!imported.elements.length) throw new Error('The import contains no supported canvas objects.')
       insertElements(editor, imported.elements, imported.files)
+      if (imported.droppedElements) notify(`Imported the supported objects and skipped ${imported.droppedElements} unsafe or unsupported item${imported.droppedElements === 1 ? '' : 's'}.`)
       for (const fileData of Object.values(imported.files)) {
         void ensureUploadedAsset(fileData).catch(() => {})
       }
