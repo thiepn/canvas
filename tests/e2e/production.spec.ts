@@ -122,7 +122,7 @@ test('production presents one simple native-style editing surface', async ({ pag
   await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
 
-  await expect(page.locator('[data-testid="toolbar-text"]')).toBeVisible()
+  await expect(page.getByRole('radio', { name: /^Text\b/i })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Canvas visuals' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Drawing tools' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Shape library' })).toHaveCount(0)
@@ -133,8 +133,9 @@ test('production presents one simple native-style editing surface', async ({ pag
 
   // Standard tool shortcuts belong to Excalidraw again; T must select the
   // visible native text tool instead of Canvas's retired parallel text mode.
+  const textTool = page.getByRole('radio', { name: /^Text\b/i })
   await page.keyboard.press('t')
-  await expect(page.locator('[data-testid="toolbar-text"]')).toHaveAttribute('aria-checked', 'true')
+  await expect(textTool).toBeChecked()
 
   await page.getByRole('button', { name: 'Canvas menu and presence' }).click()
   const settings = page.getByLabel('Canvas settings')
