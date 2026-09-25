@@ -17,7 +17,7 @@ if (!rootLock) throw new Error('package-lock.json is missing its root package re
 if (lock.version !== pkg.version || rootLock.version !== pkg.version) {
   throw new Error(`Release version mismatch: package.json=${pkg.version}, package-lock.json=${lock.version}, lock root=${rootLock.version}.`)
 }
-if (!/^\\d+\\.\\d+\\.\\d+$/.test(pkg.version)) {
+if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
   throw new Error(`Release verification requires a stable semver version, received ${pkg.version}.`)
 }
 if (rootLock.name !== pkg.name) {
@@ -59,7 +59,7 @@ if (keyValue !== undefined && (!keyValue || keyValue.length > 512)) {
 }
 
 const basePath = process.env.VITE_BASE_PATH?.trim() || '/canvas/'
-if (!basePath.startsWith('/') || /[?#\\\\]/.test(basePath) || basePath.split('/').includes('..')) {
+if (!basePath.startsWith('/') || /[?#\\]/.test(basePath) || basePath.split('/').includes('..')) {
   throw new Error('VITE_BASE_PATH must be an absolute URL path, for example /canvas/ or /.')
 }
 
