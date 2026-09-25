@@ -562,3 +562,69 @@
 @media(min-resolution:1dppx){
   .canvas-menu,.visual-controls-popover,.drawing-controls-popover,.shape-library-popover,.media-controls-popover,.selection-popover-panel,.navigation-panel,.rich-text-toolbar{overflow-wrap:anywhere}
 }
+
+/* v2 simplification — production is one familiar editing surface, not a dashboard. */
+.canvas-app[data-simple-ui="true"] .live-excalidraw [data-testid="toolbar-text"]{
+  display:inline-flex!important;
+}
+.canvas-app[data-simple-ui="true"] .live-excalidraw .App-toolbar__extra-tools-trigger{
+  display:flex!important;
+}
+.canvas-app[data-simple-ui="true"] .canvas-menu label[for="live-theme"],
+.canvas-app[data-simple-ui="true"] .canvas-menu #live-theme{
+  display:block!important;
+}
+.canvas-app[data-simple-ui="true"] .simple-menu-section{
+  margin:12px 0 0;
+  border-top:1px solid var(--line);
+  padding-top:10px;
+}
+.canvas-app[data-simple-ui="true"] .simple-menu-section>summary{
+  min-height:40px;
+  display:flex;
+  align-items:center;
+  font-weight:600;
+  cursor:pointer;
+  list-style:none;
+}
+.canvas-app[data-simple-ui="true"] .simple-menu-section>summary::-webkit-details-marker{display:none}
+.canvas-app[data-simple-ui="true"] .simple-menu-section>summary::after{
+  content:'›';
+  margin-left:auto;
+  color:var(--muted);
+  transition:transform .14s ease;
+}
+.canvas-app[data-simple-ui="true"] .simple-menu-section[open]>summary::after{transform:rotate(90deg)}
+.canvas-app[data-simple-ui="true"] .simple-menu-section .collaboration-panel{
+  margin:4px 0 0;
+  border-bottom:0;
+}
+.canvas-app[data-simple-ui="true"] .canvas-backdrop::before,
+.canvas-app[data-simple-ui="true"] .canvas-backdrop::after{
+  display:none!important;
+}
+.canvas-app[data-simple-ui="true"] .live-canvas-header{
+  box-shadow:none;
+}
+.canvas-app[data-simple-ui="true"] .live-canvas-header .identity-trigger{
+  min-width:40px;
+}
+@media(max-width:520px) and (min-height:501px){
+  .canvas-app[data-simple-ui="true"] .canvas-header{
+    flex:0 0 54px;
+    min-height:54px;
+    flex-wrap:nowrap;
+    align-content:normal;
+    gap:4px;
+    padding-top:4px;
+    padding-bottom:4px;
+  }
+  .canvas-app[data-simple-ui="true"] .canvas-header .header-spacer{display:block}
+  .canvas-app[data-simple-ui="true"] .canvas-header .connection{
+    order:initial;
+    flex:0 1 auto;
+    max-width:120px;
+  }
+  .canvas-app[data-simple-ui="true"] .canvas-header>.identity-trigger{order:initial}
+}
+
