@@ -2954,7 +2954,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   >
     <a className="skip-link" href="#shared-canvas-workspace">Skip to canvas</a>
     <p id="canvas-keyboard-instructions" className="sr-only">
-      Shared infinite canvas. Use the top toolbar to choose drawing and editing tools. Press V for selection, Space for pan, T for text, and F for frame. Tab reaches Canvas-owned controls; Escape closes open menus.
+      Shared infinite canvas. Use the standard toolbar to select, draw, add text, erase, and insert content. Press V for selection, Space for pan, T for text, and F for frame. Escape closes open menus.
     </p>
     <LiveHeader
       api={api}
@@ -3019,7 +3019,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       aria-describedby="canvas-keyboard-instructions"
       tabIndex={-1}
     >
-      <CanvasBackdrop ref={backdropRef} profile={backdropProfile} theme={resolvedTheme} />
+      {!SIMPLE_UI && <CanvasBackdrop ref={backdropRef} profile={backdropProfile} theme={resolvedTheme} />}
       {!SIMPLE_UI && delightBurst > 0 && <div key={delightBurst} className="canvas-delight-burst" aria-hidden="true">
         {Array.from({ length: 10 }, (_, index) => <span key={index} style={{ '--delight-index': index } as CSSProperties}>✦</span>)}
       </div>}
