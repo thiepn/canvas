@@ -25,6 +25,6 @@ export default defineConfig({
     url: 'http://127.0.0.1:5190/canvas/',
     reuseExistingServer: false,
     timeout: 120000,
-    env: { VITE_CANVAS_TABLE: 'canvas_ci_elements', VITE_BASE_PATH: '/canvas/' },
+    env: { VITE_CANVAS_TABLE: 'canvas_ci_elements', VITE_BASE_PATH: '/canvas/', VITE_CANVAS_UI: 'advanced' },
   },
 })

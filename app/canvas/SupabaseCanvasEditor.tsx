@@ -152,6 +152,11 @@ const UI_OPTIONS = {
   welcomeScreen: false,
 } as const
 
+// Production deliberately presents one familiar Excalidraw-style editing surface.
+// The older Canvas-owned control suites remain available to the live compatibility
+// harness so data/features stay testable while the user-facing UI stays simple.
+const SIMPLE_UI = import.meta.env.VITE_CANVAS_UI !== 'advanced'
+
 function stampOf(element: SceneElement): VersionStamp {
   return { version: element.version, versionNonce: element.versionNonce, isDeleted: element.isDeleted }
 }
@@ -321,11 +326,11 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
     <div role="status" aria-live="polite" aria-atomic="true" data-sync-health={syncHealth.key} data-connection-state={status.toLowerCase()} className={`connection sync-health sync-health--${syncHealth.tone}`} aria-label={`${syncHealth.label}. ${syncHealth.detail}${status === 'Live' ? ' Live connection.' : ''}`} title={syncHealth.detail}><span aria-hidden="true" /><span>{syncHealth.label}</span>{status === 'Live' && <span className="connection-transport">Live</span>}</div>
     <div className="header-spacer" />
     <div className="people-peek" aria-label={status === 'Live' ? `${people.length + 1} people connected` : 'No active connection'}>{status === 'Live' && people.slice(0, 3).map(person => <span key={person.deviceId} title={person.displayName} className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />)}</div>
-    {visualControls}
-    {mediaControls}
-    {drawingControls}
-    <button ref={shapeTriggerRef} type="button" className={`icon-button shape-library-button${shapeMenu ? ' is-active' : ''}`} aria-label="Shape library" aria-expanded={shapeMenu} title="Shape library" disabled={!api || status !== 'Live'} onClick={() => setShapeMenu(value => !value)}><Icon name="rectangle" /></button>
-    {shapeMenu && <div ref={shapeMenuRef} className="shape-library-popover" aria-label="Shape library menu">
+    {!SIMPLE_UI && visualControls}
+    {!SIMPLE_UI && mediaControls}
+    {!SIMPLE_UI && drawingControls}
+    {!SIMPLE_UI && <button ref={shapeTriggerRef} type="button" className={`icon-button shape-library-button${shapeMenu ? ' is-active' : ''}`} aria-label="Shape library" aria-expanded={shapeMenu} title="Shape library" disabled={!api || status !== 'Live'} onClick={() => setShapeMenu(value => !value)}><Icon name="rectangle" /></button>}
+    {!SIMPLE_UI && shapeMenu && <div ref={shapeMenuRef} className="shape-library-popover" aria-label="Shape library menu">
       <div className="shape-library-heading">SHAPES</div>
       <div className="shape-library-grid">
         <button type="button" onClick={() => activateNativeShape('rectangle')}><span className="shape-preview shape-preview--rectangle" />Rectangle</button>
@@ -349,23 +354,33 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
         <button type="button" onClick={() => addCustomShape('bolt')}><span className="stamp-preview" aria-hidden="true">ϟ</span>Bolt</button>
       </div>
     </div>}
-    <button type="button" className={`icon-button rich-text-button${richTextMode ? ' is-active' : ''}`} aria-label="Rich text" aria-pressed={richTextMode} title="Rich text (T)" disabled={!api || status !== 'Live'} onClick={toggleRichText}><Icon name="text" /></button>
-    <button type="button" className="icon-button frame-button" aria-label="Frame tool" title="Frame tool" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" /></button>
-    <button type="button" className="icon-button fit-button" aria-label="Fit content" title="Fit all content" disabled={!api} onClick={fit}><Icon name="fit" /></button>
+    {!SIMPLE_UI && <button type="button" className={`icon-button rich-text-button${richTextMode ? ' is-active' : ''}`} aria-label="Rich text" aria-pressed={richTextMode} title="Rich text (T)" disabled={!api || status !== 'Live'} onClick={toggleRichText}><Icon name="text" /></button>}
+    {!SIMPLE_UI && <button type="button" className="icon-button frame-button" aria-label="Frame tool" title="Frame tool" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" /></button>}
+    {!SIMPLE_UI && <button type="button" className="icon-button fit-button" aria-label="Fit content" title="Fit all content" disabled={!api} onClick={fit}><Icon name="fit" /></button>}
     <button ref={triggerRef} type="button" className="identity-trigger" aria-label="Canvas menu and presence" aria-expanded={menu} aria-controls={menu ? 'live-canvas-menu' : undefined} onClick={() => setMenu(!menu)}><span className="identity-initial" style={{ borderColor: safeColor(identity.color) }}>{identity.displayName.slice(0, 1).toUpperCase()}</span><span className="identity-name">{identity.displayName}</span><Icon name="more" /></button>
     {menu && <div ref={menuRef} id="live-canvas-menu" className="canvas-menu" aria-label="Canvas settings">
       <div className="menu-heading">ON THIS CANVAS</div>
       <div className="people-list"><div><span className="presence-dot" style={{ backgroundColor: safeColor(identity.color) }} />{identity.displayName}<small>You</small></div>{status === 'Live' && people.map(person => <div key={person.deviceId}><span className="presence-dot" style={{ backgroundColor: safeColor(person.color) }} />{person.displayName || 'Guest'}</div>)}</div>
-      {collaborationPanel}
+      {SIMPLE_UI
+        ? <details className="simple-menu-section"><summary>Collaboration</summary>{collaborationPanel}</details>
+        : collaborationPanel}
       <form onSubmit={submit}><label htmlFor="live-display-name">Display name</label><div className="name-input"><input id="live-display-name" autoComplete="off" maxLength={32} value={name} onChange={event => setName(event.target.value)} /><button type="submit">Save</button></div></form>
       <label htmlFor="live-theme">Appearance</label><select id="live-theme" value={theme} onChange={event => changeTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
-      <div className="menu-heading menu-tools-heading">CANVAS CONTROLS</div>
-      <button type="button" className="menu-action" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" />Frame tool</button>
-      <button type="button" className="menu-action" disabled={!api} onClick={() => downloadBackup(api)}><Icon name="download" />Export JSON backup</button>
-      <button type="button" className="menu-action" disabled={!api} onClick={() => { fit(); setMenu(false) }}><Icon name="fit" />Fit all content</button>
-      <button type="button" className="menu-action" disabled={!api || status !== 'Live' || !hasLockedElements} onClick={() => { unlockAll(); setMenu(false) }}><Icon name="select" />Unlock all locked objects</button>
+      {SIMPLE_UI ? <details className="simple-menu-section simple-menu-more">
+        <summary>More</summary>
+        <button type="button" className="menu-action" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" />Frame tool</button>
+        <button type="button" className="menu-action" disabled={!api} onClick={() => downloadBackup(api)}><Icon name="download" />Export JSON backup</button>
+        <button type="button" className="menu-action" disabled={!api} onClick={() => { fit(); setMenu(false) }}><Icon name="fit" />Fit all content</button>
+        <button type="button" className="menu-action" disabled={!api || status !== 'Live' || !hasLockedElements} onClick={() => { unlockAll(); setMenu(false) }}><Icon name="select" />Unlock all locked objects</button>
+      </details> : <>
+        <div className="menu-heading menu-tools-heading">CANVAS CONTROLS</div>
+        <button type="button" className="menu-action" disabled={!api || status !== 'Live'} onClick={activateFrame}><Icon name="frame" />Frame tool</button>
+        <button type="button" className="menu-action" disabled={!api} onClick={() => downloadBackup(api)}><Icon name="download" />Export JSON backup</button>
+        <button type="button" className="menu-action" disabled={!api} onClick={() => { fit(); setMenu(false) }}><Icon name="fit" />Fit all content</button>
+        <button type="button" className="menu-action" disabled={!api || status !== 'Live' || !hasLockedElements} onClick={() => { unlockAll(); setMenu(false) }}><Icon name="select" />Unlock all locked objects</button>
+      </>}
       <p className="privacy-note">One shared canvas. Anyone with the link can read and change everything. Names are not verified identities. Unsaved changes may be kept temporarily in local crash-recovery storage on this device until the shared save is confirmed.</p>
-      <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Pen · Shift+E Stroke eraser · E Object eraser · T Text · F Frame · Space Pan</p>
+      {!SIMPLE_UI && <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Pen · Shift+E Stroke eraser · E Object eraser · T Text · F Frame · Space Pan</p>}
     </div>}
   </header>
 }
@@ -574,11 +589,23 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const assetBucket = useMemo(() => assetBucketForTable(config.tableName), [config.tableName])
 
   const resolvedTheme = theme === 'system' ? systemDark ? 'dark' : 'light' : theme
-  const resolvedMotion = resolveCanvasMotion(visualProfile.motion, systemReducedMotion)
+  const effectiveVisualProfile = useMemo<CanvasVisualProfile>(() => SIMPLE_UI
+    ? {
+        ...visualProfile,
+        accent: 'blue',
+        paper: 'clean',
+        gridPattern: 'none',
+        motion: 'system',
+        sounds: false,
+        haptics: false,
+        ambientGlow: false,
+      }
+    : visualProfile, [visualProfile])
+  const resolvedMotion = resolveCanvasMotion(effectiveVisualProfile.motion, systemReducedMotion)
   const backdropProfile = useMemo<CanvasVisualProfile>(() => ({
-    ...visualProfile,
-    gridPattern: gridModeEnabled && visualProfile.gridPattern !== 'squares' ? visualProfile.gridPattern : 'none',
-  }), [gridModeEnabled, visualProfile])
+    ...effectiveVisualProfile,
+    gridPattern: SIMPLE_UI ? 'none' : gridModeEnabled && effectiveVisualProfile.gridPattern !== 'squares' ? effectiveVisualProfile.gridPattern : 'none',
+  }), [effectiveVisualProfile, gridModeEnabled])
   const syncHealth = useMemo(() => deriveSyncHealth({ connection: status, ...syncRuntime }), [status, syncRuntime])
   const recoveryNotice = recoveryMessage(syncHealth)
 
@@ -1383,12 +1410,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     }
   }, [captureCurrentScene, clearRemotePreviews, transition])
   useEffect(() => {
-    visualProfileRef.current = visualProfile
+    visualProfileRef.current = effectiveVisualProfile
     document.documentElement.dataset.theme = resolvedTheme
     document.documentElement.dataset.canvasMotion = resolvedMotion
-    document.documentElement.dataset.canvasAccent = visualProfile.accent
-    document.documentElement.dataset.canvasPaper = visualProfile.paper
-  }, [resolvedMotion, resolvedTheme, visualProfile])
+    document.documentElement.dataset.canvasAccent = effectiveVisualProfile.accent
+    document.documentElement.dataset.canvasPaper = effectiveVisualProfile.paper
+  }, [effectiveVisualProfile, resolvedMotion, resolvedTheme])
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)')
     const update = () => setSystemDark(media.matches)
@@ -2356,6 +2383,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         setRichTextMode(false)
         return
       }
+      if (SIMPLE_UI) return
       if (event.altKey || event.ctrlKey || event.metaKey) return
       const key = event.key.toLowerCase()
       if (key === 't') {
@@ -2730,6 +2758,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }
 
   const handleCanvasDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (SIMPLE_UI) return
     if (richTextLayerRef.current?.editSelected()) {
       event.preventDefault()
       event.stopPropagation()
@@ -2919,12 +2948,13 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     className="canvas-app live-canvas-app"
     data-canvas-engine="excalidraw-supabase"
     data-canvas-motion={resolvedMotion}
-    data-canvas-grid={gridModeEnabled ? visualProfile.gridPattern : 'none'}
-    style={visualRootStyle(visualProfile, resolvedTheme)}
+    data-canvas-grid={SIMPLE_UI ? 'none' : gridModeEnabled ? visualProfile.gridPattern : 'none'}
+    data-simple-ui={SIMPLE_UI ? 'true' : 'false'}
+    style={visualRootStyle(effectiveVisualProfile, resolvedTheme)}
   >
     <a className="skip-link" href="#shared-canvas-workspace">Skip to canvas</a>
     <p id="canvas-keyboard-instructions" className="sr-only">
-      Shared infinite canvas. Use the top toolbar to choose drawing and editing tools. Press V for selection, Space for pan, T for text, and F for frame. Tab reaches Canvas-owned controls; Escape closes open menus.
+      Shared infinite canvas. Use the standard toolbar to select, draw, add text, erase, and insert content. Press V for selection, Space for pan, T for text, and F for frame. Escape closes open menus.
     </p>
     <LiveHeader
       api={api}
@@ -2989,8 +3019,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
       aria-describedby="canvas-keyboard-instructions"
       tabIndex={-1}
     >
-      <CanvasBackdrop ref={backdropRef} profile={backdropProfile} theme={resolvedTheme} />
-      {delightBurst > 0 && <div key={delightBurst} className="canvas-delight-burst" aria-hidden="true">
+      {!SIMPLE_UI && <CanvasBackdrop ref={backdropRef} profile={backdropProfile} theme={resolvedTheme} />}
+      {!SIMPLE_UI && delightBurst > 0 && <div key={delightBurst} className="canvas-delight-burst" aria-hidden="true">
         {Array.from({ length: 10 }, (_, index) => <span key={index} style={{ '--delight-index': index } as CSSProperties}>✦</span>)}
       </div>}
       <div
@@ -3012,8 +3042,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onScrollChange={() => requestAnimationFrame(refreshNavigationUi)}
           theme={resolvedTheme}
           viewModeEnabled={status !== 'Live'}
-          objectsSnapModeEnabled={objectsSnapModeEnabled}
-          gridModeEnabled={gridModeEnabled && visualProfile.gridPattern === 'squares'}
+          objectsSnapModeEnabled={SIMPLE_UI ? false : objectsSnapModeEnabled}
+          gridModeEnabled={!SIMPLE_UI && gridModeEnabled && visualProfile.gridPattern === 'squares'}
           handleKeyboardGlobally
           isCollaborating={status === 'Live'}
           UIOptions={UI_OPTIONS}
@@ -3043,7 +3073,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onEditEnd={endRichTextOperation}
           onDraft={recordRichTextDraft}
         />
-        <SelectionToolbar
+        {!SIMPLE_UI && <SelectionToolbar
           api={api}
           selection={selectionSnapshot}
           disabled={status !== 'Live'}
@@ -3055,8 +3085,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onSelectionRefresh={refreshSelectionUi}
           onManipulationCommit={captureCurrentScene}
           onReplaceImage={replaceImageFile}
-        />
-        <NavigationOverlay ref={navigationRef} api={api} onSelectionRefresh={refreshCanvasSelectionOverlays} />
+        />}
+        {!SIMPLE_UI && <NavigationOverlay ref={navigationRef} api={api} onSelectionRefresh={refreshCanvasSelectionOverlays} />}
       </div>
       {recoveryNotice && <div className="network-banner"><span>{recoveryNotice}</span>{navigator.onLine && (status === 'Error' || status === 'Reconnecting') && <button type="button" onClick={retryConnectionNow}>Retry now</button>}</div>}
       {status === 'Live' && (syncHealth.key === 'retrying-save' || syncHealth.key === 'confirming-save') && <div className={`save-health-banner save-health-banner--${syncHealth.tone}`}><span>{syncHealth.detail}</span>{syncHealth.key === 'retrying-save' && <button type="button" onClick={retrySaveNow}>Retry now</button>}</div>}

@@ -41,7 +41,9 @@ try {
   requireSecureResponse(page.url())
   await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible({ timeout: 45_000 })
   await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 45_000 })
-  await expect(page.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
+  await expect(page.getByRole('radio', { name: /^Text\b/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Canvas visuals' })).toHaveCount(0)
+  await expect(page.getByRole('toolbar', { name: 'Canvas navigation' })).toHaveCount(0)
   expect(await page.locator('script[type="module"][src]').first().getAttribute('src')).toBe(expectedAsset)
   expect(await page.evaluate(() => '__CANVAS_TEST__' in window)).toBe(false)
 
@@ -72,7 +74,9 @@ try {
   const settings = page.getByLabel('Canvas settings')
   await expect(settings).toBeVisible()
   await expect(settings.getByLabel('Display name')).toBeVisible()
-  await expect(settings.getByRole('button', { name: 'Frame tool' })).toBeEnabled()
+  await expect(settings.getByLabel('Appearance')).toBeVisible()
+  await expect(settings.getByText('Collaboration', { exact: true })).toBeVisible()
+  await expect(settings.getByText('More', { exact: true })).toBeVisible()
   const layout = await page.evaluate(() => ({
     width: innerWidth,
     height: innerHeight,
@@ -84,7 +88,7 @@ try {
   await page.screenshot({ path: 'artifacts/deployed/mobile-menu.png' })
   expect(pageErrors).toEqual([])
   expect(failedAssets).toEqual([])
-  const evidence = { commit: process.env.GITHUB_SHA, reportedUrl: process.env.CANVAS_DEPLOYED_URL, url: url.origin + url.pathname, finalUrl: page.url(), expectedAsset, checkedAt: new Date().toISOString(), checks: ['https-with-valid-certificate', 'exact-published-bundle', 'real-supabase-live', 'wheel-zooms-canvas', 'no-test-bridge', 'offline-reconnect', '320px-menu', 'no-page-errors', 'no-missing-assets'], layout }
+  const evidence = { commit: process.env.GITHUB_SHA, reportedUrl: process.env.CANVAS_DEPLOYED_URL, url: url.origin + url.pathname, finalUrl: page.url(), expectedAsset, checkedAt: new Date().toISOString(), checks: ['https-with-valid-certificate', 'exact-published-bundle', 'real-supabase-live', 'wheel-zooms-canvas', 'simple-single-surface-ui', 'no-test-bridge', 'offline-reconnect', '320px-menu', 'no-page-errors', 'no-missing-assets'], layout }
   await writeFile('artifacts/deployed/verification.json', JSON.stringify(evidence, null, 2))
   console.log(JSON.stringify(evidence))
 } finally {

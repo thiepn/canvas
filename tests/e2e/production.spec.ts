@@ -117,3 +117,31 @@ test('built PWA restores its static shell offline without caching shared Supabas
   await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 45_000 })
 })
 
+test('production presents one simple native-style editing surface', async ({ page }) => {
+  await page.goto('/canvas/')
+  await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+
+  await expect(page.getByRole('radio', { name: /^Text\b/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Canvas visuals' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Drawing tools' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Shape library' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Rich text' })).toHaveCount(0)
+  await expect(page.getByRole('toolbar', { name: 'Canvas navigation' })).toHaveCount(0)
+  await expect(page.locator('.selection-toolbar')).toHaveCount(0)
+  await expect(page.locator('.canvas-app')).toHaveAttribute('data-canvas-grid', 'none')
+
+  // Standard tool shortcuts belong to Excalidraw again; T must select the
+  // visible native text tool instead of Canvas's retired parallel text mode.
+  const textTool = page.getByRole('radio', { name: /^Text\b/i })
+  await page.keyboard.press('t')
+  await expect(textTool).toBeChecked()
+
+  await page.getByRole('button', { name: 'Canvas menu and presence' }).click()
+  const settings = page.getByLabel('Canvas settings')
+  await expect(settings.getByLabel('Display name')).toBeVisible()
+  await expect(settings.getByLabel('Appearance')).toBeVisible()
+  await expect(settings.getByText('Collaboration', { exact: true })).toBeVisible()
+  await expect(settings.getByText('More', { exact: true })).toBeVisible()
+})
+
