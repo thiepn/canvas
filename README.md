@@ -31,6 +31,19 @@ Version 2.0 freezes the current canvas-native feature surface and makes release 
 
 See [the Phase 10 release contract](./docs/phase10-v2-release.md) and [AUDIT.md](./AUDIT.md).
 
+## v2.0.1 interface simplification
+
+The default production interface is intentionally close to a normal drawing app again:
+
+- one native-style Excalidraw toolbar is the primary way to select, draw, add text, erase and insert images;
+- the parallel Canvas drawing menu, shape library, rich-text insertion mode, visual dashboard, custom selection inspector and minimap/navigation toolbar are removed from the everyday surface;
+- the canvas opens clean with no grid/line background or ambient effects;
+- T and the other ordinary tool shortcuts are handled by the standard editor again;
+- appearance, collaboration and infrequent recovery/export actions live behind the single account/menu button;
+- existing rich-text/custom-shape content remains readable and compatible.
+
+The advanced control surface remains available only to the compatibility test build so the underlying data paths can continue to be regression-tested without making production users navigate them.
+
 ## Scale and resilience
 
 Phase 9 hardens Canvas for large, long-lived shared worlds without changing the product model:
