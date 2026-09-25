@@ -41,7 +41,7 @@ try {
   requireSecureResponse(page.url())
   await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible({ timeout: 45_000 })
   await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 45_000 })
-  await expect(page.locator('[data-testid="toolbar-text"]')).toBeVisible()
+  await expect(page.getByRole('radio', { name: /^Text\b/i })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Canvas visuals' })).toHaveCount(0)
   await expect(page.getByRole('toolbar', { name: 'Canvas navigation' })).toHaveCount(0)
   expect(await page.locator('script[type="module"][src]').first().getAttribute('src')).toBe(expectedAsset)
