@@ -285,7 +285,13 @@ export async function prepareCanvasJsonImport(text: string): Promise<{
     repairBindings: false,
     refreshDimensions: false,
   }) as MediaSceneElement[]
-  return { elements: restored.filter(element => isSafeCanvasGeometry(element)), files }
+  return {
+    elements: restored.filter(element =>
+      isSafeCanvasGeometry(element)
+      && (!(element.type === 'line' || element.type === 'arrow' || element.type === 'freedraw') || isSafeCanvasPoints(element.points)),
+    ),
+    files,
+  }
 }
 
 export function createBookmarkCard(urlText: string, api: ExcalidrawImperativeAPI): MediaSceneElement[] | null {
