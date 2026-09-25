@@ -1258,18 +1258,31 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'z') return
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return
+      const key = event.key.toLowerCase()
+      const undoShortcut = key === 'z' && !event.shiftKey
+      const redoShortcut = (key === 'z' && event.shiftKey) || (key === 'y' && !event.shiftKey)
+      if (!undoShortcut && !redoShortcut) return
       const target = event.target as HTMLElement | null
       if (target?.closest('input,textarea,select,[contenteditable="true"]')) return
-      if (statusRef.current !== 'Live' || ownUndoStackRef.current.length === 0) return
+
+      // Shared history must never fall through to Excalidraw's tab-local stack.
+      // Our authoritative own-action undo is conflict checked in Postgres; a
+      // native redo after that transaction could replay stale pre-undo state.
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
-      undoMyLastAction()
+
+      if (redoShortcut) {
+        if (statusRef.current === 'Live') notify('Redo is unavailable in shared mode. Make the change again instead.')
+        return
+      }
+      if (statusRef.current !== 'Live' || ownUndoStackRef.current.length === 0) return
+      void undoMyLastAction()
     }
     document.addEventListener('keydown', keydown, true)
     return () => document.removeEventListener('keydown', keydown, true)
-  }, [undoMyLastAction])
+  }, [notify, undoMyLastAction])
 
   useEffect(() => { identityRef.current = identity }, [identity])
   useEffect(() => { shareCursorRef.current = shareCursor }, [shareCursor])
