@@ -1,3 +1,4 @@
+import { isSafeCanvasGeometry, isSafeCanvasPoints } from './geometry-contract.ts'
 import { isPersistableCanvasElement } from './media-assets.ts'
 import { isNewerVersion, type VersionStamp } from './sync-version.ts'
 
@@ -52,6 +53,8 @@ export function isRecoveryElement(value: unknown): value is RecoveryElement {
     && Number.isInteger(candidate.versionNonce)
     && typeof candidate.isDeleted === 'boolean'
     && elementBytes(candidate as RecoveryElement) <= 262_144
+    && isSafeCanvasGeometry(candidate)
+    && (!(candidate.type === 'line' || candidate.type === 'arrow' || candidate.type === 'freedraw') || isSafeCanvasPoints(candidate.points))
     && isPersistableCanvasElement(candidate as RecoveryElement)
 }
 
