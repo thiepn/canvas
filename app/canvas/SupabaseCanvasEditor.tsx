@@ -364,7 +364,7 @@ function LiveHeader({ api, identity, people, status, syncHealth, theme, rename, 
       <button type="button" className="menu-action" disabled={!api} onClick={() => downloadBackup(api)}><Icon name="download" />Export JSON backup</button>
       <button type="button" className="menu-action" disabled={!api} onClick={() => { fit(); setMenu(false) }}><Icon name="fit" />Fit all content</button>
       <button type="button" className="menu-action" disabled={!api || status !== 'Live' || !hasLockedElements} onClick={() => { unlockAll(); setMenu(false) }}><Icon name="select" />Unlock all locked objects</button>
-      <p className="privacy-note">One shared canvas. Anyone with the link can read and change everything. Names are not verified identities.</p>
+      <p className="privacy-note">One shared canvas. Anyone with the link can read and change everything. Names are not verified identities. Unsaved changes may be kept temporarily in local crash-recovery storage on this device until the shared save is confirmed.</p>
       <p className="shortcut-note">V Select · R Rectangle · D Diamond · O Ellipse · A Arrow · L Line<br />P/X Pen · Shift+E Stroke eraser · E Object eraser · T Text · F Frame · Space Pan</p>
     </div>}
   </header>
