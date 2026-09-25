@@ -64,25 +64,20 @@ The repository currently has checked-in defaults for the public Supabase URL and
 
 ## 3. Pre-release verification
 
-From a clean checkout:
+From a clean checkout, the complete v2 release command is:
 
 ```bash
 npm ci
-npm audit --audit-level=high
-npm run audit:architecture
-npm run lint
-npm run typecheck
-npm test
-npm run build
-npm run test:live
-npm run test:production
+npm run release:verify
 ```
 
-`audit:architecture` prevents the retired tldraw/Wrangler/Worker stack from returning. `test:live` and `test:production` write only to `canvas_ci_elements` and clean that table before/after their scenarios. They must never target `canvas_elements`.
+`release:verify` requires synchronized stable package/lock metadata and production release configuration, then runs the dependency audit, full quality/browser matrix and performance-budget certification. `test:live`, `test:production` and `test:performance` use only `canvas_ci_elements`; they must never target `canvas_elements`.
 
 ## 4. GitHub Pages
 
-`.github/workflows/ci.yml` is the release pipeline. On a pull request it executes quality tests only. On `main`, the Pages deployment job is conditional on the quality job succeeding.
+`.github/workflows/ci.yml` is the release pipeline. Pull requests run the full quality matrix and exact-commit performance certification. On `main`, Pages deployment is conditional on both jobs succeeding.
+
+The release-certification job runs the 10,000-object and collaboration performance budgets after quality, serialized against other Supabase CI writers.
 
 The Pages job:
 
@@ -93,7 +88,7 @@ The Pages job:
 5. deploys that artifact;
 6. runs the published-site verifier against the returned HTTPS deployment URL.
 
-After merging, require both the quality job and the Pages deployment/verifier to be green. A green pull-request run does **not** prove that Pages deployed.
+After merging, require the quality job, release-certification job, Pages deployment and deployed-site verifier to be green. A green pull-request run does **not** prove that Pages deployed.
 
 ## 5. Post-deployment verification
 

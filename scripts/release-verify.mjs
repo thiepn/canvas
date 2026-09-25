@@ -1,15 +1,32 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
+function readJson(path) {
+  return JSON.parse(readFileSync(path, 'utf8'))
+}
+
 if (!existsSync('package-lock.json')) {
   throw new Error('A committed npm lockfile is required before certifying a release.')
 }
 
-const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
+const pkg = readJson('package.json')
+const lock = readJson('package-lock.json')
+const rootLock = lock.packages?.['']
+
+if (!rootLock) throw new Error('package-lock.json is missing its root package record.')
+if (lock.version !== pkg.version || rootLock.version !== pkg.version) {
+  throw new Error(`Release version mismatch: package.json=${pkg.version}, package-lock.json=${lock.version}, lock root=${rootLock.version}.`)
+}
+if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
+  throw new Error(`Release verification requires a stable semver version, received ${pkg.version}.`)
+}
+if (rootLock.name !== pkg.name) {
+  throw new Error(`Release package name mismatch: package.json=${pkg.name}, package-lock root=${rootLock.name}.`)
+}
+
 for (const dependency of ['node_modules/@excalidraw/excalidraw', 'node_modules/@supabase/supabase-js']) {
   if (!lock.packages?.[dependency]) throw new Error(`Lockfile is missing ${dependency.replace('node_modules/', '')}.`)
 }
-
 
 const table = process.env.VITE_CANVAS_TABLE?.trim() || 'canvas_elements'
 if (table !== 'canvas_elements') {
@@ -47,9 +64,23 @@ if (!basePath.startsWith('/') || /[?#\\]/.test(basePath) || basePath.split('/').
 }
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const result = spawnSync(npm, ['run', 'check'], {
-  stdio: 'inherit',
-  shell: process.platform === 'win32',
-  env: { ...process.env, VITE_CANVAS_TABLE: 'canvas_elements', VITE_BASE_PATH: basePath },
-})
-process.exitCode = result.status ?? 1
+const env = { ...process.env, VITE_CANVAS_TABLE: 'canvas_elements', VITE_BASE_PATH: basePath }
+
+function run(args) {
+  const result = spawnSync(npm, args, {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    env,
+  })
+  if (result.status !== 0) process.exit(result.status ?? 1)
+}
+
+console.log(`Certifying Canvas v${pkg.version}`)
+run(['audit', '--audit-level=high'])
+run(['run', 'check'])
+
+if (process.env.CANVAS_SKIP_PERFORMANCE !== '1') {
+  run(['run', 'test:performance'])
+  run(['run', 'performance:report'])
+  run(['run', 'performance:budget'])
+}

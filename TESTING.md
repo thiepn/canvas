@@ -30,7 +30,7 @@ Phase 7 unit coverage additionally validates content-addressed asset IDs, raster
 
 Phase 8 unit coverage validates visual-profile defaults/persistence, light/dark paper/accent resolution, scene-locked grid math and motion preference resolution.
 
-Phase 9 unit coverage adds spatial indexing/culling, IndexedDB journal parsing/conflict rules, bounded task concurrency, geometry/point contracts and import denial-of-service limits. Passing unit tests are necessary but do not prove realtime browser behavior.
+Phase 9 unit coverage adds spatial indexing/culling, IndexedDB journal parsing/conflict rules, bounded task concurrency, geometry/point contracts and import denial-of-service limits. Phase 10 also guards package/lock release metadata. Passing unit tests are necessary but do not prove realtime browser behavior.
 
 ## Live Supabase matrix
 
@@ -56,6 +56,7 @@ The matrix covers real Excalidraw interaction and Supabase behavior, including:
 - Phase 9 delayed-write, four-client convergence and large-overlay culling stress;
 - Phase 9 database geometry rejection and browser malformed-content filtering;
 - Phase 9 320px, short-landscape, 200% text-size, skip-link/focus and forced-colors resilience;
+- Phase 10 shared-history containment so native undo/redo cannot replay stale state after an authoritative own-action undo;
 - light/dark appearance, accents, paper surfaces and grid background controls;
 - scene-locked dot/line grid scaling and native square-grid compatibility;
 - persistent vector stamps as normal shared custom-shape objects;
@@ -73,7 +74,7 @@ The quality workflow and manual performance workflow share one non-cancelling co
 
 ## Compiled production matrix
 
-`npm run test:production` builds the app with the repository `/canvas/` base path and the isolated CI table, serves only the compiled output, and exercises it in Chromium, Firefox and WebKit. It verifies the shipped `excalidraw-supabase` engine, hashed assets, connection, real persistence, reload behavior and absence of test-only bridges.
+`npm run test:production` builds the app with the repository `/canvas/` base path and the isolated CI table, serves only the compiled output, and exercises it in Chromium, Firefox and WebKit. It verifies the shipped `excalidraw-supabase` engine, hashed assets, connection, real persistence, reload behavior and absence of test-only bridges. Phase 10 additionally installs the compiled service worker in Chromium, reloads under worker control, verifies that Supabase traffic is absent from Cache Storage, performs a full offline navigation, and reconnects to Live.
 
 ## Performance evidence
 
@@ -94,11 +95,14 @@ Do not expose privileged recovery as a browser endpoint merely to automate it.
 
 ## Release criteria
 
-A phase is not release-complete merely because a pull request is green. Required evidence is:
+A phase is not release-complete merely because a pull request is green. Required v2 evidence is:
 
 - exact PR-head quality job green;
-- merged `main` quality job green;
+- exact PR-head release-certification performance job green;
+- merged `main` repeats both jobs successfully;
 - GitHub Pages deployment green;
 - deployed-site verifier green against the published HTTPS bundle.
+
+`npm run release:verify` is the developer-side full certification command: dependency audit, ordinary check matrix, performance run/report and budget assertion.
 
 Playwright traces/screenshots are retained for browser failures. Inspect them before changing synchronization code so locator/actionability, browser/network noise and actual Supabase failures remain distinguishable.

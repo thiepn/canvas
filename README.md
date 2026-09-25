@@ -10,7 +10,7 @@ Canvas is intentionally one shared world named `main`. Identity is anonymous and
 
 Supported content stays deliberately canvas-native:
 
-- selection, move, resize, rotate, duplicate, copy/paste, undo/redo;
+- selection, move, resize, rotate, duplicate, copy/paste, and multiplayer-safe own-action undo; rich-text editing keeps local text undo/redo, while shared-scene redo is intentionally blocked because tab-local history is not collaboration authority;
 - freehand drawing;
 - rectangle, ellipse, diamond, line and arrow;
 - text;
@@ -24,6 +24,12 @@ Supported content stays deliberately canvas-native:
 - lightweight vector stamps that remain ordinary selectable collaborative canvas objects.
 
 Video, audio, PDF-as-canvas-object, arbitrary attachments, iframes/embeds and remote-media objects are not part of the product. Image binaries are content-addressed in Supabase Storage while Postgres independently validates the corresponding image elements.
+
+## v2.0 release hardening
+
+Version 2.0 freezes the current canvas-native feature surface and makes release correctness a first-class gate. Shared Ctrl/Cmd+Z uses only the conflict-checked own-action transaction; tab-local shared-scene redo shortcuts are blocked rather than replaying stale local history. The compiled PWA has an offline-navigation regression, package/lock versions are release-checked, and Pages deployment waits for exact-commit 10k-scene/collaboration performance certification.
+
+See [the Phase 10 release contract](./docs/phase10-v2-release.md) and [AUDIT.md](./AUDIT.md).
 
 ## Scale and resilience
 

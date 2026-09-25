@@ -82,8 +82,54 @@ jobs:
             playwright-report/
             test-results/
             package-lock.json
-  deploy-pages:
+  release-certification:
     needs: quality
+    # Performance evidence mutates canvas_ci_elements too, so it runs only
+    # after the ordinary regression matrix and shares the cross-workflow lock.
+    concurrency:
+      group: canvas-shared-supabase-ci
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Verify version-matched Chromium runtime
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const { chromium } = require('@playwright/test');
+          assert.equal(require('@playwright/test/package.json').version, '1.63.0');
+          fs.accessSync(chromium.executablePath(), fs.constants.X_OK);
+          NODE
+      - name: Certify exact-commit performance budgets
+        run: |
+          npm run test:performance
+          npm run performance:report
+          npm run performance:budget
+        env:
+          HOME: /root
+      - name: Retain release performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: canvas-release-performance
+          path: |
+            artifacts/performance.json
+            artifacts/performance-baseline.md
+            artifacts/performance-run.json
+            test-results/
+
+  deploy-pages:
+    needs: [quality, release-certification]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 12
