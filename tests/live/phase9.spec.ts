@@ -68,6 +68,72 @@ test('IndexedDB recovery journal restores an unsaved finished gesture after relo
   await expect.poll(async () => Number((await diagnostics(page)).gauges.recoveryJournalElements ?? 0)).toBe(0)
 })
 
+test('stale recovery journal never overwrites a newer authoritative collaborator version', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Recovery conflict safety needs one browser execution.')
+  test.setTimeout(90_000)
+  await page.goto('./?debug=1')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+
+  const postPattern = `**/rest/v1/${TABLE}**`
+  await page.route(postPattern, async route => {
+    if (route.request().method() === 'POST') {
+      await route.abort('failed')
+      return
+    }
+    await route.continue()
+  })
+
+  await page.getByTitle(/^Rectangle\b/i).click()
+  await dragOnCanvas(page, [300, 250], [430, 330])
+  await expect.poll(async () => Number((await diagnostics(page)).gauges.recoveryJournalElements ?? 0)).toBeGreaterThan(0)
+
+  let local: Record<string, unknown> | undefined
+  await expect.poll(async () => {
+    local = (await readScene(page)).find(element => element.type === 'rectangle' && element.width === 130 && element.height === 80) as unknown as Record<string, unknown> | undefined
+    return Boolean(local)
+  }).toBe(true)
+  if (!local) throw new Error('Local recovery rectangle was unavailable.')
+
+  const id = String(local.id)
+  const authoritativeVersion = Number(local.version) + 1
+  const authoritativeNonce = Math.max(0, Number(local.versionNonce) - 1)
+  const authoritativeX = Number(local.x) + 480
+  const authoritativeElement = {
+    ...local,
+    id,
+    x: authoritativeX,
+    version: authoritativeVersion,
+    versionNonce: authoritativeNonce,
+    isDeleted: false,
+    updated: Date.now() + 1000,
+  }
+  const { error: authorityError } = await supabase.from(TABLE).upsert({
+    id,
+    version: authoritativeVersion,
+    version_nonce: authoritativeNonce,
+    is_deleted: false,
+    updated_by: 'phase9-newer-authority',
+    element: authoritativeElement,
+  }, { onConflict: 'id' })
+  expect(authorityError).toBeNull()
+
+  await page.unroute(postPattern)
+  await page.reload()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/Recovered .* unsaved local change/i)).toHaveCount(0)
+
+  await expect.poll(async () => {
+    const row = (await activeRows()).find(candidate => candidate.id === id)
+    return row ? { version: Number(row.version), x: Number(row.element?.x) } : null
+  }).toEqual({ version: authoritativeVersion, x: authoritativeX })
+
+  await expect.poll(async () => {
+    const element = (await readScene(page)).find(candidate => candidate.id === id)
+    return element ? { version: Number(element.version), x: Number(element.x) } : null
+  }).toEqual({ version: authoritativeVersion, x: authoritativeX })
+  await expect.poll(async () => Number((await diagnostics(page)).gauges.recoveryJournalElements ?? 0)).toBe(0)
+})
+
 test('delayed PostgREST writes stay visibly saving and converge once without duplicate rows', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Latency stress contract needs one browser execution.')
   await page.goto('./?debug=1')
