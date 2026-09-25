@@ -71,7 +71,7 @@ test('IndexedDB recovery journal restores an unsaved finished gesture after relo
 test('stale recovery journal never overwrites a newer authoritative collaborator version', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Recovery conflict safety needs one browser execution.')
   test.setTimeout(90_000)
-  await page.goto('./?debug=1')
+  await page.goto('./?debug=1&dropRealtime=1')
   await expect(page.getByText('Live', { exact: true })).toBeVisible()
 
   const postPattern = `**/rest/v1/${TABLE}**`
