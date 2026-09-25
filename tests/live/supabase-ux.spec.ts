@@ -195,7 +195,7 @@ test('rich text supports mixed inline formatting, layout controls and reload per
 test('320px mobile shell stays contained and the identity/settings menu remains usable', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 })
   await page.goto('./')
-  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-connection-state="live"]')).toBeVisible()
 
   const metrics = await page.evaluate(() => ({
     innerWidth,
