@@ -55,7 +55,8 @@ The matrix covers real Excalidraw interaction and Supabase behavior, including:
 - Phase 9 IndexedDB recovery after interrupted writes and stale-journal conflict rejection;
 - Phase 9 delayed-write, four-client convergence and large-overlay culling stress;
 - Phase 9 database geometry rejection and browser malformed-content filtering;
-- Phase 9 320px, short-landscape, 200% text-size, skip-link/focus and forced-colors resilience;\n- Phase 10 shared-history containment so native undo/redo cannot replay stale state after an authoritative own-action undo;
+- Phase 9 320px, short-landscape, 200% text-size, skip-link/focus and forced-colors resilience;
+- Phase 10 shared-history containment so native undo/redo cannot replay stale state after an authoritative own-action undo;
 - light/dark appearance, accents, paper surfaces and grid background controls;
 - scene-locked dot/line grid scaling and native square-grid compatibility;
 - persistent vector stamps as normal shared custom-shape objects;
@@ -94,11 +95,14 @@ Do not expose privileged recovery as a browser endpoint merely to automate it.
 
 ## Release criteria
 
-A phase is not release-complete merely because a pull request is green. Required evidence is:
+A phase is not release-complete merely because a pull request is green. Required v2 evidence is:
 
 - exact PR-head quality job green;
-- merged `main` quality job green;
+- exact PR-head release-certification performance job green;
+- merged `main` repeats both jobs successfully;
 - GitHub Pages deployment green;
 - deployed-site verifier green against the published HTTPS bundle.
+
+`npm run release:verify` is the developer-side full certification command: dependency audit, ordinary check matrix, performance run/report and budget assertion.
 
 Playwright traces/screenshots are retained for browser failures. Inspect them before changing synchronization code so locator/actionability, browser/network noise and actual Supabase failures remain distinguishable.
