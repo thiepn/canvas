@@ -80,6 +80,7 @@ import {
 } from './collaboration-v2.ts'
 import { canUndoOwnAction, restoreOwnActionElement, type OwnUndoEntry } from './own-action-undo.ts'
 import { MediaControls, type CanvasExportFormat } from './MediaControls.tsx'
+import { BoundedTaskQueue } from './bounded-task-queue.ts'
 import {
   assetBucketForTable,
   generateCanvasFileId,
@@ -462,6 +463,8 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   const assetReadyRef = useRef(new Set<string>())
   const assetUploadPromisesRef = useRef(new Map<string, Promise<void>>())
   const assetDownloadPromisesRef = useRef(new Map<string, Promise<void>>())
+  const assetUploadQueueRef = useRef(new BoundedTaskQueue(4))
+  const assetDownloadQueueRef = useRef(new BoundedTaskQueue(4))
   const assetUploadFailuresRef = useRef(new Set<string>())
   const assetDownloadFailuresRef = useRef(new Set<string>())
   const assetTransferCountRef = useRef(0)
@@ -654,8 +657,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     if (existing) return existing
     if (assetUploadFailuresRef.current.has(id)) return Promise.reject(new Error('Image upload is waiting for a retry.'))
 
-    const promise = (async () => {
+    const promise = assetUploadQueueRef.current.enqueue(id, async () => {
       adjustAssetTransfers(1)
+      canvasDiagnostics.gauge('assetUploadQueueDepth', assetUploadQueueRef.current.size)
       canvasDiagnostics.increment('assetUploadsStarted')
       try {
         await uploadCanvasAsset(supabase, assetBucket, file)
@@ -687,11 +691,16 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
         notify(`Image could not be saved: ${error instanceof Error ? error.message : String(error)}`)
         throw error
       } finally {
-        assetUploadPromisesRef.current.delete(id)
         adjustAssetTransfers(-1)
+        canvasDiagnostics.gauge('assetUploadQueueDepth', assetUploadQueueRef.current.size)
       }
-    })()
+    })
     assetUploadPromisesRef.current.set(id, promise)
+    void promise.then(
+      () => assetUploadPromisesRef.current.delete(id),
+      () => assetUploadPromisesRef.current.delete(id),
+    )
+    canvasDiagnostics.gauge('assetUploadQueueDepth', assetUploadQueueRef.current.size)
     return promise
   }, [adjustAssetTransfers, assetBucket, notify, patchSyncRuntime, supabase])
 
@@ -701,8 +710,9 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
     const files = editor.getFiles()
     for (const id of referencedAssetIds(elements)) {
       if (files[id] || assetDownloadPromisesRef.current.has(id) || assetDownloadFailuresRef.current.has(id)) continue
-      const promise = (async () => {
+      const promise = assetDownloadQueueRef.current.enqueue(id, async () => {
         adjustAssetTransfers(1)
+        canvasDiagnostics.gauge('assetDownloadQueueDepth', assetDownloadQueueRef.current.size)
         canvasDiagnostics.increment('assetDownloadsStarted')
         try {
           const file = await downloadCanvasAsset(supabase, assetBucket, id)
@@ -716,11 +726,16 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           canvasDiagnostics.increment('assetDownloadFailures')
           notify(`Image could not be loaded: ${error instanceof Error ? error.message : String(error)}`)
         } finally {
-          assetDownloadPromisesRef.current.delete(id)
           adjustAssetTransfers(-1)
+          canvasDiagnostics.gauge('assetDownloadQueueDepth', assetDownloadQueueRef.current.size)
         }
-      })()
+      })
       assetDownloadPromisesRef.current.set(id, promise)
+      void promise.then(
+        () => assetDownloadPromisesRef.current.delete(id),
+        () => assetDownloadPromisesRef.current.delete(id),
+      )
+      canvasDiagnostics.gauge('assetDownloadQueueDepth', assetDownloadQueueRef.current.size)
     }
   }, [adjustAssetTransfers, assetBucket, notify, supabase])
 
