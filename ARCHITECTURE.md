@@ -142,6 +142,39 @@ Phase 8 stamps (heart, check, sparkle, pin, flag and bolt) are not a new persist
 
 Optional sound/haptic feedback is best-effort browser feedback only. It never gates an action and is disabled by default for sound. Reduced-motion mode suppresses Canvas-owned transitions and delight animation, including the small local sparkle Easter egg.
 
+## Scale and local-recovery architecture
+
+Phase 9 keeps Supabase as the only shared authority while adding two client-side acceleration/recovery layers.
+
+### Spatial indexing and DOM-overlay culling
+
+Excalidraw continues to own its canvas renderer. Canvas-owned rich-text and custom-shape DOM overlays maintain version-aware fixed-cell spatial indexes keyed by immutable element stamps. On pan/zoom they render only the viewport plus overscan, while selected/editing rich text remains pinned even when it moves outside the culling window.
+
+This does not remove elements from Excalidraw or shared persistence. It only bounds Canvas-owned DOM work.
+
+### Crash-recovery journal
+
+Completed persistable local mutations are written to an IndexedDB recovery journal before a network durability attempt leaves the local queue. The journal is device/table scoped, schema-versioned, count/byte/age bounded and revalidated before replay.
+
+Startup order is strict:
+
+1. hydrate current Supabase authority;
+2. validate the journal;
+3. compare immutable `version/versionNonce/isDeleted` stamps;
+4. restore only local versions that still outrank authority;
+5. send recovered versions through the normal durable writer;
+6. clear/supersede journal entries only after authority catches up.
+
+The journal never becomes shared authority and cannot overwrite a newer collaborator version.
+
+### Image-transfer pressure
+
+Storage downloads use a keyed bounded task queue, deduplicating repeated asset requests and limiting simultaneous transfers. Image content remains SHA-256 verified before Excalidraw receives it.
+
+### Untrusted-data limits
+
+Browser and database independently constrain top-level scene geometry. Browser validation additionally bounds point arrays, text payloads, import bytes, imported element counts and file counts before content reaches the editor. Malformed shared rows/previews are rejected before rendering and recorded in diagnostics.
+
 ## Recovery architecture
 
 `canvas_admin` is a private schema with no grants to `public`, `anon`, or `authenticated`.
