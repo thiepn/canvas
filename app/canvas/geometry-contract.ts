@@ -10,6 +10,11 @@ export type CanvasGeometryLike = {
   angle?: unknown
 }
 
+export type CanvasElementGeometryLike = CanvasGeometryLike & {
+  type?: unknown
+  points?: unknown
+}
+
 function finiteWithin(value: unknown, limit: number): boolean {
   return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= limit
 }
@@ -35,4 +40,12 @@ export function isSafeCanvasPoints(value: unknown, maxPoints = CANVAS_MAX_POINTS
       && finiteWithin(point[0], CANVAS_MAX_COORDINATE)
       && finiteWithin(point[1], CANVAS_MAX_COORDINATE),
     )
+}
+
+
+export function isSafeCanvasElementGeometry(value: CanvasElementGeometryLike): boolean {
+  if (!isSafeCanvasGeometry(value)) return false
+  return value.type === 'line' || value.type === 'arrow' || value.type === 'freedraw'
+    ? isSafeCanvasPoints(value.points)
+    : true
 }
