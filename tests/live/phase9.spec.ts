@@ -267,6 +267,18 @@ test('320px, short landscape, keyboard skip navigation and forced colors remain 
     expect(visualBox).not.toBeNull()
     expect((visualBox?.x ?? -1) >= 0).toBe(true)
     expect((visualBox?.x ?? 0) + (visualBox?.width ?? 9999) <= 320.5).toBe(true)
+
+    await narrowPage.keyboard.press('Escape')
+    await narrowPage.evaluate(() => { document.documentElement.style.fontSize = '200%' })
+    await narrowPage.getByRole('button', { name: 'Canvas visuals' }).click()
+    const zoomedVisual = narrowPage.getByLabel('Canvas visuals menu')
+    await expect(zoomedVisual).toBeVisible()
+    const zoomedOverflow = await narrowPage.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(zoomedOverflow).toBeLessThanOrEqual(1)
+    const zoomedBox = await zoomedVisual.boundingBox()
+    expect(zoomedBox).not.toBeNull()
+    expect((zoomedBox?.x ?? -1) >= 0).toBe(true)
+    expect((zoomedBox?.x ?? 0) + (zoomedBox?.width ?? 9999) <= 320.5).toBe(true)
   } finally {
     await narrow.close()
   }
