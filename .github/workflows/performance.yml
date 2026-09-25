@@ -37,6 +37,8 @@ jobs:
         env:
           HOME: /root
       - run: npm run performance:report
+      - name: Enforce Phase 9 performance budgets
+        run: npm run performance:budget
       - if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
