@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
 import { DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL } from '../../app/config/public-config.ts'
 import { dragOnCanvas } from './scene-helpers.ts'
@@ -23,7 +23,7 @@ async function activeRectangles() {
   return (data ?? []).filter(row => row.element?.type === 'rectangle').length
 }
 
-async function openCanvasSettings(page: Parameters<typeof test>[0] extends never ? never : any) {
+async function openCanvasSettings(page: Page) {
   const settings = page.getByLabel('Canvas settings')
   if (!(await settings.isVisible())) await page.getByRole('button', { name: 'Canvas menu and presence' }).click()
   await expect(settings).toBeVisible()
