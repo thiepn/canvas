@@ -264,6 +264,7 @@ export function isCanvasClipboardText(text: string): boolean {
 export async function prepareCanvasJsonImport(text: string): Promise<{
   elements: MediaSceneElement[]
   files: BinaryFiles
+  droppedElements: number
 }> {
   const imported = parseCanvasImport(text)
   const fileMap = new Map<string, string>()
