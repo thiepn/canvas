@@ -3042,7 +3042,7 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
           onScrollChange={() => requestAnimationFrame(refreshNavigationUi)}
           theme={resolvedTheme}
           viewModeEnabled={status !== 'Live'}
-          objectsSnapModeEnabled={objectsSnapModeEnabled}
+          objectsSnapModeEnabled={SIMPLE_UI ? false : objectsSnapModeEnabled}
           gridModeEnabled={!SIMPLE_UI && gridModeEnabled && visualProfile.gridPattern === 'squares'}
           handleKeyboardGlobally
           isCollaborating={status === 'Live'}
