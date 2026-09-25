@@ -6,6 +6,7 @@ import { dragOnCanvas, readScene } from './scene-helpers.ts'
 import { retryTransientSupabaseTestOperation } from './supabase-test-helpers.ts'
 
 const TABLE = 'canvas_ci_elements'
+const BUCKET = 'canvas-ci-assets'
 const supabase = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 })
@@ -66,6 +67,58 @@ test('IndexedDB recovery journal restores an unsaved finished gesture after relo
   }, { timeout: 30_000 }).toBe(true)
   await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
   await expect.poll(async () => Number((await diagnostics(page)).gauges.recoveryJournalElements ?? 0)).toBe(0)
+})
+
+test('recovery journal restores an image whose asset reached Storage before its row', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Recovered image asset hydration needs one browser execution.')
+  test.setTimeout(90_000)
+  const nonce = `${Date.now()}-${Math.random()}`
+  const svg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80" viewBox="0 0 120 80"><rect width="120" height="80" fill="#2563eb"/><desc>${nonce}</desc></svg>`)
+  let fileId = ''
+
+  await page.goto('./?debug=1')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  const postPattern = `**/rest/v1/${TABLE}**`
+  await page.route(postPattern, async route => {
+    if (route.request().method() === 'POST') {
+      await route.abort('failed')
+      return
+    }
+    await route.continue()
+  })
+
+  try {
+    await page.getByRole('button', { name: 'Images and transfer' }).click()
+    const menu = page.getByLabel('Images and transfer menu')
+    const chooserPromise = page.waitForEvent('filechooser')
+    await menu.getByRole('button', { name: 'Image', exact: true }).click()
+    const chooser = await chooserPromise
+    await chooser.setFiles({ name: 'phase9-recovery.svg', mimeType: 'image/svg+xml', buffer: svg })
+
+    await expect.poll(async () => {
+      const image = (await readScene(page)).find(element => element.type === 'image' && !element.isDeleted)
+      fileId = String(image?.fileId ?? '')
+      return image?.status
+    }).toBe('saved')
+    expect(fileId).toMatch(/^[0-9a-f]{64}$/)
+    await expect.poll(async () => Number((await diagnostics(page)).gauges.recoveryJournalElements ?? 0)).toBeGreaterThan(0)
+    await expect.poll(async () => (await activeRows()).length).toBe(0)
+
+    await page.unroute(postPattern)
+    await page.reload()
+    await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText(/Recovered 1 unsaved local change/i)).toBeVisible()
+
+    await expect.poll(async () => {
+      const row = (await activeRows()).find(candidate => candidate.element?.type === 'image')
+      return row ? { fileId: row.element?.fileId, status: row.element?.status } : null
+    }, { timeout: 30_000 }).toEqual({ fileId, status: 'saved' })
+    await expect.poll(async () => Number((await diagnostics(page)).counters.assetDownloadsCompleted ?? 0)).toBeGreaterThan(0)
+    await expect(page.locator('[data-sync-health="saved"]')).toBeVisible()
+  } finally {
+    await page.unrouteAll({ behavior: 'wait' }).catch(() => {})
+    if (fileId) await supabase.storage.from(BUCKET).remove([`sha256/${fileId}`]).catch(() => {})
+  }
 })
 
 test('stale recovery journal never overwrites a newer authoritative collaborator version', async ({ page, browserName }) => {
