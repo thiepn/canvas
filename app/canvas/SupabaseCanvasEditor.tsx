@@ -2758,12 +2758,12 @@ export default function SupabaseCanvasEditor({ config }: { config: LiveConfig })
   }
 
   const handleCanvasDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (SIMPLE_UI) return
     if (richTextLayerRef.current?.editSelected()) {
       event.preventDefault()
       event.stopPropagation()
       return
     }
-    if (SIMPLE_UI) return
     const editor = apiRef.current
     if (!editor || statusRef.current !== 'Live') return
     if (Object.keys(editor.getAppState().selectedElementIds).length > 0) return
