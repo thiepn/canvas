@@ -6,12 +6,14 @@ export class BoundedTaskQueue {
     reject: (error: unknown) => void
   }> = []
   private readonly promises = new Map<string, Promise<void>>()
+  private readonly concurrency: number
   private active = 0
 
-  constructor(private readonly concurrency: number) {
+  constructor(concurrency: number) {
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) {
       throw new Error('Bounded task queue concurrency must be between 1 and 32.')
     }
+    this.concurrency = concurrency
   }
 
   enqueue(key: string, run: () => Promise<void>): Promise<void> {
