@@ -12,7 +12,7 @@ import { canvasDiagnostics } from '../diagnostics/metrics.ts'
 import { CanvasOperationTracker } from './operation-model.ts'
 import { readRevisionPages } from './revision-sync.ts'
 import { SceneVersionIndex, indexSceneById } from './scene-index.ts'
-import { isSafeCanvasGeometry } from './geometry-contract.ts'
+import { isSafeCanvasGeometry, isSafeCanvasPoints } from './geometry-contract.ts'
 import {
   clearRecoveryJournal,
   readRecoveryJournal,
@@ -161,39 +161,40 @@ function previewStampKey(stamp: VersionStamp): string {
 }
 
 function normalizeRow(value: unknown): SyncRow | null {
-  if (!value || typeof value !== 'object') return null
+  if (!value || typeof value !== 'object') {
+    canvasDiagnostics.increment('sharedRowsRejected')
+    return null
+  }
   const row = value as Record<string, unknown>
   const id = typeof row.id === 'string' ? row.id : ''
   const version = Number(row.version)
   const versionNonce = Number(row.version_nonce)
   const revision = Number(row.revision)
-  if (!id || !Number.isInteger(version) || !Number.isInteger(versionNonce) || !Number.isSafeInteger(revision) || revision <= 0 || typeof row.is_deleted !== 'boolean') return null
+  if (!id || !Number.isInteger(version) || !Number.isInteger(versionNonce) || !Number.isSafeInteger(revision) || revision <= 0 || typeof row.is_deleted !== 'boolean') {
+    canvasDiagnostics.increment('sharedRowsRejected')
+    return null
+  }
   return { id, version, version_nonce: versionNonce, is_deleted: row.is_deleted, element: row.element, revision }
 }
 
 function elementFromRow(row: SyncRow): SceneElement | null {
-  if (!row.element || typeof row.element !== 'object') return null
+  const reject = () => {
+    canvasDiagnostics.increment('sharedElementsRejected')
+    return null
+  }
+  if (!row.element || typeof row.element !== 'object') return reject()
   const element = row.element as Record<string, unknown>
-  if (element.id !== row.id || typeof element.type !== 'string' || !ALLOWED_TYPES.has(element.type)) return null
-  if (!isSafeCanvasLink(element.link) || !isSafeCanvasGeometry(element)) return null
-  if (!isPersistableCanvasElement(element as unknown as SceneElement)) return null
-  if (Number(element.version) !== row.version || Number(element.versionNonce) !== row.version_nonce || Boolean(element.isDeleted) !== row.is_deleted) return null
+  if (element.id !== row.id || typeof element.type !== 'string' || !ALLOWED_TYPES.has(element.type)) return reject()
+  if (!isSafeCanvasLink(element.link) || !isSafeCanvasGeometry(element)) return reject()
+  if ((element.type === 'line' || element.type === 'arrow' || element.type === 'freedraw') && !isSafeCanvasPoints(element.points)) return reject()
+  if (element.type === 'text' && (typeof element.text !== 'string' || element.text.length > 200_000)) return reject()
+  if (!isPersistableCanvasElement(element as unknown as SceneElement)) return reject()
+  if (Number(element.version) !== row.version || Number(element.versionNonce) !== row.version_nonce || Boolean(element.isDeleted) !== row.is_deleted) return reject()
   return row.element as SceneElement
 }
 
 function isAllowedElement(element: SceneElement): boolean {
   return ALLOWED_TYPES.has(element.type)
-}
-
-function finiteCoordinate(value: unknown): boolean {
-  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 10_000_000
-}
-
-function hasSafePoints(value: unknown): boolean {
-  return Array.isArray(value)
-    && value.length > 0
-    && value.length <= 10_000
-    && value.every(point => Array.isArray(point) && point.length >= 2 && finiteCoordinate(point[0]) && finiteCoordinate(point[1]))
 }
 
 /** Broadcast bypasses Postgres validation, so normalize untrusted preview objects before Excalidraw sees them. */
@@ -202,7 +203,7 @@ function elementFromPreview(value: CanvasPreviewElement): SceneElement | null {
   if (typeof raw.type !== 'string' || !ALLOWED_TYPES.has(raw.type)) return null
   if (!isPersistableCanvasElement(value as unknown as SceneElement)) return null
   if (!isSafeCanvasGeometry(raw)) return null
-  if ((raw.type === 'line' || raw.type === 'arrow' || raw.type === 'freedraw') && !hasSafePoints(raw.points)) return null
+  if ((raw.type === 'line' || raw.type === 'arrow' || raw.type === 'freedraw') && !isSafeCanvasPoints(raw.points)) return null
   if (raw.type === 'text' && (typeof raw.text !== 'string' || raw.text.length > 200_000)) return null
   if (!isSafeCanvasLink(raw.link)) return null
   try {
