@@ -298,6 +298,23 @@ test('320px, short landscape, keyboard skip navigation and forced colors remain 
     await landscape.close()
   }
 
+  const ultrawide = await browser.newContext({ viewport: { width: 2560, height: 1080 } })
+  const ultrawidePage = await ultrawide.newPage()
+  try {
+    await ultrawidePage.goto('./')
+    await expect(ultrawidePage.getByText('Live', { exact: true })).toBeVisible()
+    const overflow = await ultrawidePage.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(1)
+    await ultrawidePage.getByRole('button', { name: 'Canvas visuals' }).click()
+    const panel = ultrawidePage.getByLabel('Canvas visuals menu')
+    const box = await panel.boundingBox()
+    expect(box).not.toBeNull()
+    expect((box?.x ?? -1) >= 0).toBe(true)
+    expect((box?.x ?? 0) + (box?.width ?? 9999) <= 2560.5).toBe(true)
+  } finally {
+    await ultrawide.close()
+  }
+
   const forced = await browser.newContext({ viewport: { width: 900, height: 700 }, forcedColors: 'active' })
   const forcedPage = await forced.newPage()
   try {
@@ -314,6 +331,49 @@ test('320px, short landscape, keyboard skip navigation and forced colors remain 
   } finally {
     await forced.close()
   }
+})
+
+test('partial corrupt JSON import preserves safe objects and reports skipped content', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Corrupt import recovery needs one browser execution.')
+  await page.goto('./')
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+
+  await page.getByTitle(/^Rectangle\b/i).click()
+  await dragOnCanvas(page, [310, 240], [430, 320], 4)
+  let template: Record<string, unknown> | null = null
+  await expect.poll(async () => {
+    const row = (await activeRows()).find(candidate => candidate.element?.type === 'rectangle')
+    template = row?.element as Record<string, unknown> | null
+    return Boolean(template)
+  }).toBe(true)
+  if (!template) throw new Error('Import template did not persist.')
+
+  const payload = JSON.stringify({
+    type: 'canvas-backup',
+    version: 3,
+    engine: 'excalidraw',
+    exportedAt: new Date().toISOString(),
+    elements: [
+      template,
+      { ...template, id: 'unsafe-import-element', x: 1_000_000_001 },
+    ],
+    files: {},
+  })
+
+  await cleanWorld()
+  await page.reload()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await expect.poll(async () => (await activeRows()).length).toBe(0)
+
+  await page.getByRole('button', { name: 'Images and transfer' }).click()
+  const menu = page.getByLabel('Images and transfer menu')
+  const chooserPromise = page.waitForEvent('filechooser')
+  await menu.getByRole('button', { name: 'Import file' }).click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({ name: 'phase9-partial-corrupt.json', mimeType: 'application/json', buffer: Buffer.from(payload) })
+
+  await expect(page.getByText(/skipped 1 unsafe or unsupported item/i)).toBeVisible()
+  await expect.poll(async () => (await activeRows()).filter(row => row.element?.type === 'rectangle').length).toBe(1)
 })
 
 test('four live clients converge under a small collaboration burst', async ({ browser, browserName }) => {
