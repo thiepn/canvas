@@ -347,6 +347,7 @@ test('partial corrupt JSON import preserves safe objects and reports skipped con
     return Boolean(template)
   }).toBe(true)
   if (!template) throw new Error('Import template did not persist.')
+  const templateElement = template as Record<string, unknown>
 
   const payload = JSON.stringify({
     type: 'canvas-backup',
@@ -354,8 +355,8 @@ test('partial corrupt JSON import preserves safe objects and reports skipped con
     engine: 'excalidraw',
     exportedAt: new Date().toISOString(),
     elements: [
-      template,
-      { ...template, id: 'unsafe-import-element', x: 1_000_000_001 },
+      templateElement,
+      { ...templateElement, id: 'unsafe-import-element', x: 1_000_000_001 },
     ],
     files: {},
   })
