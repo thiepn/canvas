@@ -175,6 +175,42 @@ Storage downloads use a keyed bounded task queue, deduplicating repeated asset r
 
 Browser and database independently constrain top-level scene geometry. Browser validation additionally bounds point arrays, text payloads, import bytes, imported element counts and file counts before content reaches the editor. Malformed shared rows/previews are rejected before rendering and recorded in diagnostics.
 
+
+## Phase 9 scale and recovery architecture
+
+### Spatial overlay index
+
+Excalidraw remains responsible for the primary scene renderer. Canvas-owned DOM overlays use a version-aware uniform-grid index keyed by immutable Excalidraw version stamps. On scene updates, unchanged objects keep their existing cell membership; custom-shape and rich-text layers query only the current viewport plus overscan. Selected/editing rich-text blocks are pinned into the rendered set even when outside the ordinary visibility query.
+
+This does not change scene authority or object ordering. It only bounds Canvas-owned DOM work for very large scenes.
+
+### Local crash-recovery journal
+
+Completed durable candidates are written to the local IndexedDB database `canvas-local-recovery` before their PostgREST durability request begins. The journal:
+
+- is scoped by table + anonymous device ID;
+- is schema-versioned;
+- stores at most 2,000 elements / 8 MB;
+- rejects unsafe geometry, pending images and oversized element JSON;
+- expires after seven days;
+- remains device-local and is not a second collaboration authority.
+
+On startup Canvas hydrates Supabase first, then reads the journal. A journaled version is restored only when it is newer under the existing Excalidraw version/nonce ordering. Equal or newer Supabase authority wins and retires the journal entry. Confirmed server writes clear their corresponding in-flight journal entries.
+
+IndexedDB failure never blocks the shared save path. Quota/validation failures are surfaced to the user because closing the tab then has reduced crash-recovery protection.
+
+### Bounded network and memory work
+
+Durable PostgREST write/confirmation requests have an 8-second AbortSignal boundary and requeue exact attempted versions on transport failure. Supabase Storage image work uses separate four-wide queues for upload and download, deduplicated by content hash.
+
+### Data boundaries
+
+JSON imports are rejected above 80 MB, 20,000 elements or 500 files. Element geometry is bounded consistently in browser validation and Postgres. Line/arrow/freehand point arrays are bounded to 10,000 finite points before browser rendering or replay.
+
+### PWA update lifecycle
+
+The service worker uses network-first navigation with cached shell fallback. Hashed same-origin assets remain cache-first. Each release advances the shell cache version and activation removes older Canvas shell caches.
+
 ## Recovery architecture
 
 `canvas_admin` is a private schema with no grants to `public`, `anon`, or `authenticated`.
