@@ -52,6 +52,10 @@ The matrix covers real Excalidraw interaction and Supabase behavior, including:
 - JSON/PNG/SVG/PDF exports and standalone URL-card paste;
 - saved-image database enforcement, unsupported-media rejection and wheel zoom behavior;
 - Phase 8 device-local visual profile persistence without shared scene writes;
+- Phase 9 IndexedDB recovery after interrupted writes and stale-journal conflict rejection;
+- Phase 9 delayed-write, four-client convergence and large-overlay culling stress;
+- Phase 9 database geometry rejection and browser malformed-content filtering;
+- Phase 9 320px, short-landscape, 200% text-size, skip-link/focus and forced-colors resilience;
 - light/dark appearance, accents, paper surfaces and grid background controls;
 - scene-locked dot/line grid scaling and native square-grid compatibility;
 - persistent vector stamps as normal shared custom-shape objects;
