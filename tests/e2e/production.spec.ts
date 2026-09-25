@@ -73,3 +73,47 @@ test('built /canvas/ loads the shipped engine and persists a real vector through
   expect(failedAssets).toEqual([])
   expect(errors).toEqual([])
 })
+
+test('built PWA restores its static shell offline without caching shared Supabase state', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Service-worker lifecycle certification needs one Chromium execution.')
+
+  await page.goto('/canvas/')
+  await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+
+  const registration = await page.evaluate(async () => {
+    const ready = await navigator.serviceWorker.ready
+    return { scope: ready.scope, active: ready.active?.state ?? null }
+  })
+  expect(new URL(registration.scope).pathname).toBe('/canvas/')
+  expect(registration.active).toBe('activated')
+
+  // Reload once under the active worker so hashed JS/CSS/font/image responses
+  // are observed and added to the build-scoped static cache.
+  await page.reload()
+  await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
+  await expect(page.getByText('Live', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true)
+
+  const cached = await page.evaluate(async () => {
+    const names = await caches.keys()
+    const urls: string[] = []
+    for (const name of names) {
+      const cache = await caches.open(name)
+      for (const request of await cache.keys()) urls.push(request.url)
+    }
+    return { names, urls }
+  })
+  expect(cached.names.some(name => name.startsWith('canvas-shell-'))).toBe(true)
+  expect(cached.urls.some(url => url.includes('supabase.co'))).toBe(false)
+  expect(cached.urls.some(url => new URL(url).pathname === '/canvas/')).toBe(true)
+
+  await context.setOffline(true)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await expect(page.locator('[data-canvas-engine="excalidraw-supabase"]')).toBeVisible()
+  await expect(page.getByText('Offline', { exact: true })).toBeVisible()
+
+  await context.setOffline(false)
+  await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 45_000 })
+})
+
