@@ -82,7 +82,7 @@ npm run test:production
 
 ## 4. GitHub Pages
 
-`.github/workflows/ci.yml` is the release pipeline. On a pull request it executes quality tests only. On `main`, the Pages deployment job is conditional on the quality job succeeding.
+`.github/workflows/ci.yml` is the release pipeline. Pull requests run the full quality matrix and exact-commit performance certification. On `main`, Pages deployment is conditional on both jobs succeeding.
 
 The Pages job:
 
@@ -93,7 +93,7 @@ The Pages job:
 5. deploys that artifact;
 6. runs the published-site verifier against the returned HTTPS deployment URL.
 
-After merging, require both the quality job and the Pages deployment/verifier to be green. A green pull-request run does **not** prove that Pages deployed.
+After merging, require the quality job, release-certification job, Pages deployment and deployed-site verifier to be green. A green pull-request run does **not** prove that Pages deployed.
 
 ## 5. Post-deployment verification
 
