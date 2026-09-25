@@ -154,3 +154,17 @@ Backend schema is versioned in `supabase/migrations/`. Apply those migrations in
 ## License and third-party software
 
 Repository licensing is in [LICENSE](./LICENSE). Excalidraw and other dependencies retain their respective licenses; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+
+## Phase 9 hardening
+
+Canvas includes explicit scale and recovery guardrails in addition to Excalidraw's renderer:
+
+- Canvas-owned rich-text/custom-shape DOM overlays use a version-aware spatial grid and render only the viewport plus overscan;
+- image Storage work is deduplicated and bounded to four concurrent uploads and four concurrent downloads;
+- imports are capped at 80 MB, 20,000 elements and 500 files before restoration;
+- shared rows, previews, recovery data and imports share bounded geometry/point validation;
+- Postgres independently enforces generous coordinate/dimension/angle limits;
+- completed unsaved mutations are journaled in device-local IndexedDB before the network durability attempt and replay only when they still outrank Supabase authority;
+- document navigations use network-first service-worker handling with cached offline fallback;
+- the manual/weekly 10k-object benchmark has enforceable performance ceilings rather than report-only output;
+- 320px, landscape, keyboard-focus, safe-area, reduced-motion and forced-colors behavior are release-tested.
